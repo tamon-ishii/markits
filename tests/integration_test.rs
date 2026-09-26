@@ -132,3 +132,78 @@ fn test_skitch_components_full_workflow() {
     assert!(svg.contains("paint-order=\"stroke fill\""));
     assert!(svg.contains("<line x1=\"50\"")); // Divider
 }
+
+#[test]
+fn test_step_arrow_full_workflow() {
+    let json = r#"{
+      "canvas": { "width": 800, "height": 600 },
+      "annotations": [
+        {
+          "type": "step-arrow",
+          "target": [300, 200, 150, 50],
+          "step": 1,
+          "style": "step",
+          "position": "left"
+        },
+        {
+          "type": "badge",
+          "target": [300, 350, 150, 50],
+          "step": 2,
+          "arrow": true,
+          "style": "primary",
+          "position": "bottom"
+        },
+        {
+          "type": "arrow",
+          "target": [550, 200, 150, 50],
+          "step": 3,
+          "style": "danger",
+          "position": "top"
+        }
+      ]
+    }"#;
+
+    let svg = render_from_json(json).expect("Should render step arrow SVG");
+    assert!(svg.contains("marker-end=\"url(#arrowhead-step)\""));
+    assert!(svg.contains("marker-end=\"url(#arrowhead-primary)\""));
+    assert!(svg.contains("marker-end=\"url(#arrowhead-danger)\""));
+    assert!(svg.contains(">1</text>"));
+    assert!(svg.contains(">2</text>"));
+    assert!(svg.contains(">3</text>"));
+}
+
+#[test]
+fn test_bezier_arrow_full_workflow() {
+    let json = r#"{
+      "canvas": { "width": 1200, "height": 800 },
+      "annotations": [
+        {
+          "type": "bezier-arrow",
+          "start": [100, 300],
+          "control": [350, 100],
+          "end": [600, 300],
+          "text": "非同期キュー転送",
+          "style": "info"
+        },
+        {
+          "type": "curved-arrow",
+          "from": [650, 300],
+          "via": [850, 500],
+          "to": [1050, 300],
+          "text": "DB書き込み",
+          "style": "pink",
+          "box": false,
+          "offset": 15
+        }
+      ]
+    }"#;
+
+    let svg = render_from_json(json).expect("Should render bezier arrow SVG");
+    assert!(svg.contains("<path d=\"M 100 300 Q 350 100 600 300\""));
+    assert!(svg.contains("<path d=\"M 650 300 Q 850 500 1050 300\""));
+    assert!(svg.contains("marker-end=\"url(#arrowhead-info)\""));
+    assert!(svg.contains("marker-end=\"url(#arrowhead-pink)\""));
+    assert!(svg.contains("非同期キュー転送"));
+    assert!(svg.contains("DB書き込み"));
+    assert!(svg.contains("paint-order=\"stroke fill\"")); // for unboxed text
+}

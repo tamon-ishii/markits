@@ -202,6 +202,16 @@ impl SvgRenderer {
                         start.x, start.y, end.x, end.y, tokens.stroke_color, tokens.stroke_width, key, filter_attr
                     ));
                 }
+                ResolvedAnnotation::BezierArrow { start, control, end, style, shadow, .. } => {
+                    let tokens = self.theme.tokens_for(*style);
+                    let key = style_key(*style);
+                    let filter_attr = if *shadow { r#" filter="url(#markits-shadow)""# } else { "" };
+                    svg.push_str(&format!(
+                        r#"  <path d="M {} {} Q {} {} {} {}" fill="none" stroke="{}" stroke-width="{}" stroke-linecap="round" marker-end="url(#arrowhead-{})"{}/>
+"#,
+                        start.x, start.y, control.x, control.y, end.x, end.y, tokens.stroke_color, tokens.stroke_width, key, filter_attr
+                    ));
+                }
                 _ => {}
             }
         }
@@ -289,6 +299,42 @@ impl SvgRenderer {
                         escaped
                     ));
                 }
+                ResolvedAnnotation::StepArrow {
+                    center,
+                    radius,
+                    label,
+                    arrow_start,
+                    arrow_end,
+                    style,
+                    shadow,
+                } => {
+                    let tokens = self.theme.tokens_for(*style);
+                    let key = style_key(*style);
+                    let escaped = escape_xml(label);
+                    let filter_attr = if *shadow { r#" filter="url(#markits-shadow)""# } else { "" };
+
+                    // 1. Pointer arrow line connecting badge to target
+                    svg.push_str(&format!(
+                        r#"  <line x1="{}" y1="{}" x2="{}" y2="{}" stroke="{}" stroke-width="{}" stroke-linecap="round" marker-end="url(#arrowhead-{})"/>
+"#,
+                        arrow_start.x, arrow_start.y, arrow_end.x, arrow_end.y, tokens.stroke_color, tokens.stroke_width, key
+                    ));
+
+                    // 2. Circular step badge
+                    svg.push_str(&format!(
+                        r##"  <g{}>
+    <circle cx="{}" cy="{}" r="{}" fill="{}" stroke="#ffffff" stroke-width="2"/>
+    <text x="{}" y="{}" fill="{}" font-family="{}" font-size="{}" font-weight="bold" text-anchor="middle" dominant-baseline="central">{}</text>
+  </g>
+"##,
+                        filter_attr,
+                        center.x, center.y, radius,
+                        tokens.fill_color,
+                        center.x, center.y,
+                        tokens.text_color, self.theme.font_family, self.theme.font_size * 0.9,
+                        escaped
+                    ));
+                }
                 ResolvedAnnotation::Pin { head_center, head_radius, tip, icon, text, text_rect, style, shadow, outline } => {
                     let tokens = self.theme.tokens_for(*style);
                     let filter_attr = if *shadow { r#" filter="url(#markits-shadow)""# } else { "" };
@@ -355,6 +401,48 @@ impl SvgRenderer {
                     }
 
                     svg.push_str("  </g>\n");
+                }
+                ResolvedAnnotation::BezierArrow { text, text_rect, style, shadow, outline, boxed, .. } => {
+                    if let (Some(txt), Some(tr)) = (text, text_rect) {
+                        let tokens = self.theme.tokens_for(*style);
+                        let escaped = escape_xml(txt);
+                        let filter_attr = if *shadow { r#" filter="url(#markits-shadow)""# } else { "" };
+
+                        if *boxed {
+                            let stroke_color = if *outline { "#ffffff" } else { tokens.stroke_color };
+                            svg.push_str(&format!(
+                                r#"  <g{}>
+    <rect x="{}" y="{}" width="{}" height="{}" rx="{}" ry="{}" fill="{}" stroke="{}" stroke-width="1.5"/>
+    <text x="{}" y="{}" fill="{}" font-family="{}" font-size="{}" font-weight="600" text-anchor="middle" dominant-baseline="central">{}</text>
+  </g>
+"#,
+                                filter_attr,
+                                tr.x, tr.y, tr.width, tr.height,
+                                self.theme.corner_radius, self.theme.corner_radius,
+                                tokens.fill_color, stroke_color,
+                                tr.center_x(), tr.center_y(),
+                                tokens.text_color, self.theme.font_family, self.theme.font_size,
+                                escaped
+                            ));
+                        } else {
+                            let outline_attr = if *outline {
+                                r##" stroke="#ffffff" stroke-width="3.5" stroke-linejoin="round" paint-order="stroke fill""##
+                            } else {
+                                ""
+                            };
+                            svg.push_str(&format!(
+                                r#"  <g{}>
+    <text x="{}" y="{}" fill="{}" font-family="{}" font-size="{}" font-weight="600" text-anchor="middle" dominant-baseline="central"{}>{}</text>
+  </g>
+"#,
+                                filter_attr,
+                                tr.center_x(), tr.center_y(),
+                                tokens.stroke_color, self.theme.font_family, self.theme.font_size,
+                                outline_attr,
+                                escaped
+                            ));
+                        }
+                    }
                 }
                 _ => {}
             }
@@ -500,6 +588,84 @@ mod tests {
         assert!(svg.contains("<polygon points="));
         assert!(svg.contains(">♡</text>"));
         assert!(svg.contains("Like Button"));
+        assert!(svg.contains("#ea1a65")); // Pink
+    }
+
+    #[test]
+    fn test_render_step_arrow() {
+        let json = r#"{
+            "canvas": {"width": 800, "height": 600},
+            "annotations": [
+                {
+                    "type": "step-arrow",
+                    "target": [200, 150, 100, 50],
+                    "step": 1,
+                    "style": "step",
+                    "position": "bottom"
+                }
+            ]
+        }"#;
+
+        let svg = render_from_json(json).unwrap();
+        assert!(svg.contains("marker-end=\"url(#arrowhead-step)\""));
+        assert!(svg.contains("<circle"));
+        assert!(svg.contains(">1</text>"));
+        assert!(svg.contains("#7c3aed")); // Step color
+    }
+
+    #[test]
+    fn test_render_bezier_arrow() {
+        let json = r#"{
+            "canvas": {"width": 1000, "height": 600},
+            "annotations": [
+                {
+                    "type": "bezier-arrow",
+                    "start": [100, 400],
+                    "control": [300, 150],
+                    "end": [500, 400],
+                    "text": "データ同期",
+                    "style": "primary",
+                    "shadow": true,
+                    "outline": true
+                }
+            ]
+        }"#;
+
+        let svg = render_from_json(json).unwrap();
+        assert!(svg.contains("<path d=\"M 100 400 Q 300 150 500 400\""));
+        assert!(svg.contains("marker-end=\"url(#arrowhead-primary)\""));
+        assert!(svg.contains("fill=\"none\""));
+        assert!(svg.contains("データ同期"));
+        assert!(svg.contains("<filter id=\"markits-shadow\""));
+        assert!(svg.contains("<rect")); // Boxed by default
+        assert!(svg.contains("#2563eb")); // primary color
+    }
+
+    #[test]
+    fn test_render_bezier_arrow_unboxed() {
+        let json = r#"{
+            "canvas": {"width": 800, "height": 600},
+            "annotations": [
+                {
+                    "type": "bezier-arrow",
+                    "start": [100, 300],
+                    "control": [250, 100],
+                    "end": [400, 300],
+                    "text": "枠なしテキスト",
+                    "style": "pink",
+                    "box": false,
+                    "outline": true
+                }
+            ]
+        }"#;
+
+        let svg = render_from_json(json).unwrap();
+        assert!(svg.contains("<path d=\"M 100 300 Q 250 100 400 300\""));
+        assert!(svg.contains("枠なしテキスト"));
+        // When box is false, NO rect should be rendered for text
+        assert!(!svg.contains("<rect"));
+        // Text should have paint-order stroke fill
+        assert!(svg.contains("paint-order=\"stroke fill\""));
         assert!(svg.contains("#ea1a65")); // Pink
     }
 }

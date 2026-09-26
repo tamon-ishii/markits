@@ -119,6 +119,78 @@ impl<'de> Deserialize<'de> for TargetRect {
     }
 }
 
+/// 2D point coordinates for vectors, curves, and anchors.
+///
+/// Can be deserialized from either an object `{"x": ..., "y": ...}`
+/// or a 2-element array `[x, y]`.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
+pub struct Point2D {
+    pub x: f64,
+    pub y: f64,
+}
+
+impl Point2D {
+    pub fn new(x: f64, y: f64) -> Self {
+        Self { x, y }
+    }
+}
+
+impl<'de> Deserialize<'de> for Point2D {
+    fn deserialize<D>(deserializer: D) -> std::result::Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        struct Point2DVisitor;
+
+        impl<'de> Visitor<'de> for Point2DVisitor {
+            type Value = Point2D;
+
+            fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+                formatter.write_str("a 2-element array [x, y] or an object with x, y")
+            }
+
+            fn visit_seq<A>(self, mut seq: A) -> std::result::Result<Point2D, A::Error>
+            where
+                A: SeqAccess<'de>,
+            {
+                let x = seq
+                    .next_element::<f64>()?
+                    .ok_or_else(|| de::Error::invalid_length(0, &"2 elements [x, y]"))?;
+                let y = seq
+                    .next_element::<f64>()?
+                    .ok_or_else(|| de::Error::invalid_length(1, &"2 elements [x, y]"))?;
+
+                Ok(Point2D { x, y })
+            }
+
+            fn visit_map<M>(self, mut map: M) -> std::result::Result<Point2D, M::Error>
+            where
+                M: MapAccess<'de>,
+            {
+                let mut x = None;
+                let mut y = None;
+
+                while let Some(key) = map.next_key::<String>()? {
+                    match key.as_str() {
+                        "x" => x = Some(map.next_value::<f64>()?),
+                        "y" => y = Some(map.next_value::<f64>()?),
+                        _ => {
+                            let _ = map.next_value::<de::IgnoredAny>()?;
+                        }
+                    }
+                }
+
+                let x = x.ok_or_else(|| de::Error::missing_field("x"))?;
+                let y = y.ok_or_else(|| de::Error::missing_field("y"))?;
+
+                Ok(Point2D { x, y })
+            }
+        }
+
+        deserializer.deserialize_any(Point2DVisitor)
+    }
+}
+
 /// Semantic styling intent used to derive colors and strokes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "kebab-case")]
@@ -147,6 +219,7 @@ pub enum PositionHint {
     TopRight,
     BottomLeft,
     BottomRight,
+    Center,
 }
 
 fn default_true() -> bool {
@@ -159,6 +232,8 @@ fn default_true() -> bool {
 pub enum Annotation {
     Arrow {
         target: TargetRect,
+        #[serde(default)]
+        step: Option<u32>,
         #[serde(default)]
         text: Option<String>,
         #[serde(default)]
@@ -231,6 +306,31 @@ pub enum Annotation {
         position: PositionHint,
         #[serde(default)]
         shadow: Option<bool>,
+        #[serde(default)]
+        arrow: Option<bool>,
+    },
+    #[serde(
+        alias = "step_arrow",
+        alias = "number-arrow",
+        alias = "number_arrow",
+        alias = "numbered-arrow",
+        alias = "numbered_arrow",
+        alias = "arrow-badge",
+        alias = "badge-arrow",
+        alias = "step-pin"
+    )]
+    StepArrow {
+        target: TargetRect,
+        #[serde(default)]
+        step: Option<u32>,
+        #[serde(default)]
+        text: Option<String>,
+        #[serde(default)]
+        style: SemanticStyle,
+        #[serde(default)]
+        position: PositionHint,
+        #[serde(default)]
+        shadow: Option<bool>,
     },
     Spotlight {
         target: TargetRect,
@@ -265,10 +365,66 @@ pub enum Annotation {
         #[serde(default)]
         style: SemanticStyle,
     },
+    #[serde(
+        alias = "bezier_arrow",
+        alias = "curved-arrow",
+        alias = "curved_arrow",
+        alias = "curve-arrow",
+        alias = "curve_arrow",
+        alias = "bezier"
+    )]
+    BezierArrow {
+        #[serde(default)]
+        target: Option<TargetRect>,
+        #[serde(default, alias = "from", alias = "p0", alias = "start_point")]
+        start: Option<Point2D>,
+        #[serde(
+            default,
+            alias = "mid",
+            alias = "middle",
+            alias = "via",
+            alias = "p1",
+            alias = "intermediate",
+            alias = "control_point"
+        )]
+        control: Option<Point2D>,
+        #[serde(default, alias = "to", alias = "p2", alias = "end_point")]
+        end: Option<Point2D>,
+        #[serde(default)]
+        text: Option<String>,
+        #[serde(default)]
+        style: SemanticStyle,
+        #[serde(default, alias = "text_position")]
+        position: PositionHint,
+        #[serde(
+            default,
+            alias = "gap",
+            alias = "distance",
+            alias = "text_offset",
+            alias = "spacing"
+        )]
+        offset: Option<f64>,
+        #[serde(default, alias = "ratio", alias = "progress", alias = "along")]
+        t: Option<f64>,
+        #[serde(default)]
+        shadow: Option<bool>,
+        #[serde(default)]
+        outline: Option<bool>,
+        #[serde(
+            default,
+            alias = "box",
+            alias = "enclosure",
+            alias = "frame",
+            alias = "pill",
+            alias = "badge",
+            alias = "background"
+        )]
+        boxed: Option<bool>,
+    },
 }
 
 impl Annotation {
-    pub fn target(&self) -> &TargetRect {
+    pub fn target(&self) -> TargetRect {
         match self {
             Annotation::Arrow { target, .. }
             | Annotation::Rect { target, .. }
@@ -280,7 +436,22 @@ impl Annotation {
             | Annotation::Spotlight { target, .. }
             | Annotation::Pin { target, .. }
             | Annotation::Bullseye { target, .. }
-            | Annotation::Divider { target, .. } => target,
+            | Annotation::Divider { target, .. }
+            | Annotation::StepArrow { target, .. } => *target,
+            Annotation::BezierArrow { target, start, control, end, .. } => {
+                if let Some(t) = target {
+                    *t
+                } else {
+                    let s = start.unwrap_or(Point2D::new(0.0, 0.0));
+                    let c = control.unwrap_or(Point2D::new(50.0, 50.0));
+                    let e = end.unwrap_or(Point2D::new(100.0, 100.0));
+                    let min_x = s.x.min(c.x).min(e.x);
+                    let max_x = s.x.max(c.x).max(e.x);
+                    let min_y = s.y.min(c.y).min(e.y);
+                    let max_y = s.y.max(c.y).max(e.y);
+                    TargetRect::new(min_x, min_y, (max_x - min_x).max(1.0), (max_y - min_y).max(1.0))
+                }
+            }
         }
     }
 
@@ -296,7 +467,9 @@ impl Annotation {
             | Annotation::Spotlight { style, .. }
             | Annotation::Pin { style, .. }
             | Annotation::Bullseye { style, .. }
-            | Annotation::Divider { style, .. } => *style,
+            | Annotation::Divider { style, .. }
+            | Annotation::StepArrow { style, .. }
+            | Annotation::BezierArrow { style, .. } => *style,
         }
     }
 
@@ -306,7 +479,9 @@ impl Annotation {
             | Annotation::Label { position, .. }
             | Annotation::Callout { position, .. }
             | Annotation::Badge { position, .. }
-            | Annotation::Pin { position, .. } => *position,
+            | Annotation::Pin { position, .. }
+            | Annotation::StepArrow { position, .. }
+            | Annotation::BezierArrow { position, .. } => *position,
             _ => PositionHint::Auto,
         }
     }
@@ -321,7 +496,9 @@ impl Annotation {
             | Annotation::Callout { shadow, .. }
             | Annotation::Badge { shadow, .. }
             | Annotation::Pin { shadow, .. }
-            | Annotation::Bullseye { shadow, .. } => *shadow,
+            | Annotation::Bullseye { shadow, .. }
+            | Annotation::StepArrow { shadow, .. }
+            | Annotation::BezierArrow { shadow, .. } => *shadow,
             Annotation::Spotlight { .. } | Annotation::Divider { .. } => None,
         }
     }
@@ -330,7 +507,8 @@ impl Annotation {
         match self {
             Annotation::Label { outline, .. }
             | Annotation::Callout { outline, .. }
-            | Annotation::Pin { outline, .. } => *outline,
+            | Annotation::Pin { outline, .. }
+            | Annotation::BezierArrow { outline, .. } => *outline,
             _ => None,
         }
     }
@@ -511,6 +689,117 @@ mod tests {
             assert_eq!(*outline, Some(true));
         } else {
             panic!("Expected Pin annotation");
+        }
+    }
+
+    #[test]
+    fn test_step_arrow_deserialization() {
+        let json = r#"{
+            "canvas": {"width": 800, "height": 600},
+            "annotations": [
+                {
+                    "type": "step-arrow",
+                    "target": [100, 100, 200, 50],
+                    "step": 1,
+                    "style": "step",
+                    "position": "bottom"
+                },
+                {
+                    "type": "number-arrow",
+                    "target": [200, 200, 100, 50],
+                    "step": 2
+                },
+                {
+                    "type": "badge",
+                    "target": [300, 300, 100, 50],
+                    "step": 3,
+                    "arrow": true
+                }
+            ]
+        }"#;
+
+        let scene = Scene::from_json(json).expect("Failed to parse step arrow scene");
+        assert_eq!(scene.annotations.len(), 3);
+        match &scene.annotations[0] {
+            Annotation::StepArrow { step, style, position, .. } => {
+                assert_eq!(*step, Some(1));
+                assert_eq!(*style, SemanticStyle::Step);
+                assert_eq!(*position, PositionHint::Bottom);
+            }
+            _ => panic!("Expected StepArrow"),
+        }
+    }
+
+    #[test]
+    fn test_bezier_arrow_deserialization() {
+        let json = r#"{
+            "canvas": {"width": 1000, "height": 800},
+            "annotations": [
+                {
+                    "type": "bezier-arrow",
+                    "start": [100, 200],
+                    "control": [200, 100],
+                    "end": [300, 200],
+                    "text": "データ連携",
+                    "style": "primary"
+                },
+                {
+                    "type": "curved-arrow",
+                    "from": {"x": 50, "y": 60},
+                    "via": {"x": 150, "y": 10},
+                    "to": {"x": 250, "y": 60},
+                    "text": "処理完了",
+                    "style": "pink",
+                    "shadow": true
+                }
+            ]
+        }"#;
+
+        let scene = Scene::from_json(json).expect("Failed to parse bezier arrow scene");
+        assert_eq!(scene.annotations.len(), 2);
+
+        if let Annotation::BezierArrow { start, control, end, text, style, .. } = &scene.annotations[0] {
+            assert_eq!(*start, Some(Point2D::new(100.0, 200.0)));
+            assert_eq!(*control, Some(Point2D::new(200.0, 100.0)));
+            assert_eq!(*end, Some(Point2D::new(300.0, 200.0)));
+            assert_eq!(text.as_deref(), Some("データ連携"));
+            assert_eq!(*style, SemanticStyle::Primary);
+        } else {
+            panic!("Expected BezierArrow");
+        }
+
+        if let Annotation::BezierArrow { start, control, end, text, style, shadow, boxed, position, .. } = &scene.annotations[1] {
+            assert_eq!(*start, Some(Point2D::new(50.0, 60.0)));
+            assert_eq!(*control, Some(Point2D::new(150.0, 10.0)));
+            assert_eq!(*end, Some(Point2D::new(250.0, 60.0)));
+            assert_eq!(text.as_deref(), Some("処理完了"));
+            assert_eq!(*style, SemanticStyle::Pink);
+            assert_eq!(*shadow, Some(true));
+            assert_eq!(*boxed, None);
+            assert_eq!(*position, PositionHint::Auto);
+        } else {
+            panic!("Expected CurvedArrow");
+        }
+
+        let json_unboxed = r#"{
+            "canvas": {"width": 500, "height": 500},
+            "annotations": [
+                {
+                    "type": "bezier-arrow",
+                    "start": [10, 10],
+                    "end": [100, 100],
+                    "text": "No Frame",
+                    "box": false,
+                    "position": "top"
+                }
+            ]
+        }"#;
+        let scene_unboxed = Scene::from_json(json_unboxed).unwrap();
+        if let Annotation::BezierArrow { boxed, position, .. } = &scene_unboxed.annotations[0] {
+            assert_eq!(*boxed, Some(false));
+            assert_eq!(*position, PositionHint::Top);
+        } else {
+            panic!("Expected unboxed BezierArrow");
         }
     }
 }

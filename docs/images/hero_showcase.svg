@@ -1,0 +1,57 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="540" viewBox="0 0 960 540">
+  <defs>
+    <filter id="markits-shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="2" stdDeviation="3" flood-color="#000000" flood-opacity="0.25"/>
+    </filter>
+    <marker id="arrowhead-primary" viewBox="0 0 10 10" refX="7" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 1.5 L 8 5 L 0 8.5 z" fill="#2563eb" />
+    </marker>
+    <marker id="arrowhead-secondary" viewBox="0 0 10 10" refX="7" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 1.5 L 8 5 L 0 8.5 z" fill="#4b5563" />
+    </marker>
+    <marker id="arrowhead-warning" viewBox="0 0 10 10" refX="7" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 1.5 L 8 5 L 0 8.5 z" fill="#d97706" />
+    </marker>
+    <marker id="arrowhead-danger" viewBox="0 0 10 10" refX="7" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 1.5 L 8 5 L 0 8.5 z" fill="#dc2626" />
+    </marker>
+    <marker id="arrowhead-info" viewBox="0 0 10 10" refX="7" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 1.5 L 8 5 L 0 8.5 z" fill="#0284c7" />
+    </marker>
+    <marker id="arrowhead-step" viewBox="0 0 10 10" refX="7" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 1.5 L 8 5 L 0 8.5 z" fill="#7c3aed" />
+    </marker>
+    <marker id="arrowhead-pink" viewBox="0 0 10 10" refX="7" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 1.5 L 8 5 L 0 8.5 z" fill="#ea1a65" />
+    </marker>
+    <mask id="spotlight-mask-0">
+      <rect width="100%" height="100%" fill="white"/>
+      <rect x="260" y="36" width="440" height="44" rx="6" ry="6" fill="black"/>
+    </mask>
+  </defs>
+  <!-- Spotlight -->
+  <rect width="100%" height="100%" fill="#000000" opacity="0.65" mask="url(#spotlight-mask-0)"/>
+  <rect x="260" y="36" width="440" height="44" rx="6" ry="6" fill="none" stroke="#2563eb" stroke-width="2.5" stroke-dasharray="4 3"/>
+  <rect x="260" y="300" width="650" height="190" rx="10" ry="10" fill="rgba(2, 132, 199, 0.15)" stroke="#0284c7" stroke-width="2.5"/>
+  <line x1="906" y1="304" x2="890" y2="320" stroke="#dc2626" stroke-width="2.5" stroke-linecap="round" marker-end="url(#arrowhead-danger)" filter="url(#markits-shadow)"/>
+  <line x1="480" y1="96" x2="480" y2="80" stroke="#2563eb" stroke-width="2.5" stroke-linecap="round" marker-end="url(#arrowhead-primary)"/>
+  <g filter="url(#markits-shadow)">
+    <rect x="360.90000000000003" y="96" width="238.19999999999996" height="30.900000000000002" rx="6" ry="6" fill="#2563eb" stroke="#2563eb" stroke-width="1.5"/>
+    <text x="480" y="111.45" fill="#ffffff" font-family="system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="14" font-weight="600" text-anchor="middle" dominant-baseline="central">① 検索バーにキーワードを入力</text>
+  </g>
+  <g filter="url(#markits-shadow)">
+    <circle cx="238" cy="133" r="14" fill="#7c3aed" stroke="#ffffff" stroke-width="2"/>
+    <text x="238" y="133" fill="#ffffff" font-family="system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="12.6" font-weight="bold" text-anchor="middle" dominant-baseline="central">2</text>
+  </g>
+  <g filter="url(#markits-shadow)">
+    <polygon points="660,191.3 660,214.7 636,203" fill="#ea1a65" stroke="#ea1a65" stroke-width="1.5"/>
+    <circle cx="660" cy="203" r="18" fill="#ea1a65" stroke="#ffffff" stroke-width="2.5"/>
+    <text x="660" y="203" fill="#ffffff" font-family="system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="17.099999999999998" font-weight="bold" text-anchor="middle" dominant-baseline="central">★</text>
+    <rect x="682" y="187.55" width="160.5" height="30.900000000000002" rx="6" ry="6" fill="#1e293b" stroke="#ffffff" stroke-width="1.5"/>
+    <text x="762.25" y="203" fill="#ffffff" font-family="system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="14" font-weight="600" text-anchor="middle" dominant-baseline="central">新機能: AI売上予測</text>
+  </g>
+  <g filter="url(#markits-shadow)">
+    <rect x="754.2" y="273.1" width="141.60000000000002" height="30.900000000000002" rx="6" ry="6" fill="#dc2626" stroke="#dc2626" stroke-width="1.5"/>
+    <text x="825" y="288.55" fill="#ffffff" font-family="system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="14" font-weight="600" text-anchor="middle" dominant-baseline="central">即時エクスポート</text>
+  </g>
+</svg>

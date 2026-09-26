@@ -1,0 +1,38 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="640" height="320" viewBox="0 0 640 320">
+  <defs>
+    <filter id="markits-shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="2" stdDeviation="3" flood-color="#000000" flood-opacity="0.25"/>
+    </filter>
+    <marker id="arrowhead-primary" viewBox="0 0 10 10" refX="7" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 1.5 L 8 5 L 0 8.5 z" fill="#2563eb" />
+    </marker>
+    <marker id="arrowhead-secondary" viewBox="0 0 10 10" refX="7" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 1.5 L 8 5 L 0 8.5 z" fill="#4b5563" />
+    </marker>
+    <marker id="arrowhead-warning" viewBox="0 0 10 10" refX="7" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 1.5 L 8 5 L 0 8.5 z" fill="#d97706" />
+    </marker>
+    <marker id="arrowhead-danger" viewBox="0 0 10 10" refX="7" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 1.5 L 8 5 L 0 8.5 z" fill="#dc2626" />
+    </marker>
+    <marker id="arrowhead-info" viewBox="0 0 10 10" refX="7" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 1.5 L 8 5 L 0 8.5 z" fill="#0284c7" />
+    </marker>
+    <marker id="arrowhead-step" viewBox="0 0 10 10" refX="7" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 1.5 L 8 5 L 0 8.5 z" fill="#7c3aed" />
+    </marker>
+    <marker id="arrowhead-pink" viewBox="0 0 10 10" refX="7" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 1.5 L 8 5 L 0 8.5 z" fill="#ea1a65" />
+    </marker>
+  </defs>
+  <line x1="216" y1="132" x2="240" y2="132" stroke="#7c3aed" stroke-width="2.5" stroke-linecap="round" marker-end="url(#arrowhead-step)"/>
+  <g filter="url(#markits-shadow)">
+    <circle cx="202" cy="132" r="14" fill="#7c3aed" stroke="#ffffff" stroke-width="2"/>
+    <text x="202" y="132" fill="#ffffff" font-family="system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="12.6" font-weight="bold" text-anchor="middle" dominant-baseline="central">1</text>
+  </g>
+  <line x1="216" y1="208" x2="240" y2="208" stroke="#7c3aed" stroke-width="2.5" stroke-linecap="round" marker-end="url(#arrowhead-step)"/>
+  <g filter="url(#markits-shadow)">
+    <circle cx="202" cy="208" r="14" fill="#7c3aed" stroke="#ffffff" stroke-width="2"/>
+    <text x="202" y="208" fill="#ffffff" font-family="system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="12.6" font-weight="bold" text-anchor="middle" dominant-baseline="central">2</text>
+  </g>
+</svg>
