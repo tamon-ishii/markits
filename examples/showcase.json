@@ -1,0 +1,84 @@
+{
+  "canvas": {
+    "width": 1200,
+    "height": 750
+  },
+  "annotations": [
+    {
+      "type": "spotlight",
+      "target": [80, 80, 320, 140],
+      "style": "primary"
+    },
+    {
+      "type": "rounded-rect",
+      "target": [80, 80, 320, 140],
+      "rx": 8,
+      "ry": 8,
+      "style": "primary"
+    },
+    {
+      "type": "badge",
+      "target": [80, 80, 320, 140],
+      "step": 1,
+      "style": "step",
+      "position": "top-left"
+    },
+    {
+      "type": "callout",
+      "target": [80, 80, 320, 140],
+      "text": "① メイン検索エリアにキーワードを入力",
+      "style": "primary",
+      "position": "bottom"
+    },
+    {
+      "type": "rect",
+      "target": [600, 80, 280, 120],
+      "style": "warning"
+    },
+    {
+      "type": "label",
+      "target": [600, 80, 280, 120],
+      "text": "注意: 必須項目の入力が漏れています",
+      "style": "warning",
+      "position": "top"
+    },
+    {
+      "type": "circle",
+      "target": [150, 420, 140, 140],
+      "style": "danger"
+    },
+    {
+      "type": "arrow",
+      "target": [150, 420, 140, 140],
+      "position": "left",
+      "style": "danger"
+    },
+    {
+      "type": "callout",
+      "target": [150, 420, 140, 140],
+      "text": "危険: 取り消し不可の削除操作",
+      "style": "danger",
+      "position": "bottom"
+    },
+    {
+      "type": "rounded-rect",
+      "target": [600, 420, 260, 90],
+      "rx": 6,
+      "style": "info"
+    },
+    {
+      "type": "badge",
+      "target": [600, 420, 260, 90],
+      "step": 2,
+      "style": "step",
+      "position": "top-left"
+    },
+    {
+      "type": "callout",
+      "target": [600, 420, 260, 90],
+      "text": "② 設定を適用して保存",
+      "style": "info",
+      "position": "right"
+    }
+  ]
+}

@@ -1,0 +1,115 @@
+{
+  "canvas": {
+    "width": 1000,
+    "height": 650
+  },
+  "shadow": true,
+  "annotations": [
+    {
+      "type": "divider",
+      "target": [50, 310, 900, 4],
+      "style": "danger"
+    },
+    {
+      "type": "label",
+      "target": [80, 80, 200, 30],
+      "text": "①編集モードで\n小さいプラスをクリック",
+      "style": "danger",
+      "position": "top",
+      "outline": true
+    },
+    {
+      "type": "circle",
+      "target": [150, 140, 60, 60],
+      "style": "danger"
+    },
+    {
+      "type": "label",
+      "target": [360, 80, 200, 30],
+      "text": "②編集モードで\n「a」をクリック",
+      "style": "danger",
+      "position": "top",
+      "outline": true
+    },
+    {
+      "type": "pin",
+      "target": [440, 140, 60, 60],
+      "icon": "?",
+      "style": "info",
+      "position": "left"
+    },
+    {
+      "type": "label",
+      "target": [680, 80, 180, 30],
+      "text": "③説明を入力",
+      "style": "danger",
+      "position": "top",
+      "outline": true
+    },
+    {
+      "type": "pin",
+      "target": [740, 140, 60, 60],
+      "icon": "?",
+      "text": "これは何？",
+      "style": "info",
+      "position": "left"
+    },
+    {
+      "type": "label",
+      "target": [100, 370, 160, 30],
+      "text": "回転させる",
+      "style": "danger",
+      "position": "top",
+      "outline": true
+    },
+    {
+      "type": "arrow",
+      "target": [220, 420, 50, 50],
+      "style": "danger",
+      "position": "bottom-left"
+    },
+    {
+      "type": "pin",
+      "target": [230, 430, 60, 60],
+      "icon": "♡",
+      "style": "pink",
+      "position": "left"
+    },
+    {
+      "type": "bullseye",
+      "target": [470, 360, 50, 50],
+      "style": "danger"
+    },
+    {
+      "type": "label",
+      "target": [530, 360, 180, 30],
+      "text": "矢印の位置が\n変えられる",
+      "style": "danger",
+      "position": "right",
+      "outline": true
+    },
+    {
+      "type": "pin",
+      "target": [470, 430, 60, 60],
+      "icon": "♡",
+      "style": "pink",
+      "position": "top"
+    },
+    {
+      "type": "label",
+      "target": [700, 340, 200, 30],
+      "text": "矢印が右側になると\n説明入力部分は左に",
+      "style": "danger",
+      "position": "top",
+      "outline": true
+    },
+    {
+      "type": "pin",
+      "target": [730, 430, 60, 60],
+      "icon": "♡",
+      "text": "a",
+      "style": "pink",
+      "position": "right"
+    }
+  ]
+}
