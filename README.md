@@ -28,7 +28,13 @@
 
 ## インストール & CLI 利用方法
 
-### ビルド
+### ビルド済みバイナリのダウンロード
+[GitHub Releases](https://github.com/tamon-ishii/markits/releases) より、各 OS 向けの最適化済み実行可能バイナリをダウンロードしてそのまま利用できます：
+- **Linux**: `x86_64` (glibc / musl static), `aarch64` (ARM64)
+- **macOS**: `universal` (Apple Silicon & Intel 両対応), `aarch64` (M1/M2/M3/M4), `x86_64` (Intel)
+- **Windows**: `x86_64`
+
+### ソースコードからのビルド
 ```bash
 cargo build --release
 ```
