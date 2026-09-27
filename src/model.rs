@@ -5,6 +5,7 @@ use std::fmt;
 
 /// Canvas dimensions defining the viewBox of the annotation SVG.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Canvas {
     pub width: u32,
     pub height: u32,
@@ -82,6 +83,10 @@ impl<'de> Deserialize<'de> for TargetRect {
                     .next_element::<f64>()?
                     .ok_or_else(|| de::Error::invalid_length(3, &"4 elements [x, y, width, height]"))?;
 
+                if seq.next_element::<de::IgnoredAny>()?.is_some() {
+                    return Err(de::Error::invalid_length(5, &"exactly 4 elements [x, y, width, height]"));
+                }
+
                 Ok(TargetRect { x, y, width, height })
             }
 
@@ -100,9 +105,7 @@ impl<'de> Deserialize<'de> for TargetRect {
                         "y" => y = Some(map.next_value::<f64>()?),
                         "width" | "w" => width = Some(map.next_value::<f64>()?),
                         "height" | "h" => height = Some(map.next_value::<f64>()?),
-                        _ => {
-                            let _ = map.next_value::<de::IgnoredAny>()?;
-                        }
+                        _ => return Err(de::Error::unknown_field(&key, &["x", "y", "width", "height", "w", "h"])),
                     }
                 }
 
@@ -160,6 +163,10 @@ impl<'de> Deserialize<'de> for Point2D {
                     .next_element::<f64>()?
                     .ok_or_else(|| de::Error::invalid_length(1, &"2 elements [x, y]"))?;
 
+                if seq.next_element::<de::IgnoredAny>()?.is_some() {
+                    return Err(de::Error::invalid_length(3, &"exactly 2 elements [x, y]"));
+                }
+
                 Ok(Point2D { x, y })
             }
 
@@ -174,9 +181,7 @@ impl<'de> Deserialize<'de> for Point2D {
                     match key.as_str() {
                         "x" => x = Some(map.next_value::<f64>()?),
                         "y" => y = Some(map.next_value::<f64>()?),
-                        _ => {
-                            let _ = map.next_value::<de::IgnoredAny>()?;
-                        }
+                        _ => return Err(de::Error::unknown_field(&key, &["x", "y"])),
                     }
                 }
 
@@ -228,7 +233,7 @@ fn default_true() -> bool {
 
 /// Core annotation types supported by MarkIts.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "kebab-case")]
+#[serde(tag = "type", rename_all = "kebab-case", deny_unknown_fields)]
 pub enum Annotation {
     Arrow {
         target: TargetRect,
@@ -274,6 +279,8 @@ pub enum Annotation {
         target: TargetRect,
         text: String,
         #[serde(default)]
+        max_width: Option<f64>,
+        #[serde(default)]
         style: SemanticStyle,
         #[serde(default)]
         position: PositionHint,
@@ -285,6 +292,8 @@ pub enum Annotation {
     Callout {
         target: TargetRect,
         text: String,
+        #[serde(default)]
+        max_width: Option<f64>,
         #[serde(default)]
         style: SemanticStyle,
         #[serde(default)]
@@ -516,6 +525,7 @@ impl Annotation {
 
 /// The top-level scene specification.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Scene {
     pub canvas: Canvas,
     #[serde(default = "default_true")]
@@ -526,7 +536,8 @@ pub struct Scene {
 
 impl Scene {
     pub fn from_json(json_str: &str) -> Result<Self> {
-        let scene: Self = serde_json::from_str(json_str)?;
+        let prepared = crate::semantic::prepare(json_str)?;
+        let scene: Self = serde_json::from_value(prepared.scene)?;
         scene.validate()?;
         Ok(scene)
     }
@@ -545,6 +556,11 @@ impl Scene {
                     "Annotation {} has invalid non-positive target dimensions (width: {}, height: {})",
                     idx, target.width, target.height
                 )));
+            }
+            if let Annotation::Label { max_width: Some(width), .. } | Annotation::Callout { max_width: Some(width), .. } = annotation {
+                if !width.is_finite() || *width < 40.0 {
+                    return Err(MarkitsError::Validation(format!("annotations[{idx}].max_width must be a finite number >= 40")));
+                }
             }
         }
 

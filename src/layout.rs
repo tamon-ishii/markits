@@ -63,6 +63,65 @@ pub fn estimate_text_dimensions(text: &str, font_size: f64) -> Dimensions {
     Dimensions::new(total_width, total_height)
 }
 
+fn char_width(c: char, font_size: f64) -> f64 {
+    if c.is_ascii() { font_size * 0.60 } else { font_size * 1.05 }
+}
+
+/// Wraps Latin text at spaces and CJK text between characters. Explicit newlines are preserved.
+pub fn wrap_text(text: &str, font_size: f64, max_width: f64) -> String {
+    let content_width = (max_width - 24.0).max(font_size);
+    let mut output = Vec::new();
+    for paragraph in text.split('\n') {
+        let mut line = String::new();
+        let mut width = 0.0;
+        let mut word = String::new();
+        let mut word_width = 0.0;
+        let flush_word = |line: &mut String, width: &mut f64, word: &mut String, word_width: &mut f64, output: &mut Vec<String>| {
+            if word.is_empty() { return; }
+            if !line.is_empty() && *width + *word_width > content_width {
+                output.push(std::mem::take(line));
+                *width = 0.0;
+            }
+            for c in word.chars() {
+                let cw = char_width(c, font_size);
+                if !line.is_empty() && *width + cw > content_width {
+                    output.push(std::mem::take(line));
+                    *width = 0.0;
+                }
+                line.push(c);
+                *width += cw;
+            }
+            word.clear();
+            *word_width = 0.0;
+        };
+        for c in paragraph.chars() {
+            if c.is_whitespace() {
+                flush_word(&mut line, &mut width, &mut word, &mut word_width, &mut output);
+                let cw = char_width(' ', font_size);
+                if !line.is_empty() && width + cw <= content_width {
+                    line.push(' ');
+                    width += cw;
+                }
+            } else if !c.is_ascii() {
+                flush_word(&mut line, &mut width, &mut word, &mut word_width, &mut output);
+                let cw = char_width(c, font_size);
+                if !line.is_empty() && width + cw > content_width {
+                    output.push(std::mem::take(&mut line));
+                    width = 0.0;
+                }
+                line.push(c);
+                width += cw;
+            } else {
+                word.push(c);
+                word_width += char_width(c, font_size);
+            }
+        }
+        flush_word(&mut line, &mut width, &mut word, &mut word_width, &mut output);
+        output.push(line.trim_end().to_string());
+    }
+    output.join("\n")
+}
+
 /// 8 surrounding candidate anchors.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AnchorPosition {
@@ -150,6 +209,112 @@ pub fn generate_candidates(
             }
         })
         .collect()
+}
+
+fn orientation(a: Point, b: Point, c: Point) -> f64 {
+    (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x)
+}
+
+fn segments_cross(a: (Point, Point), b: (Point, Point)) -> bool {
+    let left = orientation(a.0, a.1, b.0) * orientation(a.0, a.1, b.1);
+    let right = orientation(b.0, b.1, a.0) * orientation(b.0, b.1, a.1);
+    left < -1e-8 && right < -1e-8
+}
+
+fn segment_intersects_rect(segment: (Point, Point), rect: &TargetRect) -> bool {
+    let (a, b) = segment;
+    if (a.x > rect.x && a.x < rect.right() && a.y > rect.y && a.y < rect.bottom())
+        || (b.x > rect.x && b.x < rect.right() && b.y > rect.y && b.y < rect.bottom()) {
+        return true;
+    }
+    let tl = Point::new(rect.x, rect.y);
+    let tr = Point::new(rect.right(), rect.y);
+    let bl = Point::new(rect.x, rect.bottom());
+    let br = Point::new(rect.right(), rect.bottom());
+    [(tl, tr), (tr, br), (br, bl), (bl, tl)]
+        .into_iter().any(|edge| segments_cross(segment, edge))
+}
+
+fn select_callout_candidate(
+    target: &TargetRect,
+    dimensions: Dimensions,
+    offset: f64,
+    canvas: &Canvas,
+    hint: PositionHint,
+    occupied_rects: &[TargetRect],
+    occupied_arrows: &[(Point, Point)],
+) -> Candidate {
+    let candidates: Vec<Candidate> = [offset, offset + 24.0, offset + 48.0]
+        .into_iter().flat_map(|distance| generate_candidates(target, dimensions, distance)).collect();
+    candidates.into_iter().min_by(|a, b| {
+        let score = |candidate: &Candidate| {
+            let arrow = calculate_arrow_connection(&candidate.rect, target, candidate.anchor);
+            let crossings = occupied_arrows.iter().filter(|&&other| segments_cross(arrow, other)).count() as f64;
+            let over_labels = occupied_rects.iter().filter(|rect| segment_intersects_rect(arrow, rect)).count() as f64;
+            calculate_score(candidate, target, canvas, hint, occupied_rects)
+                + crossings * 30_000.0 + over_labels * 15_000.0
+        };
+        score(a).total_cmp(&score(b)).then_with(|| a.anchor.baseline_bias().total_cmp(&b.anchor.baseline_bias()))
+    }).expect("candidate set is never empty")
+}
+
+fn callout_candidates(target: &TargetRect, dimensions: Dimensions, offset: f64) -> Vec<Candidate> {
+    [offset, offset + 24.0, offset + 48.0]
+        .into_iter()
+        .flat_map(|distance| generate_candidates(target, dimensions, distance))
+        .collect()
+}
+
+struct CalloutChoice {
+    annotation_index: usize,
+    target: TargetRect,
+    hint: PositionHint,
+    candidates: Vec<Candidate>,
+}
+
+fn pair_penalty(a: &Candidate, a_target: &TargetRect, b: &Candidate, b_target: &TargetRect) -> f64 {
+    let a_arrow = calculate_arrow_connection(&a.rect, a_target, a.anchor);
+    let b_arrow = calculate_arrow_connection(&b.rect, b_target, b.anchor);
+    let mut score = 0.0;
+    if a.rect.intersects(&b.rect) {
+        let width = (a.rect.right().min(b.rect.right()) - a.rect.x.max(b.rect.x)).max(0.0);
+        let height = (a.rect.bottom().min(b.rect.bottom()) - a.rect.y.max(b.rect.y)).max(0.0);
+        score += 20_000.0 + width * height * 10.0;
+    }
+    if segments_cross(a_arrow, b_arrow) { score += 30_000.0; }
+    if segment_intersects_rect(a_arrow, &b.rect) { score += 15_000.0; }
+    if segment_intersects_rect(b_arrow, &a.rect) { score += 15_000.0; }
+    score
+}
+
+fn total_callout_score(choices: &[CalloutChoice], selected: &[usize], scene: &Scene, fixed: &[TargetRect]) -> f64 {
+    let mut score = 0.0;
+    for (i, choice) in choices.iter().enumerate() {
+        let candidate = &choice.candidates[selected[i]];
+        let other_fixed: Vec<_> = fixed.iter().copied().filter(|r| *r != choice.target).collect();
+        score += calculate_score(candidate, &choice.target, &scene.canvas, choice.hint, &other_fixed);
+        let arrow = calculate_arrow_connection(&candidate.rect, &choice.target, candidate.anchor);
+        score += other_fixed.iter().filter(|r| segment_intersects_rect(arrow, r)).count() as f64 * 15_000.0;
+        for j in 0..i {
+            score += pair_penalty(candidate, &choice.target, &choices[j].candidates[selected[j]], &choices[j].target);
+        }
+    }
+    score
+}
+
+#[derive(Debug, Clone)]
+pub struct DebugCandidate {
+    pub rect: TargetRect,
+    pub anchor: AnchorPosition,
+    pub score: f64,
+    pub selected: bool,
+}
+
+#[derive(Debug, Clone)]
+pub struct DebugCallout {
+    pub annotation_index: usize,
+    pub target: TargetRect,
+    pub candidates: Vec<DebugCandidate>,
 }
 
 /// Computes penalty score for a candidate placement. Lower is better.
@@ -441,8 +606,85 @@ impl LayoutEngine {
         Self::default()
     }
 
+    fn callout_problem(&self, scene: &Scene, resolved: &ResolvedScene) -> (Vec<CalloutChoice>, Vec<TargetRect>, Vec<usize>) {
+        let mut fixed: Vec<TargetRect> = scene.annotations.iter().map(Annotation::target).collect();
+        let mut choices = Vec::new();
+        let mut selected = Vec::new();
+        for (index, (input, output)) in scene.annotations.iter().zip(&resolved.annotations).enumerate() {
+            match (input, output) {
+                (Annotation::Callout { target, position, .. }, ResolvedAnnotation::Callout { box_rect, .. }) => {
+                    let dim = Dimensions::new(box_rect.width, box_rect.height);
+                    let candidates = callout_candidates(target, dim, self.callout_offset);
+                    selected.push(candidates.iter().position(|c| c.rect == *box_rect).unwrap_or(0));
+                    choices.push(CalloutChoice { annotation_index: index, target: *target, hint: *position, candidates });
+                }
+                (_, ResolvedAnnotation::Label { box_rect, .. }) => fixed.push(*box_rect),
+                (_, ResolvedAnnotation::Pin { text_rect: Some(rect), .. })
+                | (_, ResolvedAnnotation::BezierArrow { text_rect: Some(rect), .. }) => fixed.push(*rect),
+                _ => {}
+            }
+        }
+        (choices, fixed, selected)
+    }
+
+    fn optimize_callouts(&self, scene: &Scene, resolved: &mut ResolvedScene) {
+        let (choices, fixed, greedy) = self.callout_problem(scene, resolved);
+        if choices.len() < 2 { return; }
+        let mut starts = vec![greedy];
+        starts.push(vec![0; choices.len()]);
+        let mut best_score = f64::INFINITY;
+        let mut best = Vec::new();
+        for mut selected in starts {
+            for sweep in 0..12 {
+                let mut changed = false;
+                let order: Vec<usize> = if sweep % 2 == 0 { (0..choices.len()).collect() } else { (0..choices.len()).rev().collect() };
+                for i in order {
+                    let previous = selected[i];
+                    let mut local_best = total_callout_score(&choices, &selected, scene, &fixed);
+                    let mut local_choice = previous;
+                    for candidate_index in 0..choices[i].candidates.len() {
+                        selected[i] = candidate_index;
+                        let score = total_callout_score(&choices, &selected, scene, &fixed);
+                        if score + 1e-8 < local_best {
+                            local_best = score;
+                            local_choice = candidate_index;
+                        }
+                    }
+                    selected[i] = local_choice;
+                    changed |= selected[i] != previous;
+                }
+                if !changed { break; }
+            }
+            let score = total_callout_score(&choices, &selected, scene, &fixed);
+            if score < best_score { best_score = score; best = selected; }
+        }
+        for (choice, index) in choices.iter().zip(best) {
+            let candidate = &choice.candidates[index];
+            if let ResolvedAnnotation::Callout { box_rect, arrow_start, arrow_end, .. } = &mut resolved.annotations[choice.annotation_index] {
+                *box_rect = candidate.rect;
+                (*arrow_start, *arrow_end) = calculate_arrow_connection(&candidate.rect, &choice.target, candidate.anchor);
+            }
+        }
+    }
+
+    pub fn debug_callouts(&self, scene: &Scene, resolved: &ResolvedScene) -> Vec<DebugCallout> {
+        let (choices, fixed, selected) = self.callout_problem(scene, resolved);
+        choices.iter().enumerate().map(|(i, choice)| {
+            let candidates = choice.candidates.iter().enumerate().map(|(index, candidate)| {
+                let mut trial = selected.clone();
+                trial[i] = index;
+                DebugCandidate { rect: candidate.rect, anchor: candidate.anchor, score: total_callout_score(&choices, &trial, scene, &fixed), selected: index == selected[i] }
+            }).collect();
+            DebugCallout { annotation_index: choice.annotation_index, target: choice.target, candidates }
+        }).collect()
+    }
+
     pub fn layout_scene(&self, scene: &Scene) -> ResolvedScene {
         let mut occupied_rects: Vec<TargetRect> = Vec::new();
+        for target in scene.annotations.iter().map(Annotation::target) {
+            if !occupied_rects.contains(&target) { occupied_rects.push(target); }
+        }
+        let mut occupied_arrows: Vec<(Point, Point)> = Vec::new();
         let mut resolved: Vec<ResolvedAnnotation> = Vec::new();
 
         for ann in &scene.annotations {
@@ -496,11 +738,13 @@ impl LayoutEngine {
                 Annotation::Label {
                     target,
                     text,
+                    max_width,
                     style,
                     position,
                     ..
                 } => {
-                    let dim = estimate_text_dimensions(text, self.font_size);
+                    let wrapped = wrap_text(text, self.font_size, max_width.unwrap_or((scene.canvas.width as f64 * 0.55).min(320.0)));
+                    let dim = estimate_text_dimensions(&wrapped, self.font_size);
                     let candidates = generate_candidates(target, dim, self.callout_offset);
                     let best = select_best_candidate(
                         &candidates,
@@ -512,7 +756,7 @@ impl LayoutEngine {
                     occupied_rects.push(best.rect);
                     resolved.push(ResolvedAnnotation::Label {
                         box_rect: best.rect,
-                        text: text.clone(),
+                        text: wrapped,
                         style: *style,
                         shadow,
                         outline,
@@ -521,25 +765,29 @@ impl LayoutEngine {
                 Annotation::Callout {
                     target,
                     text,
+                    max_width,
                     style,
                     position,
                     ..
                 } => {
-                    let dim = estimate_text_dimensions(text, self.font_size);
-                    let candidates = generate_candidates(target, dim, self.callout_offset);
-                    let best = select_best_candidate(
-                        &candidates,
+                    let wrapped = wrap_text(text, self.font_size, max_width.unwrap_or((scene.canvas.width as f64 * 0.55).min(320.0)));
+                    let dim = estimate_text_dimensions(&wrapped, self.font_size);
+                    let best = select_callout_candidate(
                         target,
+                        dim,
+                        self.callout_offset,
                         &scene.canvas,
                         *position,
                         &occupied_rects,
+                        &occupied_arrows,
                     );
                     let (arrow_start, arrow_end) =
                         calculate_arrow_connection(&best.rect, target, best.anchor);
                     occupied_rects.push(best.rect);
+                    occupied_arrows.push((arrow_start, arrow_end));
                     resolved.push(ResolvedAnnotation::Callout {
                         box_rect: best.rect,
-                        text: text.clone(),
+                        text: wrapped,
                         arrow_start,
                         arrow_end,
                         style: *style,
@@ -958,16 +1206,60 @@ impl LayoutEngine {
             }
         }
 
-        ResolvedScene {
+        let mut result = ResolvedScene {
             canvas: scene.canvas,
             annotations: resolved,
-        }
+        };
+        self.optimize_callouts(scene, &mut result);
+        result
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn japanese_text_wraps_within_width() {
+        let wrapped = wrap_text("設定が完了したら、このボタンをクリックしてください", 14.0, 120.0);
+        assert!(wrapped.contains('\n'));
+        for line in wrapped.split('\n') {
+            assert!(estimate_text_dimensions(line, 14.0).width <= 120.0);
+        }
+        assert_eq!(wrapped.replace('\n', ""), "設定が完了したら、このボタンをクリックしてください");
+    }
+
+    #[test]
+    fn global_layout_improves_joint_candidate_score() {
+        let scene = Scene::from_json(r#"{
+          "canvas":{"width":420,"height":260},
+          "annotations":[
+            {"type":"callout","target":[120,80,40,28],"text":"最初の設定を保存します","max_width":120},
+            {"type":"callout","target":[190,95,40,28],"text":"次の設定を選択します","max_width":120},
+            {"type":"callout","target":[250,120,40,28],"text":"最後に確認します","max_width":120}
+          ]
+        }"#).unwrap();
+        let engine = LayoutEngine::new();
+        let resolved = engine.layout_scene(&scene);
+        let (choices, fixed, selected) = engine.callout_problem(&scene, &resolved);
+        let initial = total_callout_score(&choices, &vec![0; choices.len()], &scene, &fixed);
+        let final_score = total_callout_score(&choices, &selected, &scene, &fixed);
+        assert!(final_score < initial);
+        assert_eq!(engine.debug_callouts(&scene, &resolved).len(), 3);
+    }
+
+    #[test]
+    fn auto_callout_avoids_existing_arrow_crossing() {
+        let target = TargetRect::new(280.0, 200.0, 40.0, 30.0);
+        let other_arrow = (Point::new(200.0, 190.0), Point::new(400.0, 190.0));
+        let best = select_callout_candidate(
+            &target, Dimensions::new(100.0, 30.0), 16.0,
+            &Canvas { width: 600, height: 400 }, PositionHint::Auto,
+            &[], &[other_arrow],
+        );
+        let selected_arrow = calculate_arrow_connection(&best.rect, &target, best.anchor);
+        assert!(!segments_cross(selected_arrow, other_arrow));
+    }
 
     #[test]
     fn test_estimate_text_dimensions() {

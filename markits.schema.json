@@ -1,0 +1,988 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/tamon-ishii/markits/main/markits.schema.json",
+  "title": "MarkIts semantic annotation document",
+  "type": "object",
+  "properties": {
+    "canvas": {
+      "type": "object",
+      "properties": {
+        "width": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "height": {
+          "type": "integer",
+          "minimum": 1
+        }
+      },
+      "required": [
+        "width",
+        "height"
+      ],
+      "additionalProperties": false
+    },
+    "shadow": {
+      "type": "boolean"
+    },
+    "targets": {
+      "type": "object",
+      "additionalProperties": {
+        "$ref": "#/$defs/targetRect"
+      }
+    },
+    "annotations": {
+      "type": "array",
+      "items": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "const": "arrow"
+              },
+              "id": {
+                "type": "string",
+                "minLength": 1
+              },
+              "target": {
+                "oneOf": [
+                  {
+                    "$ref": "#/$defs/targetRect"
+                  },
+                  {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                ]
+              },
+              "step": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "text": {
+                "type": "string"
+              },
+              "style": {
+                "type": "string",
+                "enum": [
+                  "primary",
+                  "secondary",
+                  "warning",
+                  "danger",
+                  "info",
+                  "step",
+                  "pink"
+                ]
+              },
+              "position": {
+                "type": "string",
+                "enum": [
+                  "auto",
+                  "top",
+                  "bottom",
+                  "left",
+                  "right",
+                  "top-left",
+                  "top-right",
+                  "bottom-left",
+                  "bottom-right",
+                  "center"
+                ]
+              },
+              "shadow": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "type",
+              "target"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "const": "rect"
+              },
+              "id": {
+                "type": "string",
+                "minLength": 1
+              },
+              "target": {
+                "oneOf": [
+                  {
+                    "$ref": "#/$defs/targetRect"
+                  },
+                  {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                ]
+              },
+              "style": {
+                "type": "string",
+                "enum": [
+                  "primary",
+                  "secondary",
+                  "warning",
+                  "danger",
+                  "info",
+                  "step",
+                  "pink"
+                ]
+              },
+              "shadow": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "type",
+              "target"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "const": "rounded-rect"
+              },
+              "id": {
+                "type": "string",
+                "minLength": 1
+              },
+              "target": {
+                "oneOf": [
+                  {
+                    "$ref": "#/$defs/targetRect"
+                  },
+                  {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                ]
+              },
+              "rx": {
+                "type": "number",
+                "exclusiveMinimum": 0
+              },
+              "ry": {
+                "type": "number",
+                "exclusiveMinimum": 0
+              },
+              "style": {
+                "type": "string",
+                "enum": [
+                  "primary",
+                  "secondary",
+                  "warning",
+                  "danger",
+                  "info",
+                  "step",
+                  "pink"
+                ]
+              },
+              "shadow": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "type",
+              "target"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "const": "circle"
+              },
+              "id": {
+                "type": "string",
+                "minLength": 1
+              },
+              "target": {
+                "oneOf": [
+                  {
+                    "$ref": "#/$defs/targetRect"
+                  },
+                  {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                ]
+              },
+              "style": {
+                "type": "string",
+                "enum": [
+                  "primary",
+                  "secondary",
+                  "warning",
+                  "danger",
+                  "info",
+                  "step",
+                  "pink"
+                ]
+              },
+              "shadow": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "type",
+              "target"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "const": "label"
+              },
+              "id": {
+                "type": "string",
+                "minLength": 1
+              },
+              "target": {
+                "oneOf": [
+                  {
+                    "$ref": "#/$defs/targetRect"
+                  },
+                  {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                ]
+              },
+              "text": {
+                "type": "string"
+              },
+              "max_width": {
+                "type": "number",
+                "minimum": 40
+              },
+              "style": {
+                "type": "string",
+                "enum": [
+                  "primary",
+                  "secondary",
+                  "warning",
+                  "danger",
+                  "info",
+                  "step",
+                  "pink"
+                ]
+              },
+              "position": {
+                "type": "string",
+                "enum": [
+                  "auto",
+                  "top",
+                  "bottom",
+                  "left",
+                  "right",
+                  "top-left",
+                  "top-right",
+                  "bottom-left",
+                  "bottom-right",
+                  "center"
+                ]
+              },
+              "shadow": {
+                "type": "boolean"
+              },
+              "outline": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "type",
+              "target",
+              "text"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "const": "callout"
+              },
+              "id": {
+                "type": "string",
+                "minLength": 1
+              },
+              "target": {
+                "oneOf": [
+                  {
+                    "$ref": "#/$defs/targetRect"
+                  },
+                  {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                ]
+              },
+              "text": {
+                "type": "string"
+              },
+              "max_width": {
+                "type": "number",
+                "minimum": 40
+              },
+              "style": {
+                "type": "string",
+                "enum": [
+                  "primary",
+                  "secondary",
+                  "warning",
+                  "danger",
+                  "info",
+                  "step",
+                  "pink"
+                ]
+              },
+              "position": {
+                "type": "string",
+                "enum": [
+                  "auto",
+                  "top",
+                  "bottom",
+                  "left",
+                  "right",
+                  "top-left",
+                  "top-right",
+                  "bottom-left",
+                  "bottom-right",
+                  "center"
+                ]
+              },
+              "shadow": {
+                "type": "boolean"
+              },
+              "outline": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "type",
+              "target",
+              "text"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "const": "badge"
+              },
+              "id": {
+                "type": "string",
+                "minLength": 1
+              },
+              "target": {
+                "oneOf": [
+                  {
+                    "$ref": "#/$defs/targetRect"
+                  },
+                  {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                ]
+              },
+              "step": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "text": {
+                "type": "string"
+              },
+              "style": {
+                "type": "string",
+                "enum": [
+                  "primary",
+                  "secondary",
+                  "warning",
+                  "danger",
+                  "info",
+                  "step",
+                  "pink"
+                ]
+              },
+              "position": {
+                "type": "string",
+                "enum": [
+                  "auto",
+                  "top",
+                  "bottom",
+                  "left",
+                  "right",
+                  "top-left",
+                  "top-right",
+                  "bottom-left",
+                  "bottom-right",
+                  "center"
+                ]
+              },
+              "shadow": {
+                "type": "boolean"
+              },
+              "arrow": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "type",
+              "target"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "const": "step-arrow"
+              },
+              "id": {
+                "type": "string",
+                "minLength": 1
+              },
+              "target": {
+                "oneOf": [
+                  {
+                    "$ref": "#/$defs/targetRect"
+                  },
+                  {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                ]
+              },
+              "step": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "text": {
+                "type": "string"
+              },
+              "style": {
+                "type": "string",
+                "enum": [
+                  "primary",
+                  "secondary",
+                  "warning",
+                  "danger",
+                  "info",
+                  "step",
+                  "pink"
+                ]
+              },
+              "position": {
+                "type": "string",
+                "enum": [
+                  "auto",
+                  "top",
+                  "bottom",
+                  "left",
+                  "right",
+                  "top-left",
+                  "top-right",
+                  "bottom-left",
+                  "bottom-right",
+                  "center"
+                ]
+              },
+              "shadow": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "type",
+              "target"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "const": "spotlight"
+              },
+              "id": {
+                "type": "string",
+                "minLength": 1
+              },
+              "target": {
+                "oneOf": [
+                  {
+                    "$ref": "#/$defs/targetRect"
+                  },
+                  {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                ]
+              },
+              "style": {
+                "type": "string",
+                "enum": [
+                  "primary",
+                  "secondary",
+                  "warning",
+                  "danger",
+                  "info",
+                  "step",
+                  "pink"
+                ]
+              }
+            },
+            "required": [
+              "type",
+              "target"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "const": "pin"
+              },
+              "id": {
+                "type": "string",
+                "minLength": 1
+              },
+              "target": {
+                "oneOf": [
+                  {
+                    "$ref": "#/$defs/targetRect"
+                  },
+                  {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                ]
+              },
+              "icon": {
+                "type": "string"
+              },
+              "text": {
+                "type": "string"
+              },
+              "style": {
+                "type": "string",
+                "enum": [
+                  "primary",
+                  "secondary",
+                  "warning",
+                  "danger",
+                  "info",
+                  "step",
+                  "pink"
+                ]
+              },
+              "position": {
+                "type": "string",
+                "enum": [
+                  "auto",
+                  "top",
+                  "bottom",
+                  "left",
+                  "right",
+                  "top-left",
+                  "top-right",
+                  "bottom-left",
+                  "bottom-right",
+                  "center"
+                ]
+              },
+              "shadow": {
+                "type": "boolean"
+              },
+              "outline": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "type",
+              "target"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "const": "bullseye"
+              },
+              "id": {
+                "type": "string",
+                "minLength": 1
+              },
+              "target": {
+                "oneOf": [
+                  {
+                    "$ref": "#/$defs/targetRect"
+                  },
+                  {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                ]
+              },
+              "style": {
+                "type": "string",
+                "enum": [
+                  "primary",
+                  "secondary",
+                  "warning",
+                  "danger",
+                  "info",
+                  "step",
+                  "pink"
+                ]
+              },
+              "shadow": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "type",
+              "target"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "const": "divider"
+              },
+              "id": {
+                "type": "string",
+                "minLength": 1
+              },
+              "target": {
+                "oneOf": [
+                  {
+                    "$ref": "#/$defs/targetRect"
+                  },
+                  {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                ]
+              },
+              "style": {
+                "type": "string",
+                "enum": [
+                  "primary",
+                  "secondary",
+                  "warning",
+                  "danger",
+                  "info",
+                  "step",
+                  "pink"
+                ]
+              }
+            },
+            "required": [
+              "type",
+              "target"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "const": "bezier-arrow"
+              },
+              "id": {
+                "type": "string",
+                "minLength": 1
+              },
+              "target": {
+                "oneOf": [
+                  {
+                    "$ref": "#/$defs/targetRect"
+                  },
+                  {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                ]
+              },
+              "start": {
+                "$ref": "#/$defs/point"
+              },
+              "control": {
+                "$ref": "#/$defs/point"
+              },
+              "end": {
+                "$ref": "#/$defs/point"
+              },
+              "text": {
+                "type": "string"
+              },
+              "style": {
+                "type": "string",
+                "enum": [
+                  "primary",
+                  "secondary",
+                  "warning",
+                  "danger",
+                  "info",
+                  "step",
+                  "pink"
+                ]
+              },
+              "position": {
+                "type": "string",
+                "enum": [
+                  "auto",
+                  "top",
+                  "bottom",
+                  "left",
+                  "right",
+                  "top-left",
+                  "top-right",
+                  "bottom-left",
+                  "bottom-right",
+                  "center"
+                ]
+              },
+              "offset": {
+                "type": "number",
+                "minimum": 0
+              },
+              "t": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 1
+              },
+              "shadow": {
+                "type": "boolean"
+              },
+              "outline": {
+                "type": "boolean"
+              },
+              "boxed": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "type"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "const": "instruction"
+              },
+              "id": {
+                "type": "string",
+                "minLength": 1
+              },
+              "target": {
+                "oneOf": [
+                  {
+                    "$ref": "#/$defs/targetRect"
+                  },
+                  {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                ]
+              },
+              "action": {
+                "type": "string",
+                "enum": [
+                  "click",
+                  "enter",
+                  "select",
+                  "drag",
+                  "attention",
+                  "warning",
+                  "compare"
+                ]
+              },
+              "text": {
+                "type": "string"
+              },
+              "max_width": {
+                "type": "number",
+                "minimum": 40
+              },
+              "style": {
+                "type": "string",
+                "enum": [
+                  "primary",
+                  "secondary",
+                  "warning",
+                  "danger",
+                  "info",
+                  "step",
+                  "pink"
+                ]
+              },
+              "position": {
+                "type": "string",
+                "enum": [
+                  "auto",
+                  "top",
+                  "bottom",
+                  "left",
+                  "right",
+                  "top-left",
+                  "top-right",
+                  "bottom-left",
+                  "bottom-right",
+                  "center"
+                ]
+              },
+              "destination": {
+                "oneOf": [
+                  {
+                    "$ref": "#/$defs/targetRect"
+                  },
+                  {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                ]
+              }
+            },
+            "required": [
+              "type",
+              "target",
+              "action",
+              "text"
+            ],
+            "additionalProperties": false,
+            "allOf": [
+              {
+                "if": {
+                  "properties": {
+                    "action": {
+                      "enum": [
+                        "drag",
+                        "compare"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "action"
+                  ]
+                },
+                "then": {
+                  "required": [
+                    "destination"
+                  ]
+                }
+              }
+            ]
+          }
+        ]
+      }
+    }
+  },
+  "required": [
+    "canvas"
+  ],
+  "additionalProperties": false,
+  "$defs": {
+    "targetRect": {
+      "oneOf": [
+        {
+          "type": "array",
+          "prefixItems": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "number"
+            },
+            {
+              "type": "number",
+              "exclusiveMinimum": 0
+            },
+            {
+              "type": "number",
+              "exclusiveMinimum": 0
+            }
+          ],
+          "minItems": 4,
+          "maxItems": 4
+        },
+        {
+          "type": "object",
+          "properties": {
+            "x": {
+              "type": "number"
+            },
+            "y": {
+              "type": "number"
+            },
+            "width": {
+              "type": "number",
+              "exclusiveMinimum": 0
+            },
+            "height": {
+              "type": "number",
+              "exclusiveMinimum": 0
+            }
+          },
+          "required": [
+            "x",
+            "y",
+            "width",
+            "height"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "point": {
+      "oneOf": [
+        {
+          "type": "array",
+          "prefixItems": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "number"
+            }
+          ],
+          "minItems": 2,
+          "maxItems": 2
+        },
+        {
+          "type": "object",
+          "properties": {
+            "x": {
+              "type": "number"
+            },
+            "y": {
+              "type": "number"
+            }
+          },
+          "required": [
+            "x",
+            "y"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    }
+  }
+}

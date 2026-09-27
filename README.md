@@ -37,7 +37,7 @@ MarkIts で利用可能な全 13 種類のマーク（アノテーション）�
 ### 各マークの詳細仕様 & JSON 例
 
 #### 1. `callout` (コールアウト)
-ターゲット要素（ボタンや入力欄など）を自動で指し示す矢印と、説明文を入れたテキストピルを同時に生成します。8方向の候補からキャンバスはみ出しや他要素との重複を避ける決定論的自動レイアウトが行われます。
+ターゲット要素を指す矢印と説明文を生成します。複数の callout がある場合は全候補を採点し、画面外へのはみ出し、ラベルや target との重なり、矢印の交差を抑える配置に更新します。
 
 ![Callout Preview](docs/images/callout.png)
 
@@ -56,6 +56,7 @@ MarkIts で利用可能な全 13 種類のマーク（アノテーション）�
 - **主なプロパティ**:
   - `target` *(必須)*: 対象領域 `[x, y, width, height]` または `{"x": 220, "y": 115, "width": 200, "height": 48}`
   - `text` *(必須)*: 表示する説明テキスト
+  - `max_width`: テキスト枠の最大幅（40 px 以上）。省略時は画面幅に応じて最大 320 px。日本語と英語を自動改行
   - `style`: セマンティックスタイル（デフォルト: `"primary"`）
   - `position`: 配置優先ヒント（`"auto"`, `"top"`, `"bottom"`, `"left"`, `"right"`, `"top-left"`, `"top-right"`, `"bottom-left"`, `"bottom-right"`）
   - `outline`: 白フチ文字（`true` / `false`）
@@ -452,11 +453,32 @@ markits render input.json > overlay.svg
 
 # パイプ (stdin) 経由で生成
 cat input.json | markits render - > overlay.svg
+
+# 入力の検証と配置結果の取得
+markits validate input.json
+markits render input.json --layout-json > layout.json
+markits render input.json --debug > layout-debug.svg
 ```
 
 ---
 
 ## 入力 JSON 例 (Semantic Intent)
+
+`targets` に名前と矩形を登録すると、各注釈で座標の代わりに名前を参照できます。`instruction` は操作の意図から強調表示と callout を生成します。`position` を省略すると `auto` になります。
+
+```json
+{
+  "canvas": { "width": 1200, "height": 750 },
+  "targets": { "save-button": [820, 640, 100, 36] },
+  "annotations": [
+    { "id": "step1", "type": "instruction", "target": "save-button", "action": "click", "text": "保存をクリック" }
+  ]
+}
+```
+
+`action` は `click`、`enter`、`select`、`drag`、`attention`、`warning`、`compare` に対応します。`click` と `attention` は spotlight と callout、その他は角丸の枠と callout に展開します。`drag` と `compare` には2番目の target を `destination` で指定します。`drag` は2つの target 間の矢印も描きます。`--layout-json` は SVG と、各部品の `id`、`bounds`、`arrow_path` を返します。入力形式の定義は [markits.schema.json](markits.schema.json) を参照してください。
+
+従来の座標指定も利用できます。
 
 ```json
 {
