@@ -1,6 +1,12 @@
 # MarkIts — Semantic Annotation SVG Engine
 
+<p align="center">
+  <img src="markits.png" alt="MarkIts" width="400">
+</p>
+
 **MarkIts** は、スクリーンショットや画像の上に重ねる説明用アノテーションを、意味的な指示（Semantic JSON）から高品質な **SVG** として生成する軽量な Rust ライブラリおよび CLI ツールです。
+
+AI（LLM）がドキュメント作成時にスクリーンショットを装飾する用途に最適です。トークン消費を抑えつつ、安定した品質のアノテーションを生成します。
 
 > **「AIは『何を説明するか』を決め、MarkItsは『どう綺麗に見せるか』を決める」**
 
@@ -24,7 +30,7 @@ MarkIts で利用可能な全 13 種類のマーク（アノテーション）�
 | [`step-arrow`](#4-step-arrow-矢印つき番号--ステップアロー) | 矢印で対象を指し示す番号バッジ（手順案内向け） | `step`, `text`, `style`, `position`, `shadow` |
 | [`label`](#5-label-テキストラベル) | フチ取り（アウトライン）対応の高視認性テキストピル | `text`, `style`, `position`, `outline`, `shadow` |
 | [`rect`](#6-rect-矩形ハイライト) | 領域を半透明カラーと枠線で囲む矩形ハイライト | `style`, `shadow` |
-| [`rounded-rect`](#7-rounded-rect-角丸矩形ハイライト) | 角丸の丸みを自在に調整できるハイライト枠 | `rx`, `ry`, `style`, `shadow` |
+| [`rounded-rect`](#7-rounded-rect-角丸矩形ハイライト) | 角丸の半径（丸み）を自在に調整できるハイライト枠 | `rx`, `ry`, `style`, `shadow` |
 | [`circle`](#8-circle--ellipse-円形楕円ハイライト) | アバターや丸型アイコン・ボタンを囲む円形・楕円ハイライト | `style`, `shadow` |
 | [`arrow`](#9-arrow-ポインター矢印) | 注目対象をダイレクトに指し示す方向指示矢印 | `position`, `style`, `shadow` |
 | [`bezier-arrow`](#10-bezier-arrow-ベジェ矢印--曲線コネクタ) | 始点・中間点・終点を結ぶ曲線矢印。中間にテキスト配置対応（枠あり・枠なし・離れ距離調整対応） | `start`, `control`, `end`, `text`, `box`, `offset`, `position`, `style`, `shadow`, `outline` |
@@ -58,9 +64,9 @@ MarkIts で利用可能な全 13 種類のマーク（アノテーション）�
   - `text` *(必須)*: 表示する説明テキスト
   - `max_width`: テキスト枠の最大幅（40 px 以上）。省略時は画面幅に応じて最大 320 px。日本語と英語を自動改行
   - `style`: セマンティックスタイル（デフォルト: `"primary"`）
-  - `position`: 配置優先ヒント（`"auto"`, `"top"`, `"bottom"`, `"left"`, `"right"`, `"top-left"`, `"top-right"`, `"bottom-left"`, `"bottom-right"`）
-  - `outline`: 白フチ文字（`true` / `false`）
-  - `shadow`: ドロップシャドウ（`true` / `false`）
+  - `position`: 配置優先ヒント（`"auto"`, `"top"`, `"bottom"`, `"left"`, `"right"`, `"top-left"`, `"top-right"`, `"bottom-left"`, `"bottom-right"`、デフォルト: `"auto"`）
+  - `outline`: 白フチ文字（`true` / `false`、デフォルト: `false`）
+  - `shadow`: ドロップシャドウ（`true` / `false`、デフォルト: `false`）
 
 ---
 
@@ -85,8 +91,10 @@ MarkIts で利用可能な全 13 種類のマーク（アノテーション）�
   - `target` *(必須)*: 対象領域
   - `icon`: ピンヘッド内に表示する記号・アイコン・1文字（省略可）
   - `text`: ピンヘッドに連結するダークピルテキスト（省略時はピンヘッド＋ポインターのみ）
-  - `style`: セマンティックスタイル（Skitch マゼンタは `"pink"`）
-  - `position`: ピンの配置方向（`"left"`, `"right"`, `"top"`, `"bottom"`）
+  - `style`: セマンティックスタイル（デフォルト: `"pink"`）
+  - `position`: ピンの配置方向（`"left"`, `"right"`, `"top"`, `"bottom"`、デフォルト: `"auto"`）
+  - `outline`: 白フチ文字（`true` / `false`、デフォルト: `false`）
+  - `shadow`: ドロップシャドウ（`true` / `false`、デフォルト: `false`）
 
 ---
 
@@ -121,14 +129,15 @@ MarkIts で利用可能な全 13 種類のマーク（アノテーション）�
   - `target` *(必須)*: 対象領域
   - `step`: 手順番号（数値 `1`, `2`, ...）
   - `text`: 文字列での指定（`step` の代わりに使用可能）
-  - `style`: セマンティックスタイル（ステップ推奨: `"step"`）
-  - `position`: 配置コーナー（`"top-left"`, `"top-right"`, `"bottom-left"`, `"bottom-right"` など）
-  - `arrow`: `true` に設定すると矢印付き番号（`step-arrow`）として描画
+  - `style`: セマンティックスタイル（ステップ推奨: `"step"`、デフォルト: `"primary"`）
+  - `position`: 配置コーナー（`"top-left"`, `"top-right"`, `"bottom-left"`, `"bottom-right"` など、デフォルト: `"top-left"`）
+  - `arrow`: `true` に設定すると矢印付き番号（`step-arrow`）として描画（デフォルト: `false`）
+  - `shadow`: ドロップシャドウの有無（`true` / `false`、デフォルト: `false`）
 
 ---
 
 #### 4. `step-arrow` (矢印つき番号 / ステップアロー)
-操作マニュアルやチュートリアルで頻出する、**番号バッジ（①、②、1、2...）から対象要素へ向けて矢印が伸びる**アノテーションです（別名: `number-arrow`, `numbered-arrow`, `arrow-badge`）。適切なオフセットで番号マーカーを自動配置し、対象要素へ直接矢印線を引くため、複数ステップの操作順序が一目で伝わります。
+操作マニュアルやチュートリアルで頻出する、**番号バッジ（①、②、1、2...）から対象要素へ向けて矢印が伸びる**アノテーションです（別名: `number-arrow`, `numbered-arrow`, `arrow-badge`）。適切なオフセットで番号マーカーを自動配置し、対象要素へ直接矢印線を伸ばすため、複数ステップの操作順序が一目で伝わります。
 
 ![Step Arrow Preview](docs/images/step_arrow.png)
 
@@ -158,9 +167,9 @@ MarkIts で利用可能な全 13 種類のマーク（アノテーション）�
   - `target` *(必須)*: 対象領域 `[x, y, width, height]`
   - `step`: 手順番号（数値 `1`, `2`, ...）
   - `text`: 任意の文字列（`"①"`, `"A"` など）
-  - `style`: セマンティックスタイル（デフォルト: `"step"` または `"primary"`）
-  - `position`: バッジの配置方向（`"left"`, `"right"`, `"top"`, `"bottom"`, `"auto"` など）
-  - `shadow`: ドロップシャドウ（`true` / `false`）
+  - `style`: セマンティックスタイル（デフォルト: `"step"`）
+  - `position`: バッジの配置方向（`"left"`, `"right"`, `"top"`, `"bottom"`, `"auto"` など、デフォルト: `"auto"`）
+  - `shadow`: ドロップシャドウの有無（`true` / `false`、デフォルト: `false`）
 
 > [!TIP]
 > `type: "step-arrow"` 以外にも、既存の `badge` に `"arrow": true` を指定するか、または `arrow` に `"step": 1` を指定しても自動的に矢印つき番号として描画されます。
@@ -186,9 +195,10 @@ MarkIts で利用可能な全 13 種類のマーク（アノテーション）�
 - **主なプロパティ**:
   - `target` *(必須)*: 対象領域
   - `text` *(必須)*: 表示テキスト（改行 `\n` 対応）
-  - `style`: セマンティックスタイル
-  - `position`: 配置方向（`"top"`, `"bottom"`, `"left"`, `"right"` など）
-  - `outline`: 白フチ取りの有無
+  - `style`: セマンティックスタイル（デフォルト: `"primary"`）
+  - `position`: 配置方向（`"top"`, `"bottom"`, `"left"`, `"right"` など、デフォルト: `"top"`）
+  - `outline`: 白フチ取りの有無（`true` / `false`、デフォルト: `false`）
+  - `shadow`: ドロップシャドウの有無（`true` / `false`、デフォルト: `false`）
 
 ---
 
@@ -207,13 +217,13 @@ MarkIts で利用可能な全 13 種類のマーク（アノテーション）�
 
 - **主なプロパティ**:
   - `target` *(必須)*: 対象矩形領域 `[x, y, width, height]`
-  - `style`: セマンティックスタイル
-  - `shadow`: ドロップシャドウの有無
+  - `style`: セマンティックスタイル（デフォルト: `"primary"`）
+  - `shadow`: ドロップシャドウの有無（`true` / `false`、デフォルト: `false`）
 
 ---
 
 #### 7. `rounded-rect` (角丸矩形ハイライト)
-角丸を持つ UI 要素（ドロップゾーン、モーダル、ボタン、タグなど）にぴたりとフィットするハイライト枠です（別名: `rounded_rect`）。`rx`、`ry` で丸み半径を細かく調整できます。
+角丸を持つ UI 要素（ドロップゾーン、モーダル、ボタン、タグなど）にぴたりとフィットするハイライト枠です（別名: `rounded_rect`）。`rx`、`ry` で角丸の半径（丸み）を自由に調整できます。
 
 ![Rounded Rect Preview](docs/images/rounded_rect.png)
 
@@ -231,7 +241,8 @@ MarkIts で利用可能な全 13 種類のマーク（アノテーション）�
   - `target` *(必須)*: 対象領域
   - `rx`: 水平方向の角丸半径（デフォルト: `8.0`）
   - `ry`: 垂直方向の角丸半径（デフォルト: `8.0`）
-  - `style`: セマンティックスタイル
+  - `style`: セマンティックスタイル（デフォルト: `"primary"`）
+  - `shadow`: ドロップシャドウの有無（`true` / `false`、デフォルト: `false`）
 
 ---
 
@@ -250,7 +261,8 @@ MarkIts で利用可能な全 13 種類のマーク（アノテーション）�
 
 - **主なプロパティ**:
   - `target` *(必須)*: 対象領域（正円の場合は幅＝高さ）
-  - `style`: セマンティックスタイル
+  - `style`: セマンティックスタイル（デフォルト: `"primary"`）
+  - `shadow`: ドロップシャドウの有無（`true` / `false`、デフォルト: `false`）
 
 ---
 
@@ -270,8 +282,9 @@ MarkIts で利用可能な全 13 種類のマーク（アノテーション）�
 
 - **主なプロパティ**:
   - `target` *(必須)*: 対象領域
-  - `position`: 矢印の起点方向（`"left"`, `"right"`, `"top"`, `"bottom"`, `"bottom-left"` など）
-  - `style`: セマンティックスタイル
+  - `position`: 矢印の起点方向（`"left"`, `"right"`, `"top"`, `"bottom"`, `"bottom-left"` など、デフォルト: `"auto"`）
+  - `style`: セマンティックスタイル（デフォルト: `"primary"`）
+  - `shadow`: ドロップシャドウの有無（`true` / `false`、デフォルト: `false`）
 
 ---
 
@@ -311,10 +324,10 @@ MarkIts で利用可能な全 13 種類のマーク（アノテーション）�
   - `control` (`mid`, `middle`, `via`, `p1`, `intermediate`): 曲線のカーブを制御する中間制御点 `[x, y]`（省略時は始点・終点の中間上方に自動配置）
   - `end` (`to`, `p2`): 矢頭（矢印の先）が向かう終点座標 `[x, y]`
   - `text`: 矢印の中間に表示する説明ラベル（省略可）
-  - `offset` (`gap`, `distance`): **矢印とテキストの離れる距離（ピクセル単位）**。数値を指定して自由に離れ具合を調整可能（例: `12`, `16`, `24`。省略時は `box: true` で 8px、`box: false` で 6px）
-  - `position`: テキストの配置位置（`"auto"`: カーブ外側に自動配置 / `"top"`: 曲線の上 / `"bottom"`: 曲線の内側・下 / `"center"`: 曲線直上）
+  - `offset` (`gap`, `distance`): **矢印線とテキストの離れる距離（ピクセル単位）**。数値を指定して自由に離れ具合を調整可能（例: `12`, `16`, `24`。省略時は `box: true` で 8px、`box: false` で 6px）
+  - `position`: テキストの配置位置（`"auto"`: 曲線外側に自動配置 / `"top"`: 曲線の上 / `"bottom"`: 曲線の内側・下 / `"center"`: 曲線直上、デフォルト: `"auto"`）
   - `box` (`boxed`, `enclosure`, `pill`, `frame`): テキストの背景枠・囲いの有無（`true`: 枠あり角丸ピル / `false`: 枠なし浮動テキスト、デフォルト: `true`）
-  - `t` (`ratio`, `progress`): 曲線上の配置比率（`0.0` 〜 `1.0`、デフォルト: `0.5` 中央）
+  - `t` (`ratio`, `progress`): 曲線上の配置比率（`0.0` 〜 `1.0`、デフォルト: `0.5`）
   - `style`: セマンティックスタイル（デフォルト: `"primary"`）
   - `shadow`: ドロップシャドウ（`true` / `false`、デフォルト: `true`）
   - `outline`: 白フチ取り（`true` / `false`、デフォルト: `true`）
@@ -337,7 +350,8 @@ MarkIts で利用可能な全 13 種類のマーク（アノテーション）�
 
 - **主なプロパティ**:
   - `target` *(必須)*: 中心位置を求めるための対象領域
-  - `style`: セマンティックスタイル
+  - `style`: セマンティックスタイル（デフォルト: `"primary"`）
+  - `shadow`: ドロップシャドウの有無（`true` / `false`、デフォルト: `false`）
 
 ---
 
@@ -356,7 +370,7 @@ MarkIts で利用可能な全 13 種類のマーク（アノテーション）�
 
 - **主なプロパティ**:
   - `target` *(必須)*: 水平線は `[x, y, width, thickness]`、垂直線は `[x, y, thickness, height]`
-  - `style`: セマンティックスタイル
+  - `style`: セマンティックスタイル（デフォルト: `"primary"`）
 
 ---
 
@@ -375,7 +389,7 @@ MarkIts で利用可能な全 13 種類のマーク（アノテーション）�
 
 - **主なプロパティ**:
   - `target` *(必須)*: くり抜く対象領域
-  - `style`: くり抜き枠の点線カラーを決めるセマンティックスタイル
+  - `style`: くり抜き枠の点線カラーを決めるセマンティックスタイル（デフォルト: `"primary"`）
 
 ---
 
