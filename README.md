@@ -1,5 +1,9 @@
 # MarkIts — Semantic Annotation SVG Engine
 
+<p align="center">
+  <img src="markits.png" alt="MarkIts" width="400">
+</p>
+
 **MarkIts** は、スクリーンショットや画像の上に重ねる説明用アノテーションを、意味的な指示（Semantic JSON）から高品質な **SVG** として生成する軽量な Rust ライブラリおよび CLI ツールです。
 
 > **「AIは『何を説明するか』を決め、MarkItsは『どう綺麗に見せるか』を決める」**
