@@ -1,394 +1,314 @@
-//! Resolve AI-facing input into the existing coordinate-based scene model.
+//! Converts named targets and high-level instructions into renderable annotations.
 use crate::error::{MarkitsError, Result};
-use crate::model::{Scene, TargetRect};
+use crate::model::TargetRect;
 use serde_json::{Map, Value, json};
+use std::collections::{HashMap, HashSet};
 
-pub struct ResolvedInput {
-    pub scene: Scene,
-    /// One source ID per expanded annotation, in drawing order.
-    pub source_ids: Vec<String>,
+pub struct PreparedInput {
+    pub scene: Value,
+    pub ids: Vec<String>,
 }
 
 fn invalid(message: impl Into<String>) -> MarkitsError {
     MarkitsError::Validation(message.into())
 }
 
-fn distance(a: &str, b: &str) -> usize {
-    let mut row: Vec<usize> = (0..=b.chars().count()).collect();
-    for (i, ac) in a.chars().enumerate() {
-        let mut previous = row[0];
-        row[0] = i + 1;
-        for (j, bc) in b.chars().enumerate() {
-            let old = row[j + 1];
-            row[j + 1] = (row[j + 1] + 1)
-                .min(row[j] + 1)
-                .min(previous + usize::from(ac != bc));
-            previous = old;
+fn suggestion(value: &str, options: &[&str]) -> Option<String> {
+    fn distance(a: &str, b: &str) -> usize {
+        let mut costs: Vec<usize> = (0..=b.chars().count()).collect();
+        for (i, ca) in a.chars().enumerate() {
+            let mut previous = i;
+            costs[0] = i + 1;
+            for (j, cb) in b.chars().enumerate() {
+                let old = costs[j + 1];
+                costs[j + 1] = (costs[j + 1] + 1)
+                    .min(costs[j] + 1)
+                    .min(previous + usize::from(ca != cb));
+                previous = old;
+            }
         }
+        costs[b.chars().count()]
     }
-    row[b.chars().count()]
+    options
+        .iter()
+        .map(|option| (*option, distance(value, option)))
+        .min_by_key(|(_, score)| *score)
+        .and_then(|(option, score)| (score <= 2).then(|| option.to_string()))
 }
 
-fn validate_fields(map: &Map<String, Value>, allowed: &[&str], path: &str) -> Result<()> {
-    for key in map.keys() {
-        if !allowed.contains(&key.as_str()) {
-            let suggestion = allowed
-                .iter()
-                .min_by_key(|candidate| distance(key, candidate))
-                .filter(|candidate| distance(key, candidate) <= 2)
-                .map(|candidate| format!("; did you mean {candidate:?}?"))
-                .unwrap_or_default();
+fn validate_rect(rect: &TargetRect, value: &Value, path: &str) -> Result<()> {
+    let coordinate = |index: usize, field: &str| {
+        if value.is_array() {
+            format!("{path}[{index}]")
+        } else {
+            format!("{path}.{field}")
+        }
+    };
+    for (index, field, number) in [
+        (0, "x", rect.x),
+        (1, "y", rect.y),
+        (2, "width", rect.width),
+        (3, "height", rect.height),
+    ] {
+        if !number.is_finite() {
             return Err(invalid(format!(
-                "{path}: unknown field {key:?}{suggestion}"
+                "{} must be finite",
+                coordinate(index, field)
             )));
         }
+    }
+    if rect.width <= 0.0 {
+        return Err(invalid(format!("{} must be > 0", coordinate(2, "width"))));
+    }
+    if rect.height <= 0.0 {
+        return Err(invalid(format!("{} must be > 0", coordinate(3, "height"))));
     }
     Ok(())
 }
 
-fn rect(value: &Value, path: &str) -> Result<TargetRect> {
-    if let Some(map) = value.as_object() {
-        validate_fields(map, &["x", "y", "width", "height", "w", "h"], path)?;
+fn named_target(value: &Value, targets: &HashMap<String, TargetRect>, path: &str) -> Result<Value> {
+    if let Some(name) = value.as_str() {
+        let rect = targets.get(name).ok_or_else(|| {
+            let mut known: Vec<&str> = targets.keys().map(String::as_str).collect();
+            known.sort_unstable();
+            let hint = suggestion(name, &known)
+                .map(|candidate| format!(" Did you mean '{candidate}'?"))
+                .unwrap_or_default();
+            invalid(format!("{path}: unknown target '{name}'.{hint}"))
+        })?;
+        return Ok(serde_json::to_value(rect)?);
     }
-    let parsed: TargetRect =
-        serde_json::from_value(value.clone()).map_err(|e| invalid(format!("{path}: {e}")))?;
-    for (name, number) in [
-        ("x", parsed.x),
-        ("y", parsed.y),
-        ("width", parsed.width),
-        ("height", parsed.height),
-    ] {
-        if !number.is_finite() {
-            return Err(invalid(format!("{path}.{name} must be finite")));
+    let rect: TargetRect = serde_json::from_value(value.clone())
+        .map_err(|error| invalid(format!("{path}: {error}")))?;
+    validate_rect(&rect, value, path)?;
+    Ok(value.clone())
+}
+
+fn check_key(value: &str, path: &str, options: &[&str]) -> Result<()> {
+    if options.contains(&value) {
+        return Ok(());
+    }
+    let hint = suggestion(value, options)
+        .map(|candidate| format!(" Did you mean '{candidate}'?"))
+        .unwrap_or_default();
+    Err(invalid(format!("{path}: unknown value '{value}'.{hint}")))
+}
+
+fn instruction_parts(
+    object: &Map<String, Value>,
+    path: &str,
+    targets: &HashMap<String, TargetRect>,
+) -> Result<Vec<Value>> {
+    for key in object.keys() {
+        if ![
+            "type",
+            "target",
+            "destination",
+            "action",
+            "text",
+            "style",
+            "position",
+            "max_width",
+            "outline",
+            "shadow",
+        ]
+        .contains(&key.as_str())
+        {
+            return Err(invalid(format!("{path}: unknown field '{key}'")));
         }
     }
-    if parsed.width <= 0.0 {
-        let field = if value.is_array() { "[2]" } else { ".width" };
-        return Err(invalid(format!("{path}{field} must be > 0")));
+    let action = object
+        .get("action")
+        .and_then(Value::as_str)
+        .ok_or_else(|| invalid(format!("{path}.action: expected an action string")))?;
+    check_key(
+        action,
+        &format!("{path}.action"),
+        &[
+            "click",
+            "enter",
+            "select",
+            "drag",
+            "attention",
+            "warning",
+            "compare",
+        ],
+    )?;
+    let target = object
+        .get("target")
+        .cloned()
+        .ok_or_else(|| invalid(format!("{path}.target: required")))?;
+    let text = object
+        .get("text")
+        .and_then(Value::as_str)
+        .ok_or_else(|| invalid(format!("{path}.text: expected a string")))?;
+    let style = object
+        .get("style")
+        .and_then(Value::as_str)
+        .unwrap_or(if action == "warning" {
+            "warning"
+        } else {
+            "primary"
+        });
+    let position = object
+        .get("position")
+        .and_then(Value::as_str)
+        .unwrap_or("auto");
+    let mut parts = Vec::new();
+    if matches!(action, "click" | "attention") {
+        parts.push(json!({"type":"spotlight","target":target,"style":style}));
+    } else if matches!(action, "enter" | "select" | "drag" | "warning" | "compare") {
+        parts.push(json!({"type":"rounded-rect","target":target,"style":style}));
     }
-    if parsed.height <= 0.0 {
-        let field = if value.is_array() { "[3]" } else { ".height" };
-        return Err(invalid(format!("{path}{field} must be > 0")));
+    let mut callout_target = target.clone();
+    if matches!(action, "drag" | "compare") {
+        let destination = object.get("destination").ok_or_else(|| {
+            invalid(format!(
+                "{path}.destination: required for action '{action}'"
+            ))
+        })?;
+        let source_value = named_target(&target, targets, &format!("{path}.target"))?;
+        let destination_value = named_target(destination, targets, &format!("{path}.destination"))?;
+        let source: TargetRect = serde_json::from_value(source_value)?;
+        let dest: TargetRect = serde_json::from_value(destination_value)?;
+        parts.push(json!({"type":"rounded-rect","target":destination,"style":style}));
+        if action == "drag" {
+            let start = [source.center_x(), source.center_y()];
+            let end = [dest.center_x(), dest.center_y()];
+            let control = [(start[0] + end[0]) / 2.0, (start[1] + end[1]) / 2.0 - 32.0];
+            parts.push(json!({"type":"bezier-arrow","start":start,"control":control,"end":end,"style":style}));
+        }
+        callout_target = destination.clone();
+    } else if object.contains_key("destination") {
+        return Err(invalid(format!(
+            "{path}.destination: only valid for drag or compare"
+        )));
     }
-    Ok(parsed)
+    let mut callout = json!({"type":"callout","target":callout_target,"text":text,"style":style,"position":position});
+    if let Some(width) = object.get("max_width") { callout["max_width"] = width.clone(); }
+    if let Some(outline) = object.get("outline") { callout["outline"] = outline.clone(); }
+    if let Some(shadow) = object.get("shadow") { callout["shadow"] = shadow.clone(); }
+    parts.push(callout);
+    Ok(parts)
 }
 
-fn resolve_target(value: &Value, targets: &Map<String, Value>, path: &str) -> Result<Value> {
-    let value = match value.as_str() {
-        Some(name) => targets
-            .get(name)
-            .ok_or_else(|| invalid(format!("{path}: unknown target {name:?}")))?,
-        None => value,
-    };
-    let r = rect(value, path)?;
-    Ok(json!([r.x, r.y, r.width, r.height]))
-}
-
-fn push_annotation(value: Value, id: &str, output: &mut Vec<Value>, ids: &mut Vec<String>) {
-    output.push(value);
-    ids.push(id.to_string());
-}
-
-/// Parses and resolves named targets and instructions before normal Scene parsing.
-pub fn resolve_json(json_str: &str) -> Result<ResolvedInput> {
+/// Parses the public semantic document while retaining one ID per rendered annotation.
+pub fn prepare(json_str: &str) -> Result<PreparedInput> {
     let mut root: Value = serde_json::from_str(json_str)?;
     let object = root
         .as_object_mut()
-        .ok_or_else(|| invalid("scene must be an object"))?;
-    validate_fields(
-        object,
-        &["canvas", "shadow", "targets", "annotations"],
-        "scene",
-    )?;
-    if let Some(canvas) = object.get("canvas").and_then(Value::as_object) {
-        validate_fields(canvas, &["width", "height"], "canvas")?;
+        .ok_or_else(|| invalid("scene: expected a JSON object"))?;
+    for key in object.keys() {
+        if !["canvas", "shadow", "annotations", "targets"].contains(&key.as_str()) {
+            return Err(invalid(format!("scene: unknown field '{key}'")));
+        }
     }
-    let targets = object.remove("targets").unwrap_or_else(|| json!({}));
-    let targets = targets
+    let raw_targets = object.remove("targets").unwrap_or_else(|| json!({}));
+    let raw_targets = raw_targets
         .as_object()
-        .ok_or_else(|| invalid("targets must be an object"))?;
-    for (name, value) in targets {
-        rect(value, &format!("targets.{name}"))?;
+        .ok_or_else(|| invalid("targets: expected an object"))?;
+    let mut targets = HashMap::new();
+    for (name, value) in raw_targets {
+        if name.is_empty() {
+            return Err(invalid("targets: names must not be empty"));
+        }
+        let rect: TargetRect = serde_json::from_value(value.clone())
+            .map_err(|error| invalid(format!("targets.{name}: {error}")))?;
+        validate_rect(&rect, value, &format!("targets.{name}"))?;
+        targets.insert(name.clone(), rect);
     }
-    let annotations = object
-        .entry("annotations")
-        .or_insert_with(|| json!([]))
-        .as_array_mut()
-        .ok_or_else(|| invalid("annotations must be an array"))?;
-    let mut expanded = Vec::new();
+    let raw_annotations = match object.get("annotations") {
+        None => Vec::new(),
+        Some(Value::Array(items)) => items.clone(),
+        Some(_) => return Err(invalid("annotations: expected an array")),
+    };
+    let mut annotations = Vec::new();
     let mut ids = Vec::new();
-    let mut seen_ids = std::collections::HashSet::new();
-    for (index, annotation) in annotations.drain(..).enumerate() {
-        let mut ann = annotation
+    let mut used_ids = HashSet::new();
+    for (index, item) in raw_annotations.iter().enumerate() {
+        let path = format!("annotations[{index}]");
+        let mut ann = item
             .as_object()
             .cloned()
-            .ok_or_else(|| invalid(format!("annotations[{index}] must be an object")))?;
-        let kind = ann
-            .get("type")
-            .and_then(Value::as_str)
-            .ok_or_else(|| invalid(format!("annotations[{index}].type is required")))?
-            .to_string();
-        let common = ["type", "id", "target", "style"];
-        let extra: &[&str] = match kind.as_str() {
-            "callout" | "label" => &["text", "position", "outline", "shadow"],
-            "pin" | "pin-callout" | "pin_callout" => {
-                &["text", "icon", "position", "outline", "shadow"]
-            }
-            "badge" => &["step", "text", "position", "arrow", "shadow"],
-            "step-arrow" | "step_arrow" | "number-arrow" | "number_arrow" | "numbered-arrow"
-            | "numbered_arrow" | "arrow-badge" | "badge-arrow" | "step-pin" | "arrow" => {
-                &["step", "text", "position", "shadow"]
-            }
-            "rounded-rect" | "rounded_rect" => &["rx", "ry", "shadow"],
-            "bezier-arrow" | "bezier_arrow" | "curved-arrow" | "curved_arrow" | "curve-arrow"
-            | "curve_arrow" | "bezier" => &[
-                "start",
-                "from",
-                "p0",
-                "start_point",
-                "control",
-                "mid",
-                "middle",
-                "via",
-                "p1",
-                "intermediate",
-                "control_point",
-                "end",
-                "to",
-                "p2",
-                "end_point",
-                "text",
-                "position",
-                "text_position",
-                "offset",
-                "gap",
-                "distance",
-                "text_offset",
-                "spacing",
-                "t",
-                "ratio",
-                "progress",
-                "along",
-                "outline",
-                "boxed",
-                "box",
-                "enclosure",
-                "frame",
-                "pill",
-                "badge",
-                "background",
-                "shadow",
-            ],
-            "instruction" => &[
-                "action", "text", "position", "outline", "to", "with", "shadow",
-            ],
-            "rect" | "circle" | "ellipse" | "bullseye" => &["shadow"],
-            "spotlight" | "divider" => &[],
-            _ => {
-                return Err(invalid(format!(
-                    "annotations[{index}].type: unknown type {kind:?}"
-                )));
-            }
-        };
-        let mut allowed = common.to_vec();
-        allowed.extend_from_slice(extra);
-        validate_fields(&ann, &allowed, &format!("annotations[{index}]"))?;
-        if kind != "bezier-arrow"
-            && !matches!(
-                kind.as_str(),
-                "bezier_arrow"
-                    | "curved-arrow"
-                    | "curved_arrow"
-                    | "curve-arrow"
-                    | "curve_arrow"
-                    | "bezier"
-            )
-            && !ann.contains_key("target")
-        {
-            return Err(invalid(format!("annotations[{index}].target is required")));
-        }
-        if matches!(kind.as_str(), "callout" | "label") && !ann.contains_key("text") {
-            return Err(invalid(format!("annotations[{index}].text is required")));
-        }
-        for key in [
-            "start",
-            "from",
-            "p0",
-            "start_point",
-            "control",
-            "mid",
-            "middle",
-            "via",
-            "p1",
-            "intermediate",
-            "control_point",
-            "end",
-            "to",
-            "p2",
-            "end_point",
-        ] {
-            if kind != "instruction" {
-                if let Some(value) = ann.get(key) {
-                    if let Some(map) = value.as_object() {
-                        validate_fields(map, &["x", "y"], &format!("annotations[{index}].{key}"))?;
-                    }
-                }
-            }
-        }
-        for key in ["rx", "ry", "t"] {
-            if let Some(value) = ann.get(key) {
-                let number = value.as_f64().ok_or_else(|| {
-                    invalid(format!("annotations[{index}].{key} must be a number"))
-                })?;
-                if number < 0.0 || (key == "t" && number > 1.0) {
-                    return Err(invalid(format!(
-                        "annotations[{index}].{key} is out of range"
-                    )));
-                }
-            }
-        }
-        if let Some(style) = ann.get("style").and_then(Value::as_str) {
-            const STYLES: &[&str] = &[
-                "primary",
-                "secondary",
-                "warning",
-                "danger",
-                "info",
-                "step",
-                "pink",
-            ];
-            if !STYLES.contains(&style) {
-                let suggestion = STYLES
-                    .iter()
-                    .min_by_key(|candidate| distance(style, candidate))
-                    .filter(|candidate| distance(style, candidate) <= 2)
-                    .map(|candidate| format!(" Did you mean {candidate:?}?"))
-                    .unwrap_or_default();
-                return Err(invalid(format!(
-                    "annotations[{index}].style: unknown style {style:?}.{suggestion}"
-                )));
-            }
-        }
+            .ok_or_else(|| invalid(format!("{path}: expected an object")))?;
         let id = ann
             .remove("id")
-            .map(|v| {
-                v.as_str()
+            .map(|value| {
+                value
+                    .as_str()
                     .map(str::to_owned)
-                    .ok_or_else(|| invalid(format!("annotations[{index}].id must be a string")))
+                    .ok_or_else(|| invalid(format!("{path}.id: expected a string")))
             })
             .transpose()?
             .unwrap_or_else(|| format!("annotation-{index}"));
-        if id.is_empty() || !seen_ids.insert(id.clone()) {
-            return Err(invalid(format!(
-                "annotations[{index}].id must be nonempty and unique"
-            )));
+        if id.is_empty() || !used_ids.insert(id.clone()) {
+            return Err(invalid(format!("{path}.id: must be nonempty and unique")));
         }
-        if let Some(target) = ann.get("target") {
-            ann.insert(
-                "target".into(),
-                resolve_target(target, targets, &format!("annotations[{index}].target"))?,
-            );
-        }
-        if kind == "instruction" {
-            for key in ["to", "with"] {
-                if let Some(value) = ann.get(key) {
-                    ann.insert(
-                        key.into(),
-                        resolve_target(value, targets, &format!("annotations[{index}].{key}"))?,
-                    );
-                }
-            }
-        }
-        if kind == "instruction" {
-            let action = ann
-                .get("action")
-                .and_then(Value::as_str)
-                .ok_or_else(|| invalid(format!("annotations[{index}].action is required")))?;
-            let target = ann
-                .get("target")
-                .ok_or_else(|| invalid(format!("annotations[{index}].target is required")))?
-                .clone();
-            let text = ann.get("text").and_then(Value::as_str).unwrap_or(action);
-            let style = ann.get("style").cloned().unwrap_or_else(|| {
-                if action == "warning" {
-                    json!("warning")
-                } else {
-                    json!("primary")
-                }
-            });
-            let position = ann
-                .get("position")
-                .cloned()
-                .unwrap_or_else(|| json!("auto"));
-            let shadow = ann.get("shadow").cloned().unwrap_or(Value::Null);
-            let outline = ann.get("outline").cloned().unwrap_or(Value::Null);
-            match action {
-                "click" | "attention" | "warning" => {
-                    push_annotation(
-                        json!({"type":"spotlight","target":target,"style":style}),
-                        &id,
-                        &mut expanded,
-                        &mut ids,
-                    );
-                }
-                "select" => {
-                    push_annotation(
-                        json!({"type":"rect","target":target,"style":style}),
-                        &id,
-                        &mut expanded,
-                        &mut ids,
-                    );
-                }
-                "drag" => {
-                    let to = ann.get("to").ok_or_else(|| {
-                        invalid(format!("annotations[{index}].to is required for drag"))
-                    })?;
-                    let from_rect = rect(&target, &format!("annotations[{index}].target"))?;
-                    let to_rect = rect(to, &format!("annotations[{index}].to"))?;
-                    let start = [from_rect.center_x(), from_rect.center_y()];
-                    let end = [to_rect.center_x(), to_rect.center_y()];
-                    let control = [(start[0] + end[0]) / 2.0, (start[1] + end[1]) / 2.0 - 40.0];
-                    push_annotation(
-                        json!({"type":"bezier-arrow","start":start,"control":control,"end":end,"style":style}),
-                        &id,
-                        &mut expanded,
-                        &mut ids,
-                    );
-                }
-                "compare" => {
-                    let with = ann.get("with").ok_or_else(|| {
-                        invalid(format!("annotations[{index}].with is required for compare"))
-                    })?;
-                    push_annotation(
-                        json!({"type":"callout","target":with,"text":text,"style":style,"position":position}),
-                        &id,
-                        &mut expanded,
-                        &mut ids,
-                    );
-                }
-                "enter" => {}
-                _ => {
-                    return Err(invalid(format!(
-                        "annotations[{index}].action: unknown action {action:?}"
-                    )));
-                }
-            }
-            push_annotation(
-                json!({"type":"callout","target":target,"text":text,"style":style,
-                "position":position,"shadow":shadow,"outline":outline}),
-                &id,
-                &mut expanded,
-                &mut ids,
-            );
+        let is_instruction = ann
+            .get("type")
+            .and_then(Value::as_str)
+            .ok_or_else(|| invalid(format!("{path}.type: expected a string")))?
+            == "instruction";
+        let expanded = if is_instruction {
+            instruction_parts(&ann, &path, &targets)?
         } else {
-            push_annotation(Value::Object(ann), &id, &mut expanded, &mut ids);
+            vec![Value::Object(ann)]
+        };
+        for (part_index, mut part) in expanded.into_iter().enumerate() {
+            let part_obj = part.as_object_mut().expect("annotation parts are objects");
+            if let Some(target) = part_obj.get("target") {
+                part_obj.insert(
+                    "target".to_owned(),
+                    named_target(target, &targets, &format!("{path}.target"))?,
+                );
+            }
+            if let Some(style) = part_obj.get("style").and_then(Value::as_str) {
+                check_key(
+                    style,
+                    &format!("{path}.style"),
+                    &[
+                        "primary",
+                        "secondary",
+                        "warning",
+                        "danger",
+                        "info",
+                        "step",
+                        "pink",
+                    ],
+                )?;
+            }
+            if let Some(position) = part_obj.get("position").and_then(Value::as_str) {
+                check_key(
+                    position,
+                    &format!("{path}.position"),
+                    &[
+                        "auto",
+                        "top",
+                        "bottom",
+                        "left",
+                        "right",
+                        "top-left",
+                        "top-right",
+                        "bottom-left",
+                        "bottom-right",
+                        "center",
+                    ],
+                )?;
+            }
+            ids.push(if is_instruction {
+                let suffix = match part.get("type").and_then(Value::as_str) {
+                    Some("callout") => "callout".to_owned(),
+                    Some("bezier-arrow") => "path".to_owned(),
+                    _ if part_index == 0 => "focus".to_owned(),
+                    _ => format!("focus-{}", part_index + 1),
+                };
+                format!("{id}:{suffix}")
+            } else {
+                id.clone()
+            });
+            annotations.push(part);
         }
     }
-    *annotations = expanded;
-    let scene: Scene = serde_json::from_value(root)?;
-    scene.validate()?;
-    Ok(ResolvedInput {
-        scene,
-        source_ids: ids,
-    })
+    object.insert("annotations".to_owned(), Value::Array(annotations));
+    Ok(PreparedInput { scene: root, ids })
 }

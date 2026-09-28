@@ -23,7 +23,7 @@ pub struct Theme {
 impl Default for Theme {
     fn default() -> Self {
         Self {
-            font_family: "system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif",
+            font_family: "system-ui, -apple-system, BlinkMacSystemFont, 'Noto Sans CJK JP', 'Noto Sans JP', 'Hiragino Kaku Gothic ProN', 'Yu Gothic', Meiryo, sans-serif",
             font_size: 14.0,
             corner_radius: 6.0,
             spotlight_backdrop: "#000000",

@@ -48,11 +48,20 @@ AI（LLM）がドキュメント作成時にスクリーンショットを装飾
 
 生成の前に画像の寸法を知りたい場合は `markits inspect screenshot.png`、注釈を検証する場合は `markits validate annotations.json --image screenshot.png` を使えます。画像モードでは JSON の `canvas` を省略できます。
 
+画像の一部だけを使う場合は、注釈を付ける前に実際の画素を切り抜けます。
+
+```sh
+markits crop screenshot.png --x 120 --y 80 --width 640 --height 400 --output cropped.png
+markits inspect cropped.png
+```
+
+出力は 640 × 400 ピクセルの PNG になります。切り抜き後の注釈座標は、新しい画像の左上を原点に指定してください。
+
 ---
 
 ## 🔖 対応マーク（アノテーション）一覧 & スクリーンショット
 
-MarkIts で利用可能な 13 種類の描画マーク（アノテーション）の一覧です。高レベルの `instruction` も利用できます。UI 上の対象要素（`target`）に合わせて自動レイアウトされ、視認性の高いアノテーション SVG を出力します。
+MarkIts で利用可能な全 13 種類のマーク（アノテーション）の一覧です。UI 上の対象要素（`target`）に合わせて自動レイアウトされ、視認性の高いアノテーション SVG を出力します。
 
 ### マーククイック一覧表
 
@@ -77,7 +86,7 @@ MarkIts で利用可能な 13 種類の描画マーク（アノテーション�
 ### 各マークの詳細仕様 & JSON 例
 
 #### 1. `callout` (コールアウト)
-ターゲット要素（ボタンや入力欄など）を自動で指し示す矢印と、説明文を入れたテキストピルを同時に生成します。8方向の候補からキャンバスはみ出しや他要素との重複を避ける決定論的自動レイアウトが行われます。
+ターゲット要素を指す矢印と説明文を生成します。複数の callout がある場合は全候補を採点し、画面外へのはみ出し、ラベルや target との重なり、矢印の交差を抑える配置に更新します。
 
 ![Callout Preview](docs/images/callout.png)
 
@@ -96,9 +105,10 @@ MarkIts で利用可能な 13 種類の描画マーク（アノテーション�
 - **主なプロパティ**:
   - `target` *(必須)*: 対象領域 `[x, y, width, height]` または `{"x": 220, "y": 115, "width": 200, "height": 48}`
   - `text` *(必須)*: 表示する説明テキスト
+  - `max_width`: テキスト枠の最大幅（40 px 以上）。省略時は画面幅に応じて最大 320 px。日本語と英語を自動改行
   - `style`: セマンティックスタイル（デフォルト: `"primary"`）
   - `position`: 配置優先ヒント（`"auto"`, `"top"`, `"bottom"`, `"left"`, `"right"`, `"top-left"`, `"top-right"`, `"bottom-left"`, `"bottom-right"`、デフォルト: `"auto"`）
-  - `outline`: 白フチ文字（`true` / `false`、デフォルト: `false`）
+  - `outline`: 白フチ文字（`true` / `false`、デフォルト: `true`）
   - `shadow`: ドロップシャドウ（`true` / `false`、デフォルト: `false`）
 
 ---
@@ -126,7 +136,7 @@ MarkIts で利用可能な 13 種類の描画マーク（アノテーション�
   - `text`: ピンヘッドに連結するダークピルテキスト（省略時はピンヘッド＋ポインターのみ）
   - `style`: セマンティックスタイル（デフォルト: `"pink"`）
   - `position`: ピンの配置方向（`"left"`, `"right"`, `"top"`, `"bottom"`、デフォルト: `"auto"`）
-  - `outline`: 白フチ文字（`true` / `false`、デフォルト: `false`）
+  - `outline`: 白フチ文字（`true` / `false`、デフォルト: `true`）
   - `shadow`: ドロップシャドウ（`true` / `false`、デフォルト: `false`）
 
 ---
@@ -230,7 +240,7 @@ MarkIts で利用可能な 13 種類の描画マーク（アノテーション�
   - `text` *(必須)*: 表示テキスト（改行 `\n` 対応）
   - `style`: セマンティックスタイル（デフォルト: `"primary"`）
   - `position`: 配置方向（`"top"`, `"bottom"`, `"left"`, `"right"` など、デフォルト: `"top"`）
-  - `outline`: 白フチ取りの有無（`true` / `false`、デフォルト: `false`）
+  - `outline`: 白フチ取りの有無（`true` / `false`、デフォルト: `true`）
   - `shadow`: ドロップシャドウの有無（`true` / `false`、デフォルト: `false`）
 
 ---
@@ -461,19 +471,6 @@ MarkIts では、色コードを直接指定する代わりに、デザインシ
    "target": { "x": 100, "y": 150, "width": 240, "height": 50 }
    // または省略形 {"x": 100, "y": 150, "w": 240, "h": 50}
    ```
-3. **名前付き target**：トップレベルの `targets` に座標を定義し、注釈から名前で参照できます。
-   ```json
-   {
-     "canvas": {"width": 960, "height": 720},
-     "targets": {"save-button": [820, 640, 100, 36]},
-     "annotations": [
-       {"id": "step1", "type": "instruction", "action": "click",
-        "target": "save-button", "text": "保存をクリック"}
-     ]
-   }
-   ```
-
-`instruction` の `action` は `click`, `enter`, `select`, `drag`, `attention`, `warning`, `compare` です。`click`, `attention`, `warning` は spotlight と callout、`select` は rect と callout に展開されます。`drag` は移動先を `to`、`compare` は比較先を `with` で指定します。`to` と `with` も名前付き target を参照できます。
 
 ### 配置優先ヒント (`position`)
 `callout`, `pin`, `badge`, `step-arrow`, `label`, `arrow` で指定可能です：
@@ -517,27 +514,38 @@ markits render input.json --image screenshot.png --output annotated.png
 # 画像の寸法と形式を確認
 markits inspect screenshot.png
 
-# SVG と配置結果を JSON で取得
-markits render input.json --format layout-json > layout.json
-
-# 入力を検証
-markits validate input.json
-
-# canvas を省略した JSON を元画像と一緒に検証
-markits validate input.json --image screenshot.png
-
-# AI/LLM 向けの Markdown マニュアルを表示（markits -h からも案内）
-markits manual
-
 # パイプ (stdin) 経由で生成
 cat input.json | markits render - > overlay.svg
-```
 
-配置結果の各要素には `id`, `source_id`, `kind`, `bounds` と、矢印がある場合は `arrow_path` が含まれます。`bounds` はラベルなど本体の矩形で、矢印の経路は別フィールドです。正式な入力仕様は [markits.schema.json](markits.schema.json) にあります。
+# 入力の検証と配置結果の取得
+markits validate input.json
+markits validate input.json --image screenshot.png
+markits render input.json --layout-json > layout.json
+markits render input.json --debug > layout-debug.svg
+
+# AI/LLM 向けの英語 Markdown マニュアルを表示
+markits manual
+```
 
 ---
 
 ## 入力 JSON 例 (Semantic Intent)
+
+`targets` に名前と矩形を登録すると、各注釈で座標の代わりに名前を参照できます。`instruction` は操作の意図から強調表示と callout を生成します。`position` を省略すると `auto` になります。
+
+```json
+{
+  "canvas": { "width": 1200, "height": 750 },
+  "targets": { "save-button": [820, 640, 100, 36] },
+  "annotations": [
+    { "id": "step1", "type": "instruction", "target": "save-button", "action": "click", "text": "保存をクリック" }
+  ]
+}
+```
+
+`action` は `click`、`enter`、`select`、`drag`、`attention`、`warning`、`compare` に対応します。`click` と `attention` は spotlight と callout、その他は角丸の枠と callout に展開します。`drag` と `compare` には2番目の target を `destination` で指定します。`drag` は2つの target 間の矢印も描きます。`--layout-json` は SVG と、各部品の `id`、`bounds`、`arrow_path` を返します。入力形式の定義は [markits.schema.json](markits.schema.json) を参照してください。
+
+従来の座標指定も利用できます。
 
 ```json
 {
@@ -589,7 +597,7 @@ cat input.json | markits render - > overlay.svg
 ## Rust ライブラリとしての利用
 
 ```rust
-use markits::{render_from_json, render_with_layout_from_json};
+use markits::{render_from_json, Scene};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let json_data = r#"{
@@ -608,10 +616,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // 直接 JSON 文字列から SVG を出力
     let svg = render_from_json(json_data)?;
     println!("{}", svg);
-
-    // 同じ入力から SVG と各要素の配置結果を取得
-    let result = render_with_layout_from_json(json_data)?;
-    println!("{} elements", result.elements.len());
 
     Ok(())
 }

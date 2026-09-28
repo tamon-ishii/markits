@@ -1,61 +1,102 @@
-use markits::{render_from_json, render_with_layout_from_json, Scene};
+use markits::{render_debug_from_json, render_from_json, render_with_layout_from_json, Scene};
 
 #[test]
-fn named_target_instruction_and_layout_output() {
-    let json = r#"{
-      "canvas": {"width": 400, "height": 240},
-      "targets": {"save-button": [260, 160, 80, 30]},
-      "annotations": [
-        {"id": "step1", "type": "instruction", "action": "click",
-         "target": "save-button", "text": "保存をクリック"}
+fn instruction_can_disable_text_outline() {
+    let json = r#"{"canvas":{"width":160,"height":100},"annotations":[
+        {"type":"instruction","action":"click","target":[80,50,40,20],
+         "text":"Click Save","outline":false}]}"#;
+    let svg = render_from_json(json).unwrap();
+    assert!(svg.contains("Click "));
+    assert!(svg.contains("Save"));
+    assert!(!svg.contains("paint-order=\"stroke fill\""));
+}
+
+#[test]
+fn debug_svg_and_multiline_japanese_text() {
+    let input = r#"{
+      "canvas":{"width":420,"height":280},
+      "annotations":[
+        {"type":"callout","target":[150,120,60,32],"text":"設定が完了したら、このボタンをクリックしてください & <確認>","max_width":140},
+        {"type":"callout","target":[270,120,60,32],"text":"保存します","max_width":100}
       ]
     }"#;
-    let output = render_with_layout_from_json(json).unwrap();
-    assert_eq!(output.elements.len(), 2);
-    assert_eq!(output.elements[0].kind, "spotlight");
-    assert_eq!(output.elements[1].kind, "callout");
-    assert_eq!(output.elements[0].bounds, [260.0, 160.0, 80.0, 30.0]);
-    assert_eq!(output.elements[1].id, "step1:1");
-    assert_eq!(output.elements[1].source_id, "step1");
-    assert_eq!(output.elements[1].arrow_path.as_ref().unwrap().len(), 2);
-    assert!(output.svg.contains("保存をクリック"));
-    assert_eq!(output.svg, render_from_json(json).unwrap());
-    assert_eq!(Scene::from_json(json).unwrap().render_with_layout().unwrap().elements.len(), 2);
+    let svg = render_from_json(input).unwrap();
+    assert!(svg.contains("<tspan"));
+    assert!(svg.contains("&amp;"));
+    assert!(svg.contains("&lt;"));
+    assert!(svg.contains("&gt;"));
+    let debug = render_debug_from_json(input).unwrap();
+    assert!(debug.contains("id=\"markits-layout-debug\""));
+    assert_eq!(debug.matches("class=\"target-box\"").count(), 2);
+    assert_eq!(debug.matches("class=\"candidate-box selected\"").count(), 2);
+    assert_eq!(debug.matches("class=\"candidate-box rejected\"").count(), 46);
+    assert!(debug.contains("data-score="));
+    assert!(!svg.contains("markits-layout-debug"));
 }
 
 #[test]
-fn validation_identifies_unknown_target_and_style_typo() {
-    let missing = r#"{"canvas":{"width":300,"height":200},"annotations":[
-        {"type":"callout","target":"missing","text":"Save"}]}"#;
-    assert!(Scene::from_json(missing).unwrap_err().to_string().contains("unknown target"));
-
-    let typo = r#"{"canvas":{"width":300,"height":200},"annotations":[
-        {"type":"callout","target":[20,20,40,20],"text":"Save","style":"primari"}]}"#;
-    assert!(Scene::from_json(typo).unwrap_err().to_string().contains("Did you mean \"primary\""));
-
-    let invalid_width = r#"{"canvas":{"width":300,"height":200},"annotations":[
-        {"type":"callout","target":[20,20,0,20],"text":"Save"}]}"#;
-    assert!(Scene::from_json(invalid_width).unwrap_err().to_string().contains("target[2] must be > 0"));
+fn invalid_max_width_has_clear_error() {
+    let input = r#"{"canvas":{"width":400,"height":300},"annotations":[{"type":"callout","target":[100,100,40,30],"text":"x","max_width":20}]}"#;
+    assert!(Scene::from_json(input).unwrap_err().to_string().contains("annotations[0].max_width"));
 }
 
 #[test]
-fn instruction_actions_expand_to_existing_annotations() {
-    let json = r#"{
+fn instruction_passes_max_width_to_callout() {
+    let input = r#"{"canvas":{"width":400,"height":300},"annotations":[{"type":"instruction","action":"click","target":[180,140,50,30],"text":"設定が完了したら保存してください","max_width":100}]}"#;
+    let result = render_with_layout_from_json(input).unwrap();
+    assert!(result.elements[1].bounds[2] <= 100.0);
+    assert!(result.svg.contains("<tspan"));
+}
+
+#[test]
+fn named_target_instruction_and_layout_result() {
+    let input = r#"{
+      "canvas": {"width": 400, "height": 300},
+      "targets": {"save-button": [240, 180, 100, 36]},
+      "annotations": [
+        {"id": "step1", "type": "instruction", "target": "save-button", "action": "click", "text": "保存をクリック"}
+      ]
+    }"#;
+    let result = render_with_layout_from_json(input).unwrap();
+    assert!(result.svg.contains("保存をクリック"));
+    assert_eq!(result.elements.len(), 2);
+    assert_eq!(result.elements[0].id, "step1:focus");
+    assert_eq!(result.elements[1].id, "step1:callout");
+    assert_eq!(result.elements[0].bounds, [240.0, 180.0, 100.0, 36.0]);
+    assert_eq!(result.elements[1].arrow_path.as_ref().unwrap().len(), 2);
+}
+
+#[test]
+fn scene_without_annotations_remains_valid() {
+    let scene = Scene::from_json(r#"{"canvas":{"width":100,"height":100}}"#).unwrap();
+    assert!(scene.annotations.is_empty());
+}
+
+#[test]
+fn validation_explains_typo_and_bad_target() {
+    let typo = r#"{"canvas":{"width":400,"height":300},"annotations":[{"type":"callout","target":[10,20,30,40],"text":"x","style":"primari"}]}"#;
+    assert!(Scene::from_json(typo).unwrap_err().to_string().contains("Did you mean 'primary'?"));
+    let missing = r#"{"canvas":{"width":400,"height":300},"targets":{"save-button":[10,20,30,40]},"annotations":[{"type":"callout","target":"save-buttn","text":"x"}]}"#;
+    assert!(Scene::from_json(missing).unwrap_err().to_string().contains("Did you mean 'save-button'?"));
+    let bad_size = r#"{"canvas":{"width":400,"height":300},"annotations":[{"type":"callout","target":[10,20,0,40],"text":"x"}]}"#;
+    assert!(Scene::from_json(bad_size).unwrap_err().to_string().contains("annotations[0].target"));
+}
+
+#[test]
+fn drag_instruction_draws_path_between_named_targets() {
+    let input = r#"{
       "canvas": {"width": 500, "height": 300},
-      "targets": {"source": [80, 90, 60, 30], "destination": [320, 90, 60, 30]},
+      "targets": {"item": [40, 80, 60, 30], "drop-zone": [340, 180, 90, 50]},
       "annotations": [
-        {"type":"instruction","action":"drag","target":"source","to":"destination","text":"移動"},
-        {"type":"instruction","action":"compare","target":"source","with":"destination","text":"比較"},
-        {"type":"instruction","action":"warning","target":"destination","text":"注意"}
+        {"id":"move", "type":"instruction", "action":"drag", "target":"item", "destination":"drop-zone", "text":"ここへ移動"}
       ]
     }"#;
-    let output = render_with_layout_from_json(json).unwrap();
-    let kinds: Vec<_> = output.elements.iter().map(|element| element.kind.as_str()).collect();
-    assert_eq!(kinds, ["bezier-arrow", "callout", "callout", "callout", "spotlight", "callout"]);
-    assert_eq!(output.elements[0].arrow_path.as_ref().unwrap().len(), 3);
-    assert!(output.svg.contains("移動"));
-    assert!(output.svg.contains("比較"));
-    assert!(output.svg.contains("注意"));
+    let result = render_with_layout_from_json(input).unwrap();
+    assert_eq!(result.elements.len(), 4);
+    let path = result.elements.iter().find(|element| element.id == "move:path").unwrap();
+    let points = path.arrow_path.as_ref().unwrap();
+    assert_eq!(points[0], [70.0, 95.0]);
+    assert_eq!(points[2], [385.0, 205.0]);
 }
 
 #[test]

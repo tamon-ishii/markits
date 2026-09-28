@@ -1,0 +1,23 @@
+{
+  "canvas": { "width": 960, "height": 540 },
+  "targets": {
+    "search-input": [130, 150, 420, 42],
+    "save-button": [770, 450, 120, 40]
+  },
+  "annotations": [
+    {
+      "id": "step1",
+      "type": "instruction",
+      "action": "enter",
+      "target": "search-input",
+      "text": "検索語を入力"
+    },
+    {
+      "id": "step2",
+      "type": "instruction",
+      "action": "click",
+      "target": "save-button",
+      "text": "保存をクリック"
+    }
+  ]
+}

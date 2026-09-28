@@ -2,6 +2,85 @@ use crate::error::Result;
 use crate::layout::{LayoutEngine, ResolvedAnnotation, ResolvedScene};
 use crate::model::{Scene, SemanticStyle};
 use crate::theme::Theme;
+use serde::Serialize;
+
+/// Geometry returned alongside the SVG for editor and automation clients.
+#[derive(Debug, Clone, Serialize)]
+pub struct LayoutElement {
+    pub id: String,
+    pub bounds: [f64; 4],
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub arrow_path: Option<Vec<[f64; 2]>>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct RenderResult {
+    pub svg: String,
+    pub elements: Vec<LayoutElement>,
+}
+
+fn element_geometry(annotation: &ResolvedAnnotation) -> ([f64; 4], Option<Vec<[f64; 2]>>) {
+    let rect = |r: &crate::model::TargetRect| [r.x, r.y, r.width, r.height];
+    let point = |p: &crate::layout::Point| [p.x, p.y];
+    let line_bounds = |points: &[crate::layout::Point]| {
+        let min_x = points.iter().map(|p| p.x).fold(f64::INFINITY, f64::min);
+        let max_x = points.iter().map(|p| p.x).fold(f64::NEG_INFINITY, f64::max);
+        let min_y = points.iter().map(|p| p.y).fold(f64::INFINITY, f64::min);
+        let max_y = points.iter().map(|p| p.y).fold(f64::NEG_INFINITY, f64::max);
+        [min_x, min_y, max_x - min_x, max_y - min_y]
+    };
+    match annotation {
+        ResolvedAnnotation::Rect { rect: r, .. } | ResolvedAnnotation::RoundedRect { rect: r, .. } => (rect(r), None),
+        ResolvedAnnotation::Label { box_rect, .. } => (rect(box_rect), None),
+        ResolvedAnnotation::Callout { box_rect, arrow_start, arrow_end, .. } =>
+            (rect(box_rect), Some(vec![point(arrow_start), point(arrow_end)])),
+        ResolvedAnnotation::Spotlight { target, .. } => (rect(target), None),
+        ResolvedAnnotation::Circle { cx, cy, rx, ry, .. } => ([cx-rx, cy-ry, 2.0*rx, 2.0*ry], None),
+        ResolvedAnnotation::Badge { center, radius, .. } | ResolvedAnnotation::StepArrow { center, radius, .. } => {
+            let path = if let ResolvedAnnotation::StepArrow { arrow_start, arrow_end, .. } = annotation {
+                Some(vec![point(arrow_start), point(arrow_end)])
+            } else { None };
+            ([center.x-radius, center.y-radius, 2.0*radius, 2.0*radius], path)
+        }
+        ResolvedAnnotation::Pin { head_center, head_radius, text_rect, .. } => {
+            let mut bounds = [head_center.x-head_radius, head_center.y-head_radius, 2.0*head_radius, 2.0*head_radius];
+            if let Some(text) = text_rect {
+                let left = bounds[0].min(text.x);
+                let top = bounds[1].min(text.y);
+                let right = (bounds[0]+bounds[2]).max(text.right());
+                let bottom = (bounds[1]+bounds[3]).max(text.bottom());
+                bounds = [left, top, right-left, bottom-top];
+            }
+            (bounds, None)
+        }
+        ResolvedAnnotation::Bullseye { center, outer_radius, .. } =>
+            ([center.x-outer_radius, center.y-outer_radius, 2.0*outer_radius, 2.0*outer_radius], None),
+        ResolvedAnnotation::Arrow { start, end, .. } | ResolvedAnnotation::Divider { start, end, .. } =>
+            (line_bounds(&[*start, *end]), Some(vec![point(start), point(end)])),
+        ResolvedAnnotation::BezierArrow { start, control, end, text_rect, .. } => {
+            let points = [*start, *control, *end];
+            let mut bounds = line_bounds(&points);
+            if let Some(text) = text_rect {
+                let left = bounds[0].min(text.x);
+                let top = bounds[1].min(text.y);
+                let right = (bounds[0]+bounds[2]).max(text.right());
+                let bottom = (bounds[1]+bounds[3]).max(text.bottom());
+                bounds = [left, top, right-left, bottom-top];
+            }
+            (bounds, Some(points.iter().map(point).collect()))
+        }
+    }
+}
+
+fn multiline_text(text: &str, x: f64, font_size: f64) -> String {
+    let lines: Vec<&str> = text.split('\n').collect();
+    if lines.len() == 1 { return escape_xml(text); }
+    let line_height = font_size * 1.35;
+    lines.iter().enumerate().map(|(index, line)| {
+        let dy = if index == 0 { -(lines.len() as f64 - 1.0) * line_height / 2.0 } else { line_height };
+        format!("<tspan x=\"{x}\" dy=\"{dy}\">{}</tspan>", escape_xml(line))
+    }).collect()
+}
 
 /// Escapes XML special characters.
 pub fn escape_xml(s: &str) -> String {
@@ -221,7 +300,7 @@ impl SvgRenderer {
             match ann {
                 ResolvedAnnotation::Label { box_rect, text, style, shadow, outline } => {
                     let tokens = self.theme.tokens_for(*style);
-                    let escaped = escape_xml(text);
+                    let escaped = multiline_text(text, box_rect.center_x(), self.theme.font_size);
                     let filter_attr = if *shadow { r#" filter="url(#markits-shadow)""# } else { "" };
                     let outline_attr = if *outline {
                         r##" stroke="#ffffff" stroke-width="3.5" stroke-linejoin="round" paint-order="stroke fill""##
@@ -248,7 +327,7 @@ impl SvgRenderer {
                 ResolvedAnnotation::Callout { box_rect, text, arrow_start, arrow_end, style, shadow, outline } => {
                     let tokens = self.theme.tokens_for(*style);
                     let key = style_key(*style);
-                    let escaped = escape_xml(text);
+                    let escaped = multiline_text(text, box_rect.center_x(), self.theme.font_size);
                     let filter_attr = if *shadow { r#" filter="url(#markits-shadow)""# } else { "" };
                     let outline_attr = if *outline {
                         r##" stroke="#ffffff" stroke-width="3.5" stroke-linejoin="round" paint-order="stroke fill""##
@@ -468,6 +547,47 @@ impl Scene {
 pub fn render_from_json(json_str: &str) -> Result<String> {
     let scene = Scene::from_json(json_str)?;
     scene.render_svg()
+}
+
+/// Renders the final layout with target, candidate, collision and selected boxes overlaid.
+pub fn render_debug_from_json(json_str: &str) -> Result<String> {
+    let scene = Scene::from_json(json_str)?;
+    let engine = LayoutEngine::new();
+    let resolved = engine.layout_scene(&scene);
+    let mut svg = SvgRenderer::new().render_scene(&resolved);
+    let mut overlay = String::from("  <g id=\"markits-layout-debug\" font-family=\"monospace\" pointer-events=\"none\">\n");
+    for (index, ann) in resolved.annotations.iter().enumerate() {
+        if let ResolvedAnnotation::Label { box_rect, .. } | ResolvedAnnotation::Callout { box_rect, .. } = ann {
+            overlay.push_str(&format!("    <rect class=\"collision-box\" data-annotation=\"{index}\" x=\"{}\" y=\"{}\" width=\"{}\" height=\"{}\" fill=\"none\" stroke=\"#a855f7\" stroke-dasharray=\"3 3\"/>\n", box_rect.x, box_rect.y, box_rect.width, box_rect.height));
+        }
+    }
+    for callout in engine.debug_callouts(&scene, &resolved) {
+        let t = callout.target;
+        overlay.push_str(&format!("    <rect class=\"target-box\" data-annotation=\"{}\" x=\"{}\" y=\"{}\" width=\"{}\" height=\"{}\" fill=\"#3b82f6\" fill-opacity=\"0.08\" stroke=\"#2563eb\" stroke-dasharray=\"5 3\"/>\n", callout.annotation_index, t.x, t.y, t.width, t.height));
+        for (index, candidate) in callout.candidates.iter().enumerate() {
+            let r = candidate.rect;
+            let color = if candidate.selected { "#16a34a" } else { "#ef4444" };
+            let opacity = if candidate.selected { 0.18 } else { 0.025 };
+            overlay.push_str(&format!("    <rect class=\"candidate-box{}\" data-annotation=\"{}\" data-candidate=\"{}\" data-anchor=\"{:?}\" data-score=\"{:.2}\" x=\"{}\" y=\"{}\" width=\"{}\" height=\"{}\" fill=\"{}\" fill-opacity=\"{}\" stroke=\"{}\" stroke-opacity=\"0.45\" stroke-dasharray=\"2 3\"><title>callout {}: {:?}, score {:.2}{}</title></rect>\n", if candidate.selected { " selected" } else { " rejected" }, callout.annotation_index, index, candidate.anchor, candidate.score, r.x, r.y, r.width, r.height, color, opacity, color, callout.annotation_index, candidate.anchor, candidate.score, if candidate.selected { " (selected)" } else { "" }));
+        }
+    }
+    overlay.push_str("  </g>\n");
+    if let Some(index) = svg.rfind("</svg>") { svg.insert_str(index, &overlay); }
+    Ok(svg)
+}
+
+/// Renders SVG and exposes the positioned annotation geometry.
+pub fn render_with_layout_from_json(json_str: &str) -> Result<RenderResult> {
+    let prepared = crate::semantic::prepare(json_str)?;
+    let scene: Scene = serde_json::from_value(prepared.scene)?;
+    scene.validate()?;
+    let resolved = LayoutEngine::new().layout_scene(&scene);
+    let svg = SvgRenderer::new().render_scene(&resolved);
+    let elements = resolved.annotations.iter().zip(prepared.ids).map(|(annotation, id)| {
+        let (bounds, arrow_path) = element_geometry(annotation);
+        LayoutElement { id, bounds, arrow_path }
+    }).collect();
+    Ok(RenderResult { svg, elements })
 }
 
 #[cfg(test)]
