@@ -50,6 +50,26 @@ enum Commands {
         /// Path to a PNG or JPEG image
         image: std::path::PathBuf,
     },
+    /// Cut a rectangular region from a PNG or JPEG and save the actual pixels
+    Crop {
+        /// Source PNG or JPEG image
+        image: std::path::PathBuf,
+        /// Left edge in source-image pixels
+        #[arg(long)]
+        x: u32,
+        /// Top edge in source-image pixels
+        #[arg(long)]
+        y: u32,
+        /// Output width in pixels
+        #[arg(long)]
+        width: u32,
+        /// Output height in pixels
+        #[arg(long)]
+        height: u32,
+        /// Destination PNG file
+        #[arg(long)]
+        output: std::path::PathBuf,
+    },
     /// Print the bundled Markdown manual for AI/LLM use
     Manual,
 }
@@ -112,6 +132,14 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 serde_json::json!({"width": info.width, "height": info.height, "format": info.format})
             );
         }
+        Commands::Crop {
+            image,
+            x,
+            y,
+            width,
+            height,
+            output,
+        } => raster::crop_file(&image, &output, x, y, width, height)?,
         Commands::Manual => print!("{}", include_str!("../docs/AI_MANUAL.md")),
     }
 

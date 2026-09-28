@@ -13,6 +13,12 @@ For agents that can view images and run local commands. MarkIts draws annotation
 
 PNG and JPEG input are supported; image output is PNG. `--output` must end in `.png`. If JSON explicitly includes `canvas`, its dimensions must match the image. Errors go to stderr with a nonzero exit status.
 
+## Crop a screenshot
+
+Run `markits crop screenshot.png --x 120 --y 80 --width 640 --height 400 --output cropped.png` to keep exactly that rectangle. The output is a 640 × 400 PNG; pixels outside the rectangle are removed rather than covered. Coordinates are measured from the source image's top-left corner. The rectangle must be nonempty and entirely inside the source image.
+
+To annotate the cropped image, use `cropped.png` as `--image` and measure all annotation targets relative to its new top-left corner. A target at source position `(240, 180)` becomes `(120, 100)` in this example. Inspect the cropped result before annotating.
+
 ## Minimal JSON
 
 ```json

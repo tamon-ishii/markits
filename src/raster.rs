@@ -1,5 +1,5 @@
 use base64::Engine;
-use image::ImageFormat;
+use image::{DynamicImage, ImageFormat};
 use markits::{Scene, render_from_json};
 use resvg::{tiny_skia, usvg};
 use std::error::Error;
@@ -32,6 +32,55 @@ fn read_image(path: &Path) -> Result<(Vec<u8>, ImageInfo), Box<dyn Error>> {
 
 pub fn inspect_image(path: &Path) -> Result<ImageInfo, Box<dyn Error>> {
     Ok(read_image(path)?.1)
+}
+
+fn crop_image(
+    image: &DynamicImage,
+    x: u32,
+    y: u32,
+    width: u32,
+    height: u32,
+) -> Result<DynamicImage, Box<dyn Error>> {
+    if width == 0
+        || height == 0
+        || x.checked_add(width)
+            .is_none_or(|right| right > image.width())
+        || y.checked_add(height)
+            .is_none_or(|bottom| bottom > image.height())
+    {
+        return Err(format!(
+            "Crop rectangle ({x}, {y}, {width}, {height}) is outside image {}x{}",
+            image.width(),
+            image.height()
+        )
+        .into());
+    }
+    Ok(image.crop_imm(x, y, width, height))
+}
+
+pub fn crop_file(
+    input: &Path,
+    output: &Path,
+    x: u32,
+    y: u32,
+    width: u32,
+    height: u32,
+) -> Result<(), Box<dyn Error>> {
+    if !output
+        .extension()
+        .is_some_and(|ext| ext.eq_ignore_ascii_case("png"))
+    {
+        return Err("--output must be a .png file".into());
+    }
+    let bytes = fs::read(input)?;
+    let format = image::guess_format(&bytes)?;
+    if !matches!(format, ImageFormat::Png | ImageFormat::Jpeg) {
+        return Err("Image must contain a PNG or JPEG image".into());
+    }
+    let image = image::load_from_memory_with_format(&bytes, format)?;
+    let cropped = crop_image(&image, x, y, width, height)?;
+    cropped.save_with_format(output, ImageFormat::Png)?;
+    Ok(())
 }
 
 pub fn with_image_canvas(json: &str, width: u32, height: u32) -> Result<String, Box<dyn Error>> {
@@ -122,4 +171,29 @@ pub fn render_png(json: &str, image_path: &Path, output_path: &Path) -> Result<(
     );
     pixmap.save_png(output_path)?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use image::{GenericImageView, Rgba, RgbaImage};
+
+    #[test]
+    fn crop_changes_dimensions_and_keeps_only_selected_pixels() {
+        let source = DynamicImage::ImageRgba8(RgbaImage::from_fn(4, 3, |x, y| {
+            Rgba([x as u8, y as u8, 99, 255])
+        }));
+        let cropped = crop_image(&source, 1, 1, 2, 2).unwrap();
+        assert_eq!(cropped.dimensions(), (2, 2));
+        assert_eq!(cropped.get_pixel(0, 0), Rgba([1, 1, 99, 255]));
+        assert_eq!(cropped.get_pixel(1, 1), Rgba([2, 2, 99, 255]));
+    }
+
+    #[test]
+    fn crop_rejects_empty_or_outside_rectangles() {
+        let source = DynamicImage::ImageRgba8(RgbaImage::new(4, 3));
+        assert!(crop_image(&source, 0, 0, 0, 2).is_err());
+        assert!(crop_image(&source, 3, 0, 2, 2).is_err());
+        assert!(crop_image(&source, u32::MAX, 0, 2, 2).is_err());
+    }
 }

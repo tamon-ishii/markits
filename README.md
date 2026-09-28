@@ -48,6 +48,15 @@ AI（LLM）がドキュメント作成時にスクリーンショットを装飾
 
 生成の前に画像の寸法を知りたい場合は `markits inspect screenshot.png`、注釈を検証する場合は `markits validate annotations.json --image screenshot.png` を使えます。画像モードでは JSON の `canvas` を省略できます。
 
+画像の一部だけを使う場合は、注釈を付ける前に実際の画素を切り抜けます。
+
+```sh
+markits crop screenshot.png --x 120 --y 80 --width 640 --height 400 --output cropped.png
+markits inspect cropped.png
+```
+
+出力は 640 × 400 ピクセルの PNG になります。切り抜き後の注釈座標は、新しい画像の左上を原点に指定してください。
+
 ---
 
 ## 🔖 対応マーク（アノテーション）一覧 & スクリーンショット
