@@ -109,6 +109,8 @@ fn instruction_parts(
             "style",
             "position",
             "max_width",
+            "outline",
+            "shadow",
         ]
         .contains(&key.as_str())
         {
@@ -184,6 +186,8 @@ fn instruction_parts(
     }
     let mut callout = json!({"type":"callout","target":callout_target,"text":text,"style":style,"position":position});
     if let Some(width) = object.get("max_width") { callout["max_width"] = width.clone(); }
+    if let Some(outline) = object.get("outline") { callout["outline"] = outline.clone(); }
+    if let Some(shadow) = object.get("shadow") { callout["shadow"] = shadow.clone(); }
     parts.push(callout);
     Ok(parts)
 }

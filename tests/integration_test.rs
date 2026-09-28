@@ -1,6 +1,17 @@
 use markits::{render_debug_from_json, render_from_json, render_with_layout_from_json, Scene};
 
 #[test]
+fn instruction_can_disable_text_outline() {
+    let json = r#"{"canvas":{"width":160,"height":100},"annotations":[
+        {"type":"instruction","action":"click","target":[80,50,40,20],
+         "text":"Click Save","outline":false}]}"#;
+    let svg = render_from_json(json).unwrap();
+    assert!(svg.contains("Click "));
+    assert!(svg.contains("Save"));
+    assert!(!svg.contains("paint-order=\"stroke fill\""));
+}
+
+#[test]
 fn debug_svg_and_multiline_japanese_text() {
     let input = r#"{
       "canvas":{"width":420,"height":280},

@@ -75,3 +75,7 @@ The system SHALL support configuring drop shadow visibility (`shadow: bool` on S
 #### Scenario: Parse shadow and outline properties
 - **WHEN** JSON specifies root scene `"shadow": false` and an annotation with `"outline": true` and `"style": "pink"`
 - **THEN** the models retain the shadow flag, outline flag, and Pink semantic style
+
+#### Scenario: Preserve visual overrides on an instruction
+- **WHEN** an `instruction` annotation specifies `"outline": false` and `"shadow": false`
+- **THEN** its generated callout uses those settings

@@ -1,0 +1,6 @@
+{
+  "annotations": [
+    {"type": "badge", "target": [220, 128, 405, 44], "step": 1, "style": "step", "position": "top-right"},
+    {"type": "badge", "target": [618, 338, 132, 44], "step": 2, "style": "step", "position": "top-left"}
+  ]
+}

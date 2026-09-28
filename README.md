@@ -4,7 +4,7 @@
   <img src="markits.png" alt="MarkIts" width="400">
 </p>
 
-**MarkIts** は、スクリーンショットや画像の上に重ねる説明用アノテーションを、意味的な指示（Semantic JSON）から高品質な **SVG** として生成する軽量な Rust ライブラリおよび CLI ツールです。
+**MarkIts** は、スクリーンショットや画像の上に重ねる説明用アノテーションを、意味的な指示（Semantic JSON）から **SVG** または元画像と合成した **PNG** として生成する軽量な Rust ライブラリおよび CLI ツールです。
 
 AI（LLM）がドキュメント作成時にスクリーンショットを装飾する用途に最適です。トークン消費を抑えつつ、安定した品質のアノテーションを生成します。
 
@@ -13,6 +13,40 @@ AI（LLM）がドキュメント作成時にスクリーンショットを装飾
 <p align="center">
   <img src="docs/images/hero_showcase.png" alt="MarkIts Hero Showcase" width="100%">
 </p>
+
+---
+
+## LLM にそのまま頼む
+
+画像を見て CLI を実行できる LLM エージェントなら、MarkIts の JSON を手で書かずに自然文で依頼できます。インストール済みの `markits -h` から `markits manual` を見つけられます。MarkIts 自体は画像からボタンを検出しないため、エージェントが画像上の位置を読み取ります。
+
+以下の例は同じ[デモ用スクリーンショット](docs/images/llm_demo_input.png)から、実際に MarkIts で生成した PNG です。
+
+### 例 1: ボタンを四角で囲む
+
+> MarkIts でこのスクリーンショットの Save ボタンを四角で囲んで、完成した PNG を見せて。
+
+[![Save ボタンを四角で囲んだ出力](docs/images/llm_rect_boxed.png)](docs/images/llm_rect_boxed.png)
+
+[生成した注釈 JSON](examples/llm_rect.json) · `markits render examples/llm_rect.json --image docs/images/llm_demo_input.png --output docs/images/llm_rect_boxed.png`
+
+### 例 2: 操作対象をスポットライトで示す
+
+> MarkIts で Save ボタンだけを目立たせて、「Click Save」の説明を付けて。
+
+[![「Click Save」の文字入り出力](docs/images/llm_focus_labeled.png)](docs/images/llm_focus_labeled.png)
+
+[生成した注釈 JSON](examples/llm_focus.json) · `markits render examples/llm_focus.json --image docs/images/llm_demo_input.png --output docs/images/llm_focus_labeled.png`
+
+### 例 3: 操作順を番号で示す
+
+> MarkIts で検索欄を手順 1、Save ボタンを手順 2 として番号を付けて。
+
+[![検索欄の 1 と Save ボタンの 2 を付けた出力](docs/images/llm_steps_numbered.png)](docs/images/llm_steps_numbered.png)
+
+[生成した注釈 JSON](examples/llm_steps.json) · `markits render examples/llm_steps.json --image docs/images/llm_demo_input.png --output docs/images/llm_steps_numbered.png`
+
+生成の前に画像の寸法を知りたい場合は `markits inspect screenshot.png`、注釈を検証する場合は `markits validate annotations.json --image screenshot.png` を使えます。画像モードでは JSON の `canvas` を省略できます。
 
 ---
 
@@ -65,7 +99,7 @@ MarkIts で利用可能な全 13 種類のマーク（アノテーション）�
   - `max_width`: テキスト枠の最大幅（40 px 以上）。省略時は画面幅に応じて最大 320 px。日本語と英語を自動改行
   - `style`: セマンティックスタイル（デフォルト: `"primary"`）
   - `position`: 配置優先ヒント（`"auto"`, `"top"`, `"bottom"`, `"left"`, `"right"`, `"top-left"`, `"top-right"`, `"bottom-left"`, `"bottom-right"`、デフォルト: `"auto"`）
-  - `outline`: 白フチ文字（`true` / `false`、デフォルト: `false`）
+  - `outline`: 白フチ文字（`true` / `false`、デフォルト: `true`）
   - `shadow`: ドロップシャドウ（`true` / `false`、デフォルト: `false`）
 
 ---
@@ -93,7 +127,7 @@ MarkIts で利用可能な全 13 種類のマーク（アノテーション）�
   - `text`: ピンヘッドに連結するダークピルテキスト（省略時はピンヘッド＋ポインターのみ）
   - `style`: セマンティックスタイル（デフォルト: `"pink"`）
   - `position`: ピンの配置方向（`"left"`, `"right"`, `"top"`, `"bottom"`、デフォルト: `"auto"`）
-  - `outline`: 白フチ文字（`true` / `false`、デフォルト: `false`）
+  - `outline`: 白フチ文字（`true` / `false`、デフォルト: `true`）
   - `shadow`: ドロップシャドウ（`true` / `false`、デフォルト: `false`）
 
 ---
@@ -197,7 +231,7 @@ MarkIts で利用可能な全 13 種類のマーク（アノテーション）�
   - `text` *(必須)*: 表示テキスト（改行 `\n` 対応）
   - `style`: セマンティックスタイル（デフォルト: `"primary"`）
   - `position`: 配置方向（`"top"`, `"bottom"`, `"left"`, `"right"` など、デフォルト: `"top"`）
-  - `outline`: 白フチ取りの有無（`true` / `false`、デフォルト: `false`）
+  - `outline`: 白フチ取りの有無（`true` / `false`、デフォルト: `true`）
   - `shadow`: ドロップシャドウの有無（`true` / `false`、デフォルト: `false`）
 
 ---
@@ -465,13 +499,23 @@ cargo build --release
 # JSON ファイルから SVG を生成して標準出力
 markits render input.json > overlay.svg
 
+# 元画像に注釈を重ねて PNG を保存（JSON の canvas は省略可能）
+markits render input.json --image screenshot.png --output annotated.png
+
+# 画像の寸法と形式を確認
+markits inspect screenshot.png
+
 # パイプ (stdin) 経由で生成
 cat input.json | markits render - > overlay.svg
 
 # 入力の検証と配置結果の取得
 markits validate input.json
+markits validate input.json --image screenshot.png
 markits render input.json --layout-json > layout.json
 markits render input.json --debug > layout-debug.svg
+
+# AI/LLM 向けの英語 Markdown マニュアルを表示
+markits manual
 ```
 
 ---

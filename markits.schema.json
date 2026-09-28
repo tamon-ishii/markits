@@ -849,6 +849,12 @@
                   "center"
                 ]
               },
+              "outline": {
+                "type": "boolean"
+              },
+              "shadow": {
+                "type": "boolean"
+              },
               "destination": {
                 "oneOf": [
                   {
