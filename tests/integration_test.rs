@@ -1,4 +1,62 @@
-use markits::{render_from_json, Scene};
+use markits::{render_from_json, render_with_layout_from_json, Scene};
+
+#[test]
+fn named_target_instruction_and_layout_output() {
+    let json = r#"{
+      "canvas": {"width": 400, "height": 240},
+      "targets": {"save-button": [260, 160, 80, 30]},
+      "annotations": [
+        {"id": "step1", "type": "instruction", "action": "click",
+         "target": "save-button", "text": "保存をクリック"}
+      ]
+    }"#;
+    let output = render_with_layout_from_json(json).unwrap();
+    assert_eq!(output.elements.len(), 2);
+    assert_eq!(output.elements[0].kind, "spotlight");
+    assert_eq!(output.elements[1].kind, "callout");
+    assert_eq!(output.elements[0].bounds, [260.0, 160.0, 80.0, 30.0]);
+    assert_eq!(output.elements[1].id, "step1:1");
+    assert_eq!(output.elements[1].source_id, "step1");
+    assert_eq!(output.elements[1].arrow_path.as_ref().unwrap().len(), 2);
+    assert!(output.svg.contains("保存をクリック"));
+    assert_eq!(output.svg, render_from_json(json).unwrap());
+    assert_eq!(Scene::from_json(json).unwrap().render_with_layout().unwrap().elements.len(), 2);
+}
+
+#[test]
+fn validation_identifies_unknown_target_and_style_typo() {
+    let missing = r#"{"canvas":{"width":300,"height":200},"annotations":[
+        {"type":"callout","target":"missing","text":"Save"}]}"#;
+    assert!(Scene::from_json(missing).unwrap_err().to_string().contains("unknown target"));
+
+    let typo = r#"{"canvas":{"width":300,"height":200},"annotations":[
+        {"type":"callout","target":[20,20,40,20],"text":"Save","style":"primari"}]}"#;
+    assert!(Scene::from_json(typo).unwrap_err().to_string().contains("Did you mean \"primary\""));
+
+    let invalid_width = r#"{"canvas":{"width":300,"height":200},"annotations":[
+        {"type":"callout","target":[20,20,0,20],"text":"Save"}]}"#;
+    assert!(Scene::from_json(invalid_width).unwrap_err().to_string().contains("target[2] must be > 0"));
+}
+
+#[test]
+fn instruction_actions_expand_to_existing_annotations() {
+    let json = r#"{
+      "canvas": {"width": 500, "height": 300},
+      "targets": {"source": [80, 90, 60, 30], "destination": [320, 90, 60, 30]},
+      "annotations": [
+        {"type":"instruction","action":"drag","target":"source","to":"destination","text":"移動"},
+        {"type":"instruction","action":"compare","target":"source","with":"destination","text":"比較"},
+        {"type":"instruction","action":"warning","target":"destination","text":"注意"}
+      ]
+    }"#;
+    let output = render_with_layout_from_json(json).unwrap();
+    let kinds: Vec<_> = output.elements.iter().map(|element| element.kind.as_str()).collect();
+    assert_eq!(kinds, ["bezier-arrow", "callout", "callout", "callout", "spotlight", "callout"]);
+    assert_eq!(output.elements[0].arrow_path.as_ref().unwrap().len(), 3);
+    assert!(output.svg.contains("移動"));
+    assert!(output.svg.contains("比較"));
+    assert!(output.svg.contains("注意"));
+}
 
 #[test]
 fn test_complex_multi_annotation_scene() {

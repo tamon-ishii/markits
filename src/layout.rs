@@ -245,6 +245,56 @@ pub fn select_best_candidate(
     })
 }
 
+fn orientation(a: Point, b: Point, c: Point) -> f64 {
+    (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x)
+}
+
+fn segments_cross(a: Point, b: Point, c: Point, d: Point) -> bool {
+    let o1 = orientation(a, b, c);
+    let o2 = orientation(a, b, d);
+    let o3 = orientation(c, d, a);
+    let o4 = orientation(c, d, b);
+    o1 * o2 < -1e-9 && o3 * o4 < -1e-9
+}
+
+fn segment_crosses_rect(a: Point, b: Point, r: &TargetRect) -> bool {
+    if a.x > r.x && a.x < r.right() && a.y > r.y && a.y < r.bottom() {
+        return true;
+    }
+    if b.x > r.x && b.x < r.right() && b.y > r.y && b.y < r.bottom() {
+        return true;
+    }
+    let tl = Point::new(r.x, r.y);
+    let tr = Point::new(r.right(), r.y);
+    let br = Point::new(r.right(), r.bottom());
+    let bl = Point::new(r.x, r.bottom());
+    [(tl, tr), (tr, br), (br, bl), (bl, tl)]
+        .iter().any(|&(c, d)| segments_cross(a, b, c, d))
+}
+
+/// Scores callout body and connector together against already placed callouts.
+fn select_callout_candidate(
+    candidates: &[Candidate], target: &TargetRect, canvas: &Canvas,
+    hint: PositionHint, occupied_rects: &[TargetRect], label_rects: &[TargetRect],
+    arrows: &[(Point, Point)],
+) -> Candidate {
+    candidates.iter().min_by(|a, b| {
+        let score = |c: &Candidate| {
+            let mut value = calculate_score(c, target, canvas, hint, occupied_rects);
+            let (start, end) = calculate_arrow_connection(&c.rect, target, c.anchor);
+            for &(other_start, other_end) in arrows {
+                if segments_cross(start, end, other_start, other_end) { value += 30_000.0; }
+                if segment_crosses_rect(other_start, other_end, &c.rect) { value += 15_000.0; }
+            }
+            for rect in label_rects {
+                if segment_crosses_rect(start, end, rect) { value += 15_000.0; }
+            }
+            value
+        };
+        score(a).total_cmp(&score(b)).then_with(|| a.anchor.baseline_bias().total_cmp(&b.anchor.baseline_bias()))
+    }).cloned().unwrap_or_else(|| select_best_candidate(candidates, target, canvas, hint, occupied_rects))
+}
+
 /// Computes connecting arrow start (from label/callout box) and end (to target edge) points.
 pub fn calculate_arrow_connection(
     callout_box: &TargetRect,
@@ -442,7 +492,14 @@ impl LayoutEngine {
     }
 
     pub fn layout_scene(&self, scene: &Scene) -> ResolvedScene {
-        let mut occupied_rects: Vec<TargetRect> = Vec::new();
+        // Reserve every target up front so early labels cannot cover targets
+        // belonging to later annotations.
+        let mut occupied_rects: Vec<TargetRect> = scene.annotations.iter()
+            .filter(|ann| !matches!(ann, Annotation::BezierArrow { .. }))
+            .map(Annotation::target)
+            .collect();
+        let mut label_rects: Vec<TargetRect> = Vec::new();
+        let mut arrows: Vec<(Point, Point)> = Vec::new();
         let mut resolved: Vec<ResolvedAnnotation> = Vec::new();
 
         for ann in &scene.annotations {
@@ -510,6 +567,7 @@ impl LayoutEngine {
                         &occupied_rects,
                     );
                     occupied_rects.push(best.rect);
+                    label_rects.push(best.rect);
                     resolved.push(ResolvedAnnotation::Label {
                         box_rect: best.rect,
                         text: text.clone(),
@@ -527,16 +585,20 @@ impl LayoutEngine {
                 } => {
                     let dim = estimate_text_dimensions(text, self.font_size);
                     let candidates = generate_candidates(target, dim, self.callout_offset);
-                    let best = select_best_candidate(
+                    let best = select_callout_candidate(
                         &candidates,
                         target,
                         &scene.canvas,
                         *position,
                         &occupied_rects,
+                        &label_rects,
+                        &arrows,
                     );
                     let (arrow_start, arrow_end) =
                         calculate_arrow_connection(&best.rect, target, best.anchor);
                     occupied_rects.push(best.rect);
+                    label_rects.push(best.rect);
+                    arrows.push((arrow_start, arrow_end));
                     resolved.push(ResolvedAnnotation::Callout {
                         box_rect: best.rect,
                         text: text.clone(),
@@ -586,6 +648,7 @@ impl LayoutEngine {
                             center.y + (dy / len) * self.badge_radius,
                         );
                         occupied_rects.push(best.rect);
+                        arrows.push((arrow_start, arrow_end));
                         resolved.push(ResolvedAnnotation::StepArrow {
                             center,
                             radius: self.badge_radius,
@@ -652,6 +715,7 @@ impl LayoutEngine {
                         center.y + (dy / len) * self.badge_radius,
                     );
                     occupied_rects.push(best.rect);
+                    arrows.push((arrow_start, arrow_end));
                     resolved.push(ResolvedAnnotation::StepArrow {
                         center,
                         radius: self.badge_radius,
@@ -700,6 +764,7 @@ impl LayoutEngine {
                             center.y + (dy / len) * self.badge_radius,
                         );
                         occupied_rects.push(best.rect);
+                        arrows.push((arrow_start, arrow_end));
                         resolved.push(ResolvedAnnotation::StepArrow {
                             center,
                             radius: self.badge_radius,
@@ -720,6 +785,7 @@ impl LayoutEngine {
                             &occupied_rects,
                         );
                         let (start, end) = calculate_arrow_connection(&best.rect, target, best.anchor);
+                        arrows.push((start, end));
                         resolved.push(ResolvedAnnotation::Arrow {
                             start,
                             end,
@@ -772,6 +838,11 @@ impl LayoutEngine {
                     } else {
                         None
                     };
+
+                    if let Some(rect) = text_rect {
+                        occupied_rects.push(rect);
+                        label_rects.push(rect);
+                    }
 
                     resolved.push(ResolvedAnnotation::Pin {
                         head_center,
@@ -1037,6 +1108,20 @@ mod tests {
 
         assert_eq!(sel1.anchor, sel2.anchor);
         assert_eq!(sel1.rect, sel2.rect);
+    }
+
+    #[test]
+    fn callout_avoids_existing_arrow_crossing() {
+        let target = TargetRect::new(80.0, 80.0, 20.0, 20.0);
+        let canvas = Canvas { width: 180, height: 180 };
+        let candidates = generate_candidates(&target, Dimensions::new(30.0, 15.0), 15.0);
+        let vertical_options: Vec<_> = candidates.into_iter()
+            .filter(|c| matches!(c.anchor, AnchorPosition::Top | AnchorPosition::Bottom)).collect();
+        let best = select_callout_candidate(
+            &vertical_options, &target, &canvas, PositionHint::Auto, &[], &[],
+            &[(Point::new(0.0, 72.0), Point::new(160.0, 72.0))],
+        );
+        assert_eq!(best.anchor, AnchorPosition::Bottom);
     }
 
     #[test]

@@ -4,7 +4,7 @@
   <img src="markits.png" alt="MarkIts" width="400">
 </p>
 
-**MarkIts** は、スクリーンショットや画像の上に重ねる説明用アノテーションを、意味的な指示（Semantic JSON）から高品質な **SVG** として生成する軽量な Rust ライブラリおよび CLI ツールです。
+**MarkIts** は、スクリーンショットや画像の上に重ねる説明用アノテーションを、意味的な指示（Semantic JSON）から **SVG** または元画像と合成した **PNG** として生成する軽量な Rust ライブラリおよび CLI ツールです。
 
 AI（LLM）がドキュメント作成時にスクリーンショットを装飾する用途に最適です。トークン消費を抑えつつ、安定した品質のアノテーションを生成します。
 
@@ -16,9 +16,43 @@ AI（LLM）がドキュメント作成時にスクリーンショットを装飾
 
 ---
 
+## LLM にそのまま頼む
+
+画像を見て CLI を実行できる LLM エージェントなら、MarkIts の JSON を手で書かずに自然文で依頼できます。インストール済みの `markits -h` から `markits manual` を見つけられます。MarkIts 自体は画像からボタンを検出しないため、エージェントが画像上の位置を読み取ります。
+
+以下の例は同じ[デモ用スクリーンショット](docs/images/llm_demo_input.png)から、実際に MarkIts で生成した PNG です。
+
+### 例 1: ボタンを四角で囲む
+
+> MarkIts でこのスクリーンショットの Save ボタンを四角で囲んで、完成した PNG を見せて。
+
+[![Save ボタンを四角で囲んだ出力](docs/images/llm_rect_boxed.png)](docs/images/llm_rect_boxed.png)
+
+[生成した注釈 JSON](examples/llm_rect.json) · `markits render examples/llm_rect.json --image docs/images/llm_demo_input.png --output docs/images/llm_rect_boxed.png`
+
+### 例 2: 操作対象をスポットライトで示す
+
+> MarkIts で Save ボタンだけを目立たせて、「Click Save」の説明を付けて。
+
+[![「Click Save」の文字入り出力](docs/images/llm_focus_labeled.png)](docs/images/llm_focus_labeled.png)
+
+[生成した注釈 JSON](examples/llm_focus.json) · `markits render examples/llm_focus.json --image docs/images/llm_demo_input.png --output docs/images/llm_focus_labeled.png`
+
+### 例 3: 操作順を番号で示す
+
+> MarkIts で検索欄を手順 1、Save ボタンを手順 2 として番号を付けて。
+
+[![検索欄の 1 と Save ボタンの 2 を付けた出力](docs/images/llm_steps_numbered.png)](docs/images/llm_steps_numbered.png)
+
+[生成した注釈 JSON](examples/llm_steps.json) · `markits render examples/llm_steps.json --image docs/images/llm_demo_input.png --output docs/images/llm_steps_numbered.png`
+
+生成の前に画像の寸法を知りたい場合は `markits inspect screenshot.png`、注釈を検証する場合は `markits validate annotations.json --image screenshot.png` を使えます。画像モードでは JSON の `canvas` を省略できます。
+
+---
+
 ## 🔖 対応マーク（アノテーション）一覧 & スクリーンショット
 
-MarkIts で利用可能な全 13 種類のマーク（アノテーション）の一覧です。UI 上の対象要素（`target`）に合わせて自動レイアウトされ、視認性の高いアノテーション SVG を出力します。
+MarkIts で利用可能な 13 種類の描画マーク（アノテーション）の一覧です。高レベルの `instruction` も利用できます。UI 上の対象要素（`target`）に合わせて自動レイアウトされ、視認性の高いアノテーション SVG を出力します。
 
 ### マーククイック一覧表
 
@@ -427,6 +461,19 @@ MarkIts では、色コードを直接指定する代わりに、デザインシ
    "target": { "x": 100, "y": 150, "width": 240, "height": 50 }
    // または省略形 {"x": 100, "y": 150, "w": 240, "h": 50}
    ```
+3. **名前付き target**：トップレベルの `targets` に座標を定義し、注釈から名前で参照できます。
+   ```json
+   {
+     "canvas": {"width": 960, "height": 720},
+     "targets": {"save-button": [820, 640, 100, 36]},
+     "annotations": [
+       {"id": "step1", "type": "instruction", "action": "click",
+        "target": "save-button", "text": "保存をクリック"}
+     ]
+   }
+   ```
+
+`instruction` の `action` は `click`, `enter`, `select`, `drag`, `attention`, `warning`, `compare` です。`click`, `attention`, `warning` は spotlight と callout、`select` は rect と callout に展開されます。`drag` は移動先を `to`、`compare` は比較先を `with` で指定します。`to` と `with` も名前付き target を参照できます。
 
 ### 配置優先ヒント (`position`)
 `callout`, `pin`, `badge`, `step-arrow`, `label`, `arrow` で指定可能です：
@@ -464,9 +511,29 @@ cargo build --release
 # JSON ファイルから SVG を生成して標準出力
 markits render input.json > overlay.svg
 
+# 元画像に注釈を重ねて PNG を保存（JSON の canvas は省略可能）
+markits render input.json --image screenshot.png --output annotated.png
+
+# 画像の寸法と形式を確認
+markits inspect screenshot.png
+
+# SVG と配置結果を JSON で取得
+markits render input.json --format layout-json > layout.json
+
+# 入力を検証
+markits validate input.json
+
+# canvas を省略した JSON を元画像と一緒に検証
+markits validate input.json --image screenshot.png
+
+# AI/LLM 向けの Markdown マニュアルを表示（markits -h からも案内）
+markits manual
+
 # パイプ (stdin) 経由で生成
 cat input.json | markits render - > overlay.svg
 ```
+
+配置結果の各要素には `id`, `source_id`, `kind`, `bounds` と、矢印がある場合は `arrow_path` が含まれます。`bounds` はラベルなど本体の矩形で、矢印の経路は別フィールドです。正式な入力仕様は [markits.schema.json](markits.schema.json) にあります。
 
 ---
 
@@ -522,7 +589,7 @@ cat input.json | markits render - > overlay.svg
 ## Rust ライブラリとしての利用
 
 ```rust
-use markits::{render_from_json, Scene};
+use markits::{render_from_json, render_with_layout_from_json};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let json_data = r#"{
@@ -541,6 +608,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // 直接 JSON 文字列から SVG を出力
     let svg = render_from_json(json_data)?;
     println!("{}", svg);
+
+    // 同じ入力から SVG と各要素の配置結果を取得
+    let result = render_with_layout_from_json(json_data)?;
+    println!("{} elements", result.elements.len());
 
     Ok(())
 }

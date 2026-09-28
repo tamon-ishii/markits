@@ -1,0 +1,5 @@
+{
+  "annotations": [
+    {"type": "instruction", "action": "click", "target": [618, 338, 132, 44], "text": "Click Save", "position": "top", "outline": false}
+  ]
+}

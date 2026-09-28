@@ -82,6 +82,10 @@ impl<'de> Deserialize<'de> for TargetRect {
                     .next_element::<f64>()?
                     .ok_or_else(|| de::Error::invalid_length(3, &"4 elements [x, y, width, height]"))?;
 
+                if seq.next_element::<de::IgnoredAny>()?.is_some() {
+                    return Err(de::Error::invalid_length(5, &"exactly 4 elements [x, y, width, height]"));
+                }
+
                 Ok(TargetRect { x, y, width, height })
             }
 
@@ -159,6 +163,10 @@ impl<'de> Deserialize<'de> for Point2D {
                 let y = seq
                     .next_element::<f64>()?
                     .ok_or_else(|| de::Error::invalid_length(1, &"2 elements [x, y]"))?;
+
+                if seq.next_element::<de::IgnoredAny>()?.is_some() {
+                    return Err(de::Error::invalid_length(3, &"exactly 2 elements [x, y]"));
+                }
 
                 Ok(Point2D { x, y })
             }
@@ -526,9 +534,7 @@ pub struct Scene {
 
 impl Scene {
     pub fn from_json(json_str: &str) -> Result<Self> {
-        let scene: Self = serde_json::from_str(json_str)?;
-        scene.validate()?;
-        Ok(scene)
+        Ok(crate::semantic::resolve_json(json_str)?.scene)
     }
 
     pub fn validate(&self) -> Result<()> {

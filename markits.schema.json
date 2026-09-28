@@ -1,0 +1,104 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/tamon-ishii/markits/main/markits.schema.json",
+  "title": "MarkIts semantic annotation scene",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["canvas"],
+  "properties": {
+    "canvas": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["width", "height"],
+      "properties": {
+        "width": {"type": "integer", "minimum": 1},
+        "height": {"type": "integer", "minimum": 1}
+      }
+    },
+    "shadow": {"type": "boolean"},
+    "targets": {"type": "object", "additionalProperties": {"$ref": "#/$defs/rect"}},
+    "annotations": {"type": "array", "items": {"$ref": "#/$defs/annotation"}}
+  },
+  "$defs": {
+    "rect": {
+      "oneOf": [
+        {
+          "type": "array", "prefixItems": [
+            {"type": "number"}, {"type": "number"},
+            {"type": "number", "exclusiveMinimum": 0},
+            {"type": "number", "exclusiveMinimum": 0}
+          ], "minItems": 4, "maxItems": 4
+        },
+        {
+          "type": "object", "additionalProperties": false,
+          "required": ["x", "y"],
+          "allOf": [
+            {"anyOf": [{"required": ["width"]}, {"required": ["w"]}]},
+            {"anyOf": [{"required": ["height"]}, {"required": ["h"]}]}
+          ],
+          "properties": {
+            "x": {"type": "number"}, "y": {"type": "number"},
+            "width": {"type": "number", "exclusiveMinimum": 0},
+            "height": {"type": "number", "exclusiveMinimum": 0},
+            "w": {"type": "number", "exclusiveMinimum": 0},
+            "h": {"type": "number", "exclusiveMinimum": 0}
+          }
+        }
+      ]
+    },
+    "point": {
+      "oneOf": [
+        {"type": "array", "prefixItems": [{"type": "number"}, {"type": "number"}], "minItems": 2, "maxItems": 2},
+        {"type": "object", "additionalProperties": false, "required": ["x", "y"],
+          "properties": {"x": {"type": "number"}, "y": {"type": "number"}}}
+      ]
+    },
+    "target": {"oneOf": [{"$ref": "#/$defs/rect"}, {"type": "string", "minLength": 1}]},
+    "style": {"enum": ["primary", "secondary", "warning", "danger", "info", "step", "pink"]},
+    "position": {"enum": ["auto", "top", "bottom", "left", "right", "top-left", "top-right", "bottom-left", "bottom-right", "center"]},
+    "annotation": {
+      "type": "object", "additionalProperties": false,
+      "required": ["type"],
+      "properties": {
+        "type": {"enum": ["arrow", "rect", "rounded-rect", "circle", "label", "callout", "badge", "step-arrow", "spotlight", "pin", "bullseye", "divider", "bezier-arrow", "instruction"]},
+        "id": {"type": "string", "minLength": 1},
+        "target": {"$ref": "#/$defs/target"},
+        "to": {"$ref": "#/$defs/target"},
+        "with": {"$ref": "#/$defs/target"},
+        "text": {"type": "string"},
+        "style": {"$ref": "#/$defs/style"},
+        "position": {"$ref": "#/$defs/position"},
+        "shadow": {"type": "boolean"},
+        "outline": {"type": "boolean"},
+        "step": {"type": "integer", "minimum": 0},
+        "arrow": {"type": "boolean"},
+        "rx": {"type": "number", "minimum": 0},
+        "ry": {"type": "number", "minimum": 0},
+        "icon": {"type": "string"},
+        "start": {"$ref": "#/$defs/point"},
+        "control": {"$ref": "#/$defs/point"},
+        "end": {"$ref": "#/$defs/point"},
+        "offset": {"type": "number"},
+        "t": {"type": "number", "minimum": 0, "maximum": 1},
+        "boxed": {"type": "boolean"},
+        "action": {"enum": ["click", "enter", "select", "drag", "attention", "warning", "compare"]}
+      },
+      "allOf": [
+        {"if": {"properties": {"type": {"enum": ["callout", "label"]}}}, "then": {"propertyNames": {"enum": ["type", "id", "target", "text", "style", "position", "shadow", "outline"]}}},
+        {"if": {"properties": {"type": {"enum": ["rect", "circle", "bullseye"]}}}, "then": {"propertyNames": {"enum": ["type", "id", "target", "style", "shadow"]}}},
+        {"if": {"properties": {"type": {"const": "rounded-rect"}}}, "then": {"propertyNames": {"enum": ["type", "id", "target", "style", "shadow", "rx", "ry"]}}},
+        {"if": {"properties": {"type": {"enum": ["spotlight", "divider"]}}}, "then": {"propertyNames": {"enum": ["type", "id", "target", "style"]}}},
+        {"if": {"properties": {"type": {"const": "badge"}}}, "then": {"propertyNames": {"enum": ["type", "id", "target", "style", "shadow", "step", "text", "position", "arrow"]}}},
+        {"if": {"properties": {"type": {"enum": ["arrow", "step-arrow"]}}}, "then": {"propertyNames": {"enum": ["type", "id", "target", "style", "shadow", "step", "text", "position"]}}},
+        {"if": {"properties": {"type": {"const": "pin"}}}, "then": {"propertyNames": {"enum": ["type", "id", "target", "style", "shadow", "text", "icon", "position", "outline"]}}},
+        {"if": {"properties": {"type": {"const": "bezier-arrow"}}}, "then": {"propertyNames": {"enum": ["type", "id", "target", "style", "shadow", "start", "control", "end", "text", "position", "offset", "t", "outline", "boxed"]}}},
+        {"if": {"properties": {"type": {"const": "instruction"}}}, "then": {"propertyNames": {"enum": ["type", "id", "target", "style", "shadow", "action", "text", "position", "outline", "to", "with"]}}},
+        {"if": {"properties": {"type": {"const": "instruction"}}}, "then": {"required": ["target", "action"]}},
+        {"if": {"properties": {"action": {"const": "drag"}}, "required": ["action"]}, "then": {"required": ["to"]}},
+        {"if": {"properties": {"action": {"const": "compare"}}, "required": ["action"]}, "then": {"required": ["with"]}},
+        {"if": {"properties": {"type": {"enum": ["label", "callout"]}}}, "then": {"required": ["target", "text"]}},
+        {"if": {"properties": {"type": {"enum": ["arrow", "rect", "rounded-rect", "circle", "badge", "step-arrow", "spotlight", "pin", "bullseye", "divider"]}}}, "then": {"required": ["target"]}}
+      ]
+    }
+  }
+}
