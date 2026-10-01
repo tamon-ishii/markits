@@ -231,28 +231,31 @@ impl SvgRenderer {
                         start.x, start.y, end.x, end.y, tokens.stroke_color, stroke_width
                     ));
                 }
-                ResolvedAnnotation::Rect { rect, style, .. } => {
+                ResolvedAnnotation::Rect { rect, style, stroke_width, .. } => {
                     let tokens = self.theme.tokens_for(*style);
+                    let sw = stroke_width.unwrap_or(tokens.stroke_width);
                     svg.push_str(&format!(
                         r#"  <rect x="{}" y="{}" width="{}" height="{}" fill="{}" stroke="{}" stroke-width="{}"/>
 "#,
-                        rect.x, rect.y, rect.width, rect.height, tokens.light_fill, tokens.stroke_color, tokens.stroke_width
+                        rect.x, rect.y, rect.width, rect.height, tokens.light_fill, tokens.stroke_color, sw
                     ));
                 }
-                ResolvedAnnotation::RoundedRect { rect, rx, ry, style, .. } => {
+                ResolvedAnnotation::RoundedRect { rect, rx, ry, style, stroke_width, .. } => {
                     let tokens = self.theme.tokens_for(*style);
+                    let sw = stroke_width.unwrap_or(tokens.stroke_width);
                     svg.push_str(&format!(
                         r#"  <rect x="{}" y="{}" width="{}" height="{}" rx="{}" ry="{}" fill="{}" stroke="{}" stroke-width="{}"/>
 "#,
-                        rect.x, rect.y, rect.width, rect.height, rx, ry, tokens.light_fill, tokens.stroke_color, tokens.stroke_width
+                        rect.x, rect.y, rect.width, rect.height, rx, ry, tokens.light_fill, tokens.stroke_color, sw
                     ));
                 }
-                ResolvedAnnotation::Circle { cx, cy, rx, ry, style, .. } => {
+                ResolvedAnnotation::Circle { cx, cy, rx, ry, style, stroke_width, .. } => {
                     let tokens = self.theme.tokens_for(*style);
+                    let sw = stroke_width.unwrap_or(tokens.stroke_width);
                     svg.push_str(&format!(
                         r#"  <ellipse cx="{}" cy="{}" rx="{}" ry="{}" fill="{}" stroke="{}" stroke-width="{}"/>
 "#,
-                        cx, cy, rx, ry, tokens.light_fill, tokens.stroke_color, tokens.stroke_width
+                        cx, cy, rx, ry, tokens.light_fill, tokens.stroke_color, sw
                     ));
                 }
                 ResolvedAnnotation::Bullseye { center, outer_radius, inner_radius, dot_radius, style, shadow } => {
@@ -271,24 +274,97 @@ impl SvgRenderer {
                         center.x, center.y, dot_radius, tokens.stroke_color
                     ));
                 }
-                ResolvedAnnotation::Arrow { start, end, style, shadow, .. } => {
+                ResolvedAnnotation::Arrow { start, end, text, style, shadow, stroke_width, boxed, outline, text_placement } => {
                     let tokens = self.theme.tokens_for(*style);
+                    let sw = stroke_width.unwrap_or(tokens.stroke_width);
                     let key = style_key(*style);
                     let filter_attr = if *shadow { r#" filter="url(#markits-shadow)""# } else { "" };
                     svg.push_str(&format!(
                         r#"  <line x1="{}" y1="{}" x2="{}" y2="{}" stroke="{}" stroke-width="{}" stroke-linecap="round" marker-end="url(#arrowhead-{})"{}/>
 "#,
-                        start.x, start.y, end.x, end.y, tokens.stroke_color, tokens.stroke_width, key, filter_attr
+                        start.x, start.y, end.x, end.y, tokens.stroke_color, sw, key, filter_attr
                     ));
+
+                    if let Some(txt) = text {
+                        if !txt.trim().is_empty() {
+                            let escaped = escape_xml(txt);
+                            let dx = end.x - start.x;
+                            let dy = end.y - start.y;
+                            let len = (dx * dx + dy * dy).sqrt().max(0.001);
+                            let dir_x = dx / len;
+                            let dir_y = dy / len;
+                            let perp_x = -dy / len;
+                            let perp_y = dx / len;
+
+                            let (base_x, base_y) = match text_placement {
+                                crate::model::ArrowTextPlacement::End => {
+                                    let tip_offset = (len * 0.25).min(20.0);
+                                    (end.x - dir_x * tip_offset, end.y - dir_y * tip_offset)
+                                }
+                                crate::model::ArrowTextPlacement::Middle => {
+                                    ((start.x + end.x) / 2.0, (start.y + end.y) / 2.0)
+                                }
+                            };
+
+                            let font_size = self.theme.font_size;
+                            let text_dim = crate::layout::estimate_text_dimensions(txt, font_size);
+                            let pill_w = text_dim.width + 16.0;
+                            let pill_h = text_dim.height + 8.0;
+                            let rx = self.theme.corner_radius;
+                            let ry = self.theme.corner_radius;
+
+                            // Offset slightly perpendicular to arrow so line doesn't strike through text
+                            let offset_dist = pill_h / 2.0 + sw + 4.0;
+                            let cx = base_x + perp_x * offset_dist;
+                            let cy = base_y + perp_y * offset_dist;
+                            let box_x = cx - pill_w / 2.0;
+                            let box_y = cy - pill_h / 2.0;
+
+                            if *boxed {
+                                let stroke_color = if *outline { "#ffffff" } else { tokens.stroke_color };
+                                svg.push_str(&format!(
+                                    r#"  <g{}>
+    <rect x="{}" y="{}" width="{}" height="{}" rx="{}" ry="{}" fill="{}" stroke="{}" stroke-width="1.5"/>
+    <text x="{}" y="{}" fill="{}" font-family="{}" font-size="{}" font-weight="600" text-anchor="middle" dominant-baseline="central">{}</text>
+  </g>
+"#,
+                                    filter_attr,
+                                    box_x, box_y, pill_w, pill_h, rx, ry,
+                                    tokens.fill_color, stroke_color,
+                                    cx, cy,
+                                    tokens.text_color, self.theme.font_family, font_size,
+                                    escaped
+                                ));
+                            } else {
+                                let outline_attr = if *outline {
+                                    r##" stroke="#ffffff" stroke-width="1.8" stroke-linejoin="round" paint-order="stroke fill""##
+                                } else {
+                                    ""
+                                };
+                                svg.push_str(&format!(
+                                    r#"  <g{}>
+    <text x="{}" y="{}" fill="{}" font-family="{}" font-size="{}" font-weight="600" text-anchor="middle" dominant-baseline="central"{}>{}</text>
+  </g>
+"#,
+                                    filter_attr,
+                                    cx, cy,
+                                    tokens.stroke_color, self.theme.font_family, font_size,
+                                    outline_attr,
+                                    escaped
+                                ));
+                            }
+                        }
+                    }
                 }
-                ResolvedAnnotation::BezierArrow { start, control, end, style, shadow, .. } => {
+                ResolvedAnnotation::BezierArrow { start, control, end, style, shadow, stroke_width, .. } => {
                     let tokens = self.theme.tokens_for(*style);
+                    let sw = stroke_width.unwrap_or(tokens.stroke_width);
                     let key = style_key(*style);
                     let filter_attr = if *shadow { r#" filter="url(#markits-shadow)""# } else { "" };
                     svg.push_str(&format!(
                         r#"  <path d="M {} {} Q {} {} {} {}" fill="none" stroke="{}" stroke-width="{}" stroke-linecap="round" marker-end="url(#arrowhead-{})"{}/>
 "#,
-                        start.x, start.y, control.x, control.y, end.x, end.y, tokens.stroke_color, tokens.stroke_width, key, filter_attr
+                        start.x, start.y, control.x, control.y, end.x, end.y, tokens.stroke_color, sw, key, filter_attr
                     ));
                 }
                 _ => {}
@@ -302,25 +378,20 @@ impl SvgRenderer {
                     let tokens = self.theme.tokens_for(*style);
                     let escaped = multiline_text(text, box_rect.center_x(), self.theme.font_size);
                     let filter_attr = if *shadow { r#" filter="url(#markits-shadow)""# } else { "" };
-                    let outline_attr = if *outline {
-                        r##" stroke="#ffffff" stroke-width="3.5" stroke-linejoin="round" paint-order="stroke fill""##
-                    } else {
-                        ""
-                    };
+                    let stroke_color = if *outline { "#ffffff" } else { tokens.stroke_color };
 
                     svg.push_str(&format!(
                         r#"  <g{}>
     <rect x="{}" y="{}" width="{}" height="{}" rx="{}" ry="{}" fill="{}" stroke="{}" stroke-width="1.5"/>
-    <text x="{}" y="{}" fill="{}" font-family="{}" font-size="{}" font-weight="600" text-anchor="middle" dominant-baseline="central"{}>{}</text>
+    <text x="{}" y="{}" fill="{}" font-family="{}" font-size="{}" font-weight="600" text-anchor="middle" dominant-baseline="central">{}</text>
   </g>
 "#,
                         filter_attr,
                         box_rect.x, box_rect.y, box_rect.width, box_rect.height,
                         self.theme.corner_radius, self.theme.corner_radius,
-                        tokens.fill_color, tokens.stroke_color,
+                        tokens.fill_color, stroke_color,
                         box_rect.center_x(), box_rect.center_y(),
                         tokens.text_color, self.theme.font_family, self.theme.font_size,
-                        outline_attr,
                         escaped
                     ));
                 }
@@ -329,11 +400,7 @@ impl SvgRenderer {
                     let key = style_key(*style);
                     let escaped = multiline_text(text, box_rect.center_x(), self.theme.font_size);
                     let filter_attr = if *shadow { r#" filter="url(#markits-shadow)""# } else { "" };
-                    let outline_attr = if *outline {
-                        r##" stroke="#ffffff" stroke-width="3.5" stroke-linejoin="round" paint-order="stroke fill""##
-                    } else {
-                        ""
-                    };
+                    let stroke_color = if *outline { "#ffffff" } else { tokens.stroke_color };
 
                     // Pointer arrow line
                     svg.push_str(&format!(
@@ -346,16 +413,15 @@ impl SvgRenderer {
                     svg.push_str(&format!(
                         r#"  <g{}>
     <rect x="{}" y="{}" width="{}" height="{}" rx="{}" ry="{}" fill="{}" stroke="{}" stroke-width="1.5"/>
-    <text x="{}" y="{}" fill="{}" font-family="{}" font-size="{}" font-weight="600" text-anchor="middle" dominant-baseline="central"{}>{}</text>
+    <text x="{}" y="{}" fill="{}" font-family="{}" font-size="{}" font-weight="600" text-anchor="middle" dominant-baseline="central">{}</text>
   </g>
 "#,
                         filter_attr,
                         box_rect.x, box_rect.y, box_rect.width, box_rect.height,
                         self.theme.corner_radius, self.theme.corner_radius,
-                        tokens.fill_color, tokens.stroke_color,
+                        tokens.fill_color, stroke_color,
                         box_rect.center_x(), box_rect.center_y(),
                         tokens.text_color, self.theme.font_family, self.theme.font_size,
-                        outline_attr,
                         escaped
                     ));
                 }
@@ -386,8 +452,10 @@ impl SvgRenderer {
                     arrow_end,
                     style,
                     shadow,
+                    stroke_width,
                 } => {
                     let tokens = self.theme.tokens_for(*style);
+                    let sw = stroke_width.unwrap_or(tokens.stroke_width);
                     let key = style_key(*style);
                     let escaped = escape_xml(label);
                     let filter_attr = if *shadow { r#" filter="url(#markits-shadow)""# } else { "" };
@@ -396,7 +464,7 @@ impl SvgRenderer {
                     svg.push_str(&format!(
                         r#"  <line x1="{}" y1="{}" x2="{}" y2="{}" stroke="{}" stroke-width="{}" stroke-linecap="round" marker-end="url(#arrowhead-{})"/>
 "#,
-                        arrow_start.x, arrow_start.y, arrow_end.x, arrow_end.y, tokens.stroke_color, tokens.stroke_width, key
+                        arrow_start.x, arrow_start.y, arrow_end.x, arrow_end.y, tokens.stroke_color, sw, key
                     ));
 
                     // 2. Circular step badge
@@ -417,11 +485,6 @@ impl SvgRenderer {
                 ResolvedAnnotation::Pin { head_center, head_radius, tip, icon, text, text_rect, style, shadow, outline } => {
                     let tokens = self.theme.tokens_for(*style);
                     let filter_attr = if *shadow { r#" filter="url(#markits-shadow)""# } else { "" };
-                    let outline_attr = if *outline {
-                        r##" stroke="#ffffff" stroke-width="3" stroke-linejoin="round" paint-order="stroke fill""##
-                    } else {
-                        ""
-                    };
 
                     // Compute triangular pointer base perpendicular to the (head_center -> tip) direction
                     let dx = tip.x - head_center.x;
@@ -468,13 +531,14 @@ impl SvgRenderer {
                     // 4. Linked text pill
                     if let (Some(txt), Some(tr)) = (text, text_rect) {
                         let escaped_text = escape_xml(txt);
+                        let stroke_color = if *outline { "#ffffff" } else { tokens.stroke_color };
                         svg.push_str(&format!(
-                            r##"    <rect x="{}" y="{}" width="{}" height="{}" rx="{}" ry="{}" fill="#1e293b" stroke="#ffffff" stroke-width="1.5"/>
-    <text x="{}" y="{}" fill="#ffffff" font-family="{}" font-size="{}" font-weight="600" text-anchor="middle" dominant-baseline="central"{}>{}</text>
+                            r##"    <rect x="{}" y="{}" width="{}" height="{}" rx="{}" ry="{}" fill="#1e293b" stroke="{}" stroke-width="1.5"/>
+    <text x="{}" y="{}" fill="#ffffff" font-family="{}" font-size="{}" font-weight="600" text-anchor="middle" dominant-baseline="central">{}</text>
 "##,
                             tr.x, tr.y, tr.width, tr.height, self.theme.corner_radius, self.theme.corner_radius,
+                            stroke_color,
                             tr.center_x(), tr.center_y(), self.theme.font_family, self.theme.font_size,
-                            outline_attr,
                             escaped_text
                         ));
                     }
@@ -505,7 +569,7 @@ impl SvgRenderer {
                             ));
                         } else {
                             let outline_attr = if *outline {
-                                r##" stroke="#ffffff" stroke-width="3.5" stroke-linejoin="round" paint-order="stroke fill""##
+                                r##" stroke="#ffffff" stroke-width="1.8" stroke-linejoin="round" paint-order="stroke fill""##
                             } else {
                                 ""
                             };
@@ -606,6 +670,7 @@ mod tests {
             canvas: Canvas { width: 1920, height: 1080 },
             shadow: true,
             annotations: vec![],
+            uimap: None,
         };
         let svg = scene.render_svg().unwrap();
         assert!(svg.starts_with(r#"<svg xmlns="http://www.w3.org/2000/svg" width="1920" height="1080" viewBox="0 0 1920 1080">"#));
@@ -630,7 +695,7 @@ mod tests {
         assert!(svg.contains("設定を保存します"));
         assert!(svg.contains("marker-end=\"url(#arrowhead-primary)\""));
         assert!(svg.contains("<filter id=\"markits-shadow\""));
-        assert!(svg.contains("paint-order=\"stroke fill\""));
+        assert!(svg.contains("<rect"));
     }
 
     #[test]

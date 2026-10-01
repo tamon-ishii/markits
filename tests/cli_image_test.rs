@@ -109,7 +109,13 @@ fn cli_inspects_images_and_infers_canvas_for_render_and_validate() {
     let info: serde_json::Value = serde_json::from_slice(&inspect.stdout).unwrap();
     assert_eq!(
         info,
-        serde_json::json!({"width":64,"height":48,"format":"jpeg"})
+        serde_json::json!({
+            "width": 64,
+            "height": 48,
+            "format": "jpeg",
+            "has_uimap": false,
+            "uimap_elements_count": 0
+        })
     );
 
     let valid = Command::new(env!("CARGO_BIN_EXE_markits"))
@@ -192,5 +198,83 @@ fn raster_output_contains_annotation_text() {
         }
     }
     assert!(white_text_pixels > 0, "annotation text was not rasterized");
+    fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn cli_uimap_and_quick_annotate_flow() {
+    let dir = test_dir();
+    let source = dir.join("source.png");
+    let uimap_file = dir.join("uimap.json");
+    let output = dir.join("annotated.png");
+
+    RgbaImage::from_pixel(400, 300, Rgba([255, 255, 255, 255]))
+        .save_with_format(&source, ImageFormat::Png)
+        .unwrap();
+
+    let uimap_json = r#"[
+        {"role": "button", "name": "保存", "x": 100, "y": 50, "width": 80, "height": 32},
+        {"role": "button", "name": "キャンセル", "x": 200, "y": 50, "width": 90, "height": 32}
+    ]"#;
+    fs::write(&uimap_file, uimap_json).unwrap();
+
+    // 1. Quick Annotate using external UIMap targeting "保存" by name
+    let result = Command::new(env!("CARGO_BIN_EXE_markits"))
+        .args([
+            "annotate",
+            source.to_str().unwrap(),
+            "--target",
+            "保存",
+            "--mark",
+            "pin",
+            "--text",
+            "ここをクリック",
+            "--uimap",
+            uimap_file.to_str().unwrap(),
+            "--output",
+            output.to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+
+    assert!(
+        result.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+    assert!(output.exists());
+    let rendered = image::open(&output).unwrap().to_rgba8();
+    assert_eq!(rendered.dimensions(), (400, 300));
+
+    // 2. Validate with --uimap
+    let anno_json = dir.join("anno.json");
+    fs::write(&anno_json, r#"{"annotations":[{"type":"pin","target":"保存ボタン"}]}"#).unwrap();
+    let validate_res = Command::new(env!("CARGO_BIN_EXE_markits"))
+        .args([
+            "validate",
+            anno_json.to_str().unwrap(),
+            "--image",
+            source.to_str().unwrap(),
+            "--uimap",
+            uimap_file.to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        validate_res.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&validate_res.stderr)
+    );
+
+    // 3. Verify that the output PNG preserved the UIMap metadata
+    let uimap_out = Command::new(env!("CARGO_BIN_EXE_markits"))
+        .args(["uimap", output.to_str().unwrap(), "--json"])
+        .output()
+        .unwrap();
+    assert!(uimap_out.status.success(), "stderr: {}", String::from_utf8_lossy(&uimap_out.stderr));
+    let elements: Vec<serde_json::Value> = serde_json::from_slice(&uimap_out.stdout).unwrap();
+    assert_eq!(elements.len(), 2);
+    assert_eq!(elements[0]["name"], "保存");
+
     fs::remove_dir_all(dir).unwrap();
 }

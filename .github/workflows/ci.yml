@@ -16,8 +16,30 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
+
+      - name: Install Linux system dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential curl wget file libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+          cache-dependency-path: apps/desktop/package-lock.json
+
+      - name: Install and build frontend
+        run: |
+          npm ci
+          npm run build
+        working-directory: apps/desktop
+
       - uses: dtolnay/rust-toolchain@stable
+
       - name: Cargo check
         run: cargo check --all-targets
+
       - name: Cargo test
         run: cargo test --all-targets

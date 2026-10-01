@@ -52,6 +52,40 @@ impl TargetRect {
     }
 }
 
+fn default_ui_role() -> String {
+    "control".to_string()
+}
+
+/// A detected UI element (button, textbox, window, etc.) in a UIMap.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct UiElement {
+    #[serde(default = "default_ui_role")]
+    pub role: String,
+    #[serde(default)]
+    pub name: String,
+    pub x: f64,
+    pub y: f64,
+    pub width: f64,
+    pub height: f64,
+}
+
+impl UiElement {
+    pub fn new(role: impl Into<String>, name: impl Into<String>, x: f64, y: f64, width: f64, height: f64) -> Self {
+        Self {
+            role: role.into(),
+            name: name.into(),
+            x,
+            y,
+            width,
+            height,
+        }
+    }
+
+    pub fn rect(&self) -> TargetRect {
+        TargetRect::new(self.x, self.y, self.width, self.height)
+    }
+}
+
 impl<'de> Deserialize<'de> for TargetRect {
     fn deserialize<D>(deserializer: D) -> std::result::Result<Self, D::Error>
     where
@@ -227,6 +261,16 @@ pub enum PositionHint {
     Center,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "kebab-case")]
+pub enum ArrowTextPlacement {
+    #[default]
+    #[serde(alias = "center", alias = "mid")]
+    Middle,
+    #[serde(alias = "tip", alias = "head", alias = "endpoint")]
+    End,
+}
+
 fn default_true() -> bool {
     true
 }
@@ -236,20 +280,50 @@ fn default_true() -> bool {
 #[serde(tag = "type", rename_all = "kebab-case", deny_unknown_fields)]
 pub enum Annotation {
     Arrow {
-        target: TargetRect,
+        #[serde(default)]
+        target: Option<TargetRect>,
+        #[serde(default, alias = "from", alias = "p0", alias = "start_point")]
+        start: Option<Point2D>,
+        #[serde(default, alias = "to", alias = "p1", alias = "end_point")]
+        end: Option<Point2D>,
+        #[serde(default, alias = "stroke_width", alias = "width", alias = "thickness", alias = "line_width")]
+        stroke_width: Option<f64>,
         #[serde(default)]
         step: Option<u32>,
         #[serde(default)]
         text: Option<String>,
+        #[serde(
+            default,
+            alias = "text_placement",
+            alias = "text_position",
+            alias = "placement",
+            alias = "text_pos",
+            alias = "text_anchor"
+        )]
+        text_placement: Option<ArrowTextPlacement>,
         #[serde(default)]
         style: SemanticStyle,
         #[serde(default)]
         position: PositionHint,
         #[serde(default)]
         shadow: Option<bool>,
+        #[serde(default)]
+        outline: Option<bool>,
+        #[serde(
+            default,
+            alias = "box",
+            alias = "enclosure",
+            alias = "frame",
+            alias = "pill",
+            alias = "badge",
+            alias = "background"
+        )]
+        boxed: Option<bool>,
     },
     Rect {
         target: TargetRect,
+        #[serde(default, alias = "stroke_width", alias = "width", alias = "thickness", alias = "line_width")]
+        stroke_width: Option<f64>,
         #[serde(default)]
         style: SemanticStyle,
         #[serde(default)]
@@ -258,6 +332,8 @@ pub enum Annotation {
     #[serde(alias = "rounded_rect")]
     RoundedRect {
         target: TargetRect,
+        #[serde(default, alias = "stroke_width", alias = "width", alias = "thickness", alias = "line_width")]
+        stroke_width: Option<f64>,
         #[serde(default)]
         rx: Option<f64>,
         #[serde(default)]
@@ -270,6 +346,8 @@ pub enum Annotation {
     #[serde(alias = "ellipse")]
     Circle {
         target: TargetRect,
+        #[serde(default, alias = "stroke_width", alias = "width", alias = "thickness", alias = "line_width")]
+        stroke_width: Option<f64>,
         #[serde(default)]
         style: SemanticStyle,
         #[serde(default)]
@@ -330,6 +408,8 @@ pub enum Annotation {
     )]
     StepArrow {
         target: TargetRect,
+        #[serde(default, alias = "stroke_width", alias = "width", alias = "thickness", alias = "line_width")]
+        stroke_width: Option<f64>,
         #[serde(default)]
         step: Option<u32>,
         #[serde(default)]
@@ -399,12 +479,23 @@ pub enum Annotation {
         control: Option<Point2D>,
         #[serde(default, alias = "to", alias = "p2", alias = "end_point")]
         end: Option<Point2D>,
+        #[serde(default, alias = "stroke_width", alias = "width", alias = "thickness", alias = "line_width")]
+        stroke_width: Option<f64>,
         #[serde(default)]
         text: Option<String>,
         #[serde(default)]
         style: SemanticStyle,
-        #[serde(default, alias = "text_position")]
+        #[serde(default)]
         position: PositionHint,
+        #[serde(
+            default,
+            alias = "text_placement",
+            alias = "text_position",
+            alias = "placement",
+            alias = "text_pos",
+            alias = "text_anchor"
+        )]
+        text_placement: Option<ArrowTextPlacement>,
         #[serde(
             default,
             alias = "gap",
@@ -435,8 +526,20 @@ pub enum Annotation {
 impl Annotation {
     pub fn target(&self) -> TargetRect {
         match self {
-            Annotation::Arrow { target, .. }
-            | Annotation::Rect { target, .. }
+            Annotation::Arrow { target, start, end, .. } => {
+                if let Some(t) = target {
+                    *t
+                } else {
+                    let s = start.unwrap_or(Point2D::new(0.0, 0.0));
+                    let e = end.unwrap_or(Point2D::new(100.0, 100.0));
+                    let min_x = s.x.min(e.x);
+                    let max_x = s.x.max(e.x);
+                    let min_y = s.y.min(e.y);
+                    let max_y = s.y.max(e.y);
+                    TargetRect::new(min_x, min_y, (max_x - min_x).max(1.0), (max_y - min_y).max(1.0))
+                }
+            }
+            Annotation::Rect { target, .. }
             | Annotation::RoundedRect { target, .. }
             | Annotation::Circle { target, .. }
             | Annotation::Label { target, .. }
@@ -517,6 +620,7 @@ impl Annotation {
             Annotation::Label { outline, .. }
             | Annotation::Callout { outline, .. }
             | Annotation::Pin { outline, .. }
+            | Annotation::Arrow { outline, .. }
             | Annotation::BezierArrow { outline, .. } => *outline,
             _ => None,
         }
@@ -532,6 +636,8 @@ pub struct Scene {
     pub shadow: bool,
     #[serde(default)]
     pub annotations: Vec<Annotation>,
+    #[serde(default, skip_serializing_if = "Option::is_none", alias = "ui_map", alias = "ui_elements")]
+    pub uimap: Option<Vec<UiElement>>,
 }
 
 impl Scene {
@@ -556,6 +662,13 @@ impl Scene {
                     "Annotation {} has invalid non-positive target dimensions (width: {}, height: {})",
                     idx, target.width, target.height
                 )));
+            }
+            if let Annotation::Arrow { target, start, end, .. } = annotation {
+                if target.is_none() && (start.is_none() || end.is_none()) {
+                    return Err(MarkitsError::Validation(format!(
+                        "annotations[{idx}]: arrow requires either 'target' or both 'start' and 'end'"
+                    )));
+                }
             }
             if let Annotation::Label { max_width: Some(width), .. } | Annotation::Callout { max_width: Some(width), .. } = annotation {
                 if !width.is_finite() || *width < 40.0 {
@@ -816,6 +929,29 @@ mod tests {
             assert_eq!(*position, PositionHint::Top);
         } else {
             panic!("Expected unboxed BezierArrow");
+        }
+    }
+
+    #[test]
+    fn test_arrow_with_explicit_start_end() {
+        let json = r#"{
+            "canvas": {"width": 800, "height": 600},
+            "annotations": [
+                {
+                    "type": "arrow",
+                    "start": [50, 60],
+                    "end": [200, 300],
+                    "style": "primary"
+                }
+            ]
+        }"#;
+        let scene = Scene::from_json(json).unwrap();
+        if let Annotation::Arrow { start, end, style, .. } = &scene.annotations[0] {
+            assert_eq!(*start, Some(Point2D::new(50.0, 60.0)));
+            assert_eq!(*end, Some(Point2D::new(200.0, 300.0)));
+            assert_eq!(*style, SemanticStyle::Primary);
+        } else {
+            panic!("Expected Arrow");
         }
     }
 }

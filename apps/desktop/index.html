@@ -1,0 +1,276 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="color-scheme" content="dark">
+  <title>MarkIts — Screen Capture & Annotation Editor</title>
+  <link rel="stylesheet" href="/src/style.css">
+</head>
+<body>
+  <div id="app">
+    <!-- Top Main Header & Global Actions -->
+    <header class="app-header">
+      <div class="brand">
+        <span class="logo-badge">MarkIts</span>
+        <nav class="nav-tabs">
+          <button id="tab-home" class="nav-tab active">🏠 ホーム</button>
+          <button id="tab-editor" class="nav-tab">✏️ エディタ</button>
+        </nav>
+      </div>
+
+      <div class="action-bar">
+        <button id="btn-trigger-capture" class="btn btn-primary" title="画面キャプチャ (PrintScreen)">
+          📷 キャプチャ
+        </button>
+        <button id="btn-open-file" class="btn" title="画像ファイルを開く">
+          📂 開く
+        </button>
+
+        <div id="editor-actions" class="editor-actions-group" style="display: none;">
+          <div class="divider-v"></div>
+          <button id="btn-toggle-snap" class="btn btn-toggle active" title="UI要素スナップ (Altで一時切替)">🧲 スナップ</button>
+          <button id="btn-crop" class="btn btn-toggle" title="キャンバスをクロップ (切り抜き)">✂️ クロップ</button>
+          <div class="divider-v"></div>
+          <div class="zoom-controls">
+            <button id="btn-zoom-out" class="btn btn-icon btn-sm" title="縮小 (Ctrl + WheelDown)">−</button>
+            <span id="zoom-label" class="zoom-label" title="クリックで100%にリセット">100%</span>
+            <button id="btn-zoom-in" class="btn btn-icon btn-sm" title="拡大 (Ctrl + WheelUp)">+</button>
+            <button id="btn-zoom-fit" class="btn btn-sm" title="全体を表示">⊡</button>
+          </div>
+          <div class="divider-v"></div>
+          <button id="btn-undo" class="btn btn-icon" title="元に戻す (Ctrl+Z)">↩</button>
+          <button id="btn-redo" class="btn btn-icon" title="やり直す (Ctrl+Y)">↪</button>
+          <div class="divider-v"></div>
+          <button id="btn-copy-clipboard" class="btn" title="クリップボードにコピー">
+            📋 コピー
+          </button>
+          <button id="btn-save-file" class="btn btn-success" title="PNGとして保存 (解像度・アスペクト比設定)">
+            💾 保存
+          </button>
+          <div class="divider-v"></div>
+          <button id="btn-done-editing" class="btn btn-primary" title="編集を完了してホーム画面に戻る">
+            ✓ 編集終了
+          </button>
+        </div>
+      </div>
+    </header>
+
+    <!-- 1. Home View: Capture History & Gallery -->
+    <main id="home-view" class="home-view">
+      <div class="home-container">
+        <!-- Quick Action Hero Banner -->
+        <div class="home-hero">
+          <div class="hero-text">
+            <h2>スクリーンキャプチャ & アノテーション</h2>
+            <p>いつでも <strong>PrintScreen</strong> キーを押すか、右上の「📷 キャプチャ」から画面を切り取れます。<br>過去に撮影したキャプチャは自動的に履歴に保存され、クリックするといつでもアノテーションを再編集できます。</p>
+          </div>
+          <div class="hero-actions">
+            <button id="btn-hero-capture" class="btn btn-primary btn-lg">
+              📷 今すぐ画面をキャプチャ (PrintScreen)
+            </button>
+            <button id="btn-hero-open" class="btn btn-lg">
+              📂 既存の画像を開いて編集
+            </button>
+          </div>
+        </div>
+
+        <!-- History Section -->
+        <div class="history-section-header">
+          <div class="section-title-wrap">
+            <h3>キャプチャ履歴</h3>
+            <span id="history-count" class="history-count-badge">0 件</span>
+          </div>
+          <button id="btn-refresh-history" class="btn btn-sm" title="履歴を更新">
+            🔄 更新
+          </button>
+        </div>
+
+        <!-- History Grid -->
+        <div id="history-grid" class="history-grid">
+          <div class="history-loading">履歴を読み込んでいます...</div>
+        </div>
+      </div>
+    </main>
+
+    <!-- 2. Editor View: Main Workspace -->
+    <main id="editor-view" class="workspace" style="display: none;">
+      <!-- Left Tool Palette -->
+      <aside class="palette-panel">
+        <div class="panel-title">マークツール</div>
+        <div class="tool-list">
+          <button class="tool-btn active" data-type="select" title="選択・ハンドル操作モード">
+            👆 選択
+          </button>
+          <div class="tool-group-label">矢印・ポインター</div>
+          <button class="tool-btn" data-type="arrow" title="直線矢印">
+            ➔ 矢印
+          </button>
+          <button class="tool-btn" data-type="bezier-arrow" title="ベジェ曲線矢印 (テキスト対応)">
+            ⤴ 曲線矢印
+          </button>
+          <button class="tool-btn" data-type="step-arrow" title="番号付き矢印">
+            ➔① ステップ矢印
+          </button>
+          <div class="tool-group-label">テキスト・バッジ</div>
+          <button class="tool-btn" data-type="callout" title="引出線付きコールアウト">
+            💬 コールアウト
+          </button>
+          <button class="tool-btn" data-type="pin" title="Skitch風ピン">
+            📍 ピンタグ
+          </button>
+          <button class="tool-btn" data-type="label" title="テキストラベル">
+            🏷️ ラベル
+          </button>
+          <button class="tool-btn" data-type="badge" title="手順バッジ">
+            ❶ バッジ
+          </button>
+          <div class="tool-group-label">ハイライト・図形</div>
+          <button class="tool-btn" data-type="rect" title="矩形ハイライト">
+            ⬜ 矩形
+          </button>
+          <button class="tool-btn" data-type="rounded-rect" title="角丸矩形">
+            ▢ 角丸矩形
+          </button>
+          <button class="tool-btn" data-type="circle" title="円形・楕円">
+            ⭕ 円形
+          </button>
+          <button class="tool-btn" data-type="spotlight" title="スポットライト (注目領域暗転)">
+            🔦 スポットライト
+          </button>
+          <button class="tool-btn" data-type="bullseye" title="注目点マーカー">
+            🎯 ブルズアイ
+          </button>
+          <button class="tool-btn" data-type="divider" title="区切り線">
+            ➖ 区切り線
+          </button>
+        </div>
+      </aside>
+
+      <!-- Center Canvas Preview Area -->
+      <section class="canvas-viewport" id="viewport">
+        <div class="canvas-container" id="canvas-container">
+          <img id="bg-image" class="bg-image" alt="Background Canvas" />
+          <div id="svg-layer" class="svg-layer"></div>
+          <svg id="snap-guide-layer" class="snap-guide-layer"></svg>
+          <svg id="handles-layer" class="handles-layer"></svg>
+          <!-- In-Editor Interactive Crop Overlay -->
+          <div id="editor-crop-overlay" class="editor-crop-overlay" style="display: none;">
+            <div id="crop-mask-top" class="crop-mask"></div>
+            <div id="crop-mask-bottom" class="crop-mask"></div>
+            <div id="crop-mask-left" class="crop-mask"></div>
+            <div id="crop-mask-right" class="crop-mask"></div>
+            <div id="crop-box" class="crop-box">
+              <div class="crop-border-line top"></div>
+              <div class="crop-border-line bottom"></div>
+              <div class="crop-border-line left"></div>
+              <div class="crop-border-line right"></div>
+              <div class="crop-handle nw" data-crop-handle="nw"></div>
+              <div class="crop-handle n" data-crop-handle="n"></div>
+              <div class="crop-handle ne" data-crop-handle="ne"></div>
+              <div class="crop-handle e" data-crop-handle="e"></div>
+              <div class="crop-handle se" data-crop-handle="se"></div>
+              <div class="crop-handle s" data-crop-handle="s"></div>
+              <div class="crop-handle sw" data-crop-handle="sw"></div>
+              <div class="crop-handle w" data-crop-handle="w"></div>
+              <div class="crop-size-badge" id="crop-size-badge">800 × 600</div>
+              <div class="crop-toolbar">
+                <button id="btn-apply-crop" class="btn btn-sm btn-primary" title="クロップを適用 (Enter)">✓ 適用</button>
+                <button id="btn-cancel-crop" class="btn btn-sm" title="キャンセル (Esc)">✕ キャンセル</button>
+                <button id="btn-reset-crop" class="btn btn-sm" title="全画面にリセット">リセット</button>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div id="empty-state" class="empty-state">
+          <div class="empty-icon">📸</div>
+          <h3>キャプチャまたは画像を開いてください</h3>
+          <p>「キャプチャ」ボタンを押すか、PrintScreen キーで画面を切り取れます。<br>またはホーム画面から過去のキャプチャを選択して再編集できます。</p>
+          <button id="btn-empty-capture" class="btn btn-primary">画面をキャプチャする</button>
+        </div>
+      </section>
+
+      <!-- Right Inspector Properties Panel -->
+      <aside class="inspector-panel" id="inspector">
+        <div class="panel-title">プロパティ</div>
+        <div id="inspector-content" class="inspector-content">
+          <div class="empty-selection">マークを選択してください</div>
+        </div>
+      </aside>
+    </main>
+
+    <!-- Fullscreen Capture Overlay View -->
+    <div id="capture-overlay" class="capture-overlay hidden">
+      <img id="overlay-bg" class="overlay-bg" alt="Screen Capture Base" />
+      <div id="overlay-mask" class="overlay-mask">
+        <svg id="overlay-ui-elements-layer" class="overlay-ui-elements-layer"></svg>
+        <div id="ui-element-hover-box" class="ui-element-hover-box">
+          <span id="ui-element-badge" class="ui-element-badge"></span>
+        </div>
+        <div id="snap-point-indicator" class="snap-point-indicator"></div>
+        <div id="selection-box" class="selection-box">
+          <div id="selection-size-badge" class="selection-size-badge">0 x 0</div>
+        </div>
+      </div>
+      <div class="overlay-toolbar">
+        <span class="overlay-hint">ドラッグで範囲選択、またはボタンをクリックで自動選択（Escでキャンセル）</span>
+        <button id="btn-capture-fullscreen" class="btn btn-sm">全画面をキャプチャ</button>
+        <button id="btn-cancel-capture" class="btn btn-sm btn-danger">キャンセル</button>
+      </div>
+    <!-- Export Resolution Modal -->
+    <div id="modal-export" class="modal-backdrop" style="display: none;">
+      <div class="modal-card">
+        <div class="modal-header">
+          <h3>画像のエクスポート・解像度設定</h3>
+          <button id="btn-close-export-modal" class="btn-close" title="閉じる">×</button>
+        </div>
+        <div class="modal-body">
+          <div class="export-orig-info">
+            元画像サイズ: <span id="export-orig-dims" style="font-weight: 600; color: var(--primary);">1920 × 1080</span> px
+          </div>
+          
+          <div class="export-res-group">
+            <div class="res-input-wrap">
+              <label>横幅 (Width)</label>
+              <div class="input-unit">
+                <input type="number" id="export-width" min="10" max="10000" step="1" value="1920" />
+                <span>px</span>
+              </div>
+            </div>
+            
+            <button id="btn-aspect-lock" class="btn-aspect-lock active" title="アスペクト比を固定 (クリックで切替)">
+              🔒
+            </button>
+
+            <div class="res-input-wrap">
+              <label>高さ (Height)</label>
+              <div class="input-unit">
+                <input type="number" id="export-height" min="10" max="10000" step="1" value="1080" />
+                <span>px</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="export-presets-label">クイックサイズ設定:</div>
+          <div class="export-presets">
+            <button type="button" class="preset-chip active" data-preset="original">元サイズ (100%)</button>
+            <button type="button" class="preset-chip" data-preset="w800">横幅 800px</button>
+            <button type="button" class="preset-chip" data-preset="w1200">横幅 1200px</button>
+            <button type="button" class="preset-chip" data-preset="w1920">横幅 1920px (FHD)</button>
+            <button type="button" class="preset-chip" data-preset="scale-50">50%</button>
+            <button type="button" class="preset-chip" data-preset="scale-200">200%</button>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button id="btn-modal-cancel" class="btn">キャンセル</button>
+          <button id="btn-modal-copy" class="btn" title="指定解像度でクリップボードにコピー">📋 コピー</button>
+          <button id="btn-modal-save" class="btn btn-success" title="指定解像度で保存">💾 このサイズで保存</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <input type="file" id="file-input" accept="image/png,image/jpeg" style="display: none;" />
+  <script type="module" src="/src/main.ts"></script>
+</body>
+</html>

@@ -1,4 +1,4 @@
-use crate::model::{Annotation, Canvas, PositionHint, Scene, SemanticStyle, TargetRect};
+use crate::model::{Annotation, ArrowTextPlacement, Canvas, PositionHint, Scene, SemanticStyle, TargetRect};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Point {
@@ -461,11 +461,16 @@ pub enum ResolvedAnnotation {
         text: Option<String>,
         style: SemanticStyle,
         shadow: bool,
+        stroke_width: Option<f64>,
+        boxed: bool,
+        outline: bool,
+        text_placement: ArrowTextPlacement,
     },
     Rect {
         rect: TargetRect,
         style: SemanticStyle,
         shadow: bool,
+        stroke_width: Option<f64>,
     },
     RoundedRect {
         rect: TargetRect,
@@ -473,6 +478,7 @@ pub enum ResolvedAnnotation {
         ry: f64,
         style: SemanticStyle,
         shadow: bool,
+        stroke_width: Option<f64>,
     },
     Circle {
         cx: f64,
@@ -481,6 +487,7 @@ pub enum ResolvedAnnotation {
         ry: f64,
         style: SemanticStyle,
         shadow: bool,
+        stroke_width: Option<f64>,
     },
     Label {
         box_rect: TargetRect,
@@ -513,6 +520,7 @@ pub enum ResolvedAnnotation {
         arrow_end: Point,
         style: SemanticStyle,
         shadow: bool,
+        stroke_width: Option<f64>,
     },
     Spotlight {
         target: TargetRect,
@@ -553,6 +561,7 @@ pub enum ResolvedAnnotation {
         shadow: bool,
         outline: bool,
         boxed: bool,
+        stroke_width: Option<f64>,
     },
 }
 
@@ -692,11 +701,12 @@ impl LayoutEngine {
             let outline = ann.outline_override().unwrap_or(true);
 
             match ann {
-                Annotation::Rect { target, style, .. } => {
+                Annotation::Rect { target, style, stroke_width, .. } => {
                     resolved.push(ResolvedAnnotation::Rect {
                         rect: *target,
                         style: *style,
                         shadow,
+                        stroke_width: *stroke_width,
                     });
                     occupied_rects.push(*target);
                 }
@@ -705,6 +715,7 @@ impl LayoutEngine {
                     rx,
                     ry,
                     style,
+                    stroke_width,
                     ..
                 } => {
                     let rx_val = rx.unwrap_or(8.0);
@@ -715,10 +726,11 @@ impl LayoutEngine {
                         ry: ry_val,
                         style: *style,
                         shadow,
+                        stroke_width: *stroke_width,
                     });
                     occupied_rects.push(*target);
                 }
-                Annotation::Circle { target, style, .. } => {
+                Annotation::Circle { target, style, stroke_width, .. } => {
                     resolved.push(ResolvedAnnotation::Circle {
                         cx: target.center_x(),
                         cy: target.center_y(),
@@ -726,6 +738,7 @@ impl LayoutEngine {
                         ry: target.height / 2.0,
                         style: *style,
                         shadow,
+                        stroke_width: *stroke_width,
                     });
                     occupied_rects.push(*target);
                 }
@@ -842,6 +855,7 @@ impl LayoutEngine {
                             arrow_end,
                             style: *style,
                             shadow,
+                            stroke_width: None,
                         });
                     } else {
                         let candidates = generate_candidates(target, dim, 8.0);
@@ -865,6 +879,7 @@ impl LayoutEngine {
                 }
                 Annotation::StepArrow {
                     target,
+                    stroke_width,
                     step,
                     text,
                     style,
@@ -908,73 +923,117 @@ impl LayoutEngine {
                         arrow_end,
                         style: *style,
                         shadow,
+                        stroke_width: *stroke_width,
                     });
                 }
                 Annotation::Arrow {
                     target,
+                    start: explicit_start,
+                    end: explicit_end,
+                    stroke_width,
                     step,
                     text,
+                    text_placement,
                     style,
                     position,
+                    boxed,
+                    outline,
                     ..
                 } => {
-                    if step.is_some() || text.is_some() {
-                        let badge_label = if let Some(s) = step {
-                            s.to_string()
-                        } else if let Some(t) = text {
-                            t.clone()
+                    let arrow_boxed = boxed.unwrap_or(true);
+                    let arrow_outline = outline.unwrap_or(true);
+                    let placement = text_placement.unwrap_or_default();
+                    if let (Some(s), Some(e)) = (explicit_start, explicit_end) {
+                        let arrow_start = Point::new(s.x, s.y);
+                        let arrow_end = Point::new(e.x, e.y);
+                        if let Some(s_num) = step {
+                            resolved.push(ResolvedAnnotation::StepArrow {
+                                center: arrow_start,
+                                radius: self.badge_radius,
+                                label: s_num.to_string(),
+                                arrow_start,
+                                arrow_end,
+                                style: *style,
+                                shadow,
+                                stroke_width: *stroke_width,
+                            });
                         } else {
-                            "1".to_string()
-                        };
+                            resolved.push(ResolvedAnnotation::Arrow {
+                                start: arrow_start,
+                                end: arrow_end,
+                                text: text.clone(),
+                                style: *style,
+                                shadow,
+                                stroke_width: *stroke_width,
+                                boxed: arrow_boxed,
+                                outline: arrow_outline,
+                                text_placement: placement,
+                            });
+                        }
+                    } else if let Some(target) = target {
+                        if step.is_some() || text.is_some() {
+                            let badge_label = if let Some(s) = step {
+                                s.to_string()
+                            } else if let Some(t) = text {
+                                t.clone()
+                            } else {
+                                "1".to_string()
+                            };
 
-                        let dim = Dimensions::new(self.badge_radius * 2.0, self.badge_radius * 2.0);
-                        let offset = self.callout_offset + 8.0;
-                        let candidates = generate_candidates(target, dim, offset);
-                        let best = select_best_candidate(
-                            &candidates,
-                            target,
-                            &scene.canvas,
-                            *position,
-                            &occupied_rects,
-                        );
-                        let center = Point::new(best.rect.center_x(), best.rect.center_y());
-                        let (_, arrow_end) =
-                            calculate_arrow_connection(&best.rect, target, best.anchor);
-                        let dx = arrow_end.x - center.x;
-                        let dy = arrow_end.y - center.y;
-                        let len = (dx * dx + dy * dy).sqrt().max(0.001);
-                        let arrow_start = Point::new(
-                            center.x + (dx / len) * self.badge_radius,
-                            center.y + (dy / len) * self.badge_radius,
-                        );
-                        occupied_rects.push(best.rect);
-                        resolved.push(ResolvedAnnotation::StepArrow {
-                            center,
-                            radius: self.badge_radius,
-                            label: badge_label,
-                            arrow_start,
-                            arrow_end,
-                            style: *style,
-                            shadow,
-                        });
-                    } else {
-                        let dim = Dimensions::new(32.0, 32.0);
-                        let candidates = generate_candidates(target, dim, self.callout_offset);
-                        let best = select_best_candidate(
-                            &candidates,
-                            target,
-                            &scene.canvas,
-                            *position,
-                            &occupied_rects,
-                        );
-                        let (start, end) = calculate_arrow_connection(&best.rect, target, best.anchor);
-                        resolved.push(ResolvedAnnotation::Arrow {
-                            start,
-                            end,
-                            text: text.clone(),
-                            style: *style,
-                            shadow,
-                        });
+                            let dim = Dimensions::new(self.badge_radius * 2.0, self.badge_radius * 2.0);
+                            let offset = self.callout_offset + 8.0;
+                            let candidates = generate_candidates(target, dim, offset);
+                            let best = select_best_candidate(
+                                &candidates,
+                                target,
+                                &scene.canvas,
+                                *position,
+                                &occupied_rects,
+                            );
+                            let center = Point::new(best.rect.center_x(), best.rect.center_y());
+                            let (_, arrow_end) =
+                                calculate_arrow_connection(&best.rect, target, best.anchor);
+                            let dx = arrow_end.x - center.x;
+                            let dy = arrow_end.y - center.y;
+                            let len = (dx * dx + dy * dy).sqrt().max(0.001);
+                            let arrow_start = Point::new(
+                                center.x + (dx / len) * self.badge_radius,
+                                center.y + (dy / len) * self.badge_radius,
+                            );
+                            occupied_rects.push(best.rect);
+                            resolved.push(ResolvedAnnotation::StepArrow {
+                                center,
+                                radius: self.badge_radius,
+                                label: badge_label,
+                                arrow_start,
+                                arrow_end,
+                                style: *style,
+                                shadow,
+                                stroke_width: *stroke_width,
+                            });
+                        } else {
+                            let dim = Dimensions::new(32.0, 32.0);
+                            let candidates = generate_candidates(target, dim, self.callout_offset);
+                            let best = select_best_candidate(
+                                &candidates,
+                                target,
+                                &scene.canvas,
+                                *position,
+                                &occupied_rects,
+                            );
+                            let (start, end) = calculate_arrow_connection(&best.rect, target, best.anchor);
+                            resolved.push(ResolvedAnnotation::Arrow {
+                                start,
+                                end,
+                                text: text.clone(),
+                                style: *style,
+                                shadow,
+                                stroke_width: *stroke_width,
+                                boxed: arrow_boxed,
+                                outline: arrow_outline,
+                                text_placement: placement,
+                            });
+                        }
                     }
                 }
                 Annotation::Pin {
@@ -1075,6 +1134,8 @@ impl LayoutEngine {
                     control,
                     end,
                     text,
+                    text_placement,
+                    stroke_width,
                     style,
                     position,
                     offset,
@@ -1122,7 +1183,11 @@ impl LayoutEngine {
                         }
                     };
 
-                    let param_t = t.unwrap_or(0.5).clamp(0.0, 1.0);
+                    let default_t = match text_placement {
+                        Some(ArrowTextPlacement::End) => 0.85,
+                        _ => 0.5,
+                    };
+                    let param_t = t.unwrap_or(default_t).clamp(0.0, 1.0);
                     let one_minus_t = 1.0 - param_t;
                     let b0 = one_minus_t * one_minus_t;
                     let b1 = 2.0 * one_minus_t * param_t;
@@ -1201,6 +1266,7 @@ impl LayoutEngine {
                         shadow,
                         outline,
                         boxed: is_boxed,
+                        stroke_width: *stroke_width,
                     });
                 }
             }
@@ -1364,6 +1430,7 @@ mod tests {
                     shadow: Some(false),
                 },
             ],
+            uimap: None,
         };
 
         let engine = LayoutEngine::new();
@@ -1401,6 +1468,7 @@ mod tests {
                     start: Some(Point2D::new(100.0, 300.0)),
                     control: Some(Point2D::new(300.0, 100.0)),
                     end: Some(Point2D::new(500.0, 300.0)),
+                    stroke_width: None,
                     text: Some("Midpoint Text".to_string()),
                     style: SemanticStyle::Primary,
                     position: PositionHint::Center,
@@ -1409,12 +1477,14 @@ mod tests {
                     shadow: Some(true),
                     outline: Some(true),
                     boxed: Some(false),
+                    text_placement: None,
                 },
                 Annotation::BezierArrow {
                     target: None,
                     start: Some(Point2D::new(100.0, 300.0)),
                     control: Some(Point2D::new(300.0, 100.0)),
                     end: Some(Point2D::new(500.0, 300.0)),
+                    stroke_width: None,
                     text: Some("Offset Text".to_string()),
                     style: SemanticStyle::Primary,
                     position: PositionHint::Top,
@@ -1423,8 +1493,10 @@ mod tests {
                     shadow: Some(false),
                     outline: Some(true),
                     boxed: Some(true),
+                    text_placement: None,
                 },
             ],
+            uimap: None,
         };
 
         let engine = LayoutEngine::new();

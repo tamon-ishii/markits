@@ -228,7 +228,7 @@ fn test_skitch_components_full_workflow() {
     assert!(svg.contains("<polygon points=")); // Pin tip
     assert!(svg.contains("これは何？"));
     assert!(svg.contains("矢印の位置が変えられる"));
-    assert!(svg.contains("paint-order=\"stroke fill\""));
+    assert!(svg.contains("stroke=\"#ffffff\""));
     assert!(svg.contains("<line x1=\"50\"")); // Divider
 }
 
@@ -306,3 +306,96 @@ fn test_bezier_arrow_full_workflow() {
     assert!(svg.contains("DB書き込み"));
     assert!(svg.contains("paint-order=\"stroke fill\"")); // for unboxed text
 }
+
+#[test]
+fn test_explicit_arrow_render() {
+    let json = r#"{
+      "canvas": { "width": 800, "height": 600 },
+      "annotations": [
+        {
+          "type": "arrow",
+          "start": [120, 150],
+          "end": [450, 300],
+          "style": "warning"
+        },
+        {
+          "type": "arrow",
+          "from": [50, 50],
+          "to": [200, 100],
+          "step": 3,
+          "style": "step"
+        }
+      ]
+    }"#;
+
+    let svg = render_from_json(json).expect("Should render explicit arrow SVG");
+    assert!(svg.contains("<line x1=\"120\" y1=\"150\" x2=\"450\" y2=\"300\""));
+    assert!(svg.contains("marker-end=\"url(#arrowhead-warning)\""));
+    assert!(svg.contains("<line x1=\"50\" y1=\"50\" x2=\"200\" y2=\"100\""));
+    assert!(svg.contains(">3</text>"));
+}
+
+#[test]
+fn test_arrow_and_bezier_arrow_text_placement_middle_and_end() {
+    let json = r#"{
+      "canvas": { "width": 800, "height": 600 },
+      "annotations": [
+        {
+          "type": "arrow",
+          "start": [100, 100],
+          "end": [500, 100],
+          "text": "中間ラベル",
+          "text_placement": "middle"
+        },
+        {
+          "type": "arrow",
+          "start": [100, 250],
+          "end": [500, 250],
+          "text": "終点ラベル",
+          "text_placement": "end"
+        },
+        {
+          "type": "bezier-arrow",
+          "start": [100, 400],
+          "control": [300, 300],
+          "end": [500, 400],
+          "text": "ベジェ終点",
+          "text_placement": "end"
+        }
+      ]
+    }"#;
+
+    let svg = render_from_json(json).expect("Should render arrows with middle and end text");
+    assert!(svg.contains("中間ラベル"));
+    assert!(svg.contains("終点ラベル"));
+    assert!(svg.contains("ベジェ終点"));
+}
+
+#[test]
+fn test_uimap_and_named_ui_targets() {
+    let input = r#"{
+      "canvas": { "width": 800, "height": 600 },
+      "uimap": [
+        { "role": "button", "name": "保存", "x": 120, "y": 80, "width": 80, "height": 32 },
+        { "role": "button", "name": "キャンセル", "x": 220, "y": 80, "width": 90, "height": 32 },
+        { "role": "textbox", "name": "検索ワード", "x": 400, "y": 70, "width": 200, "height": 40 }
+      ],
+      "annotations": [
+        { "type": "pin", "target": "保存", "text": "ここをクリック" },
+        { "type": "rect", "target": "保存ボタン", "style": "warning" },
+        { "type": "callout", "target": "検索ワード", "text": "キーワード入力" },
+        { "type": "spotlight", "target": "button:2" }
+      ]
+    }"#;
+
+    let result = render_with_layout_from_json(input).expect("Should render annotations targeting UIMap elements");
+    assert!(result.svg.contains("ここをクリック"));
+    assert!(result.svg.contains("キーワード入力"));
+    // rect element should exactly match the target rectangle
+    let rect_elem = result.elements.iter().find(|e| e.id.contains("annotation-1")).unwrap();
+    assert_eq!(rect_elem.bounds, [120.0, 80.0, 80.0, 32.0]);
+    // spotlight targeting "button:2" (キャンセル)
+    let spot_elem = result.elements.iter().find(|e| e.id.contains("annotation-3")).unwrap();
+    assert_eq!(spot_elem.bounds, [220.0, 80.0, 90.0, 32.0]);
+}
+

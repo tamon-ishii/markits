@@ -6,17 +6,17 @@ permissions:
 on:
   push:
     tags:
-      - 'v*'
-      - '[0-9]+.*'
+      - 'v[0-9]+.*'
   workflow_dispatch:
     inputs:
       tag:
-        description: 'Release tag (leave empty to use version from Cargo.toml, e.g. v0.1.0)'
+        description: 'Release tag (leave empty to use version from Cargo.toml, e.g. v0.5.0)'
         required: false
         default: ''
 
 jobs:
   create-release:
+    name: Create Release
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -40,9 +40,8 @@ jobs:
           fi
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
 
-          # Ensure tag exists on remote if dispatched manually
           if ! git rev-parse "$TAG" >/dev/null 2>&1; then
-            echo "Tag $TAG does not exist, creating..."
+            echo "Tag $TAG does not exist on remote, creating..."
             git config user.name "github-actions[bot]"
             git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
             git tag "$TAG"
@@ -50,13 +49,14 @@ jobs:
           fi
 
           if gh release view "$TAG" >/dev/null 2>&1; then
-            echo "Release $TAG already exists, proceeding to build and upload assets."
+            echo "Release $TAG already exists, proceeding to upload assets."
           else
             echo "Creating release $TAG..."
-            gh release create "$TAG" --title "$TAG" --generate-notes
+            gh release create "$TAG" --title "MarkIts $TAG" --generate-notes
           fi
 
-  upload-assets:
+  build-cli:
+    name: Build CLI (${{ matrix.target }})
     needs: create-release
     permissions:
       contents: write
@@ -90,7 +90,7 @@ jobs:
         with:
           tool: cross
 
-      - name: Build and upload release binary
+      - name: Build and upload release binary to GitHub Release
         uses: taiki-e/upload-rust-binary-action@v1
         with:
           bin: markits
@@ -100,3 +100,95 @@ jobs:
           include: LICENSE,README.md
           token: ${{ secrets.GITHUB_TOKEN }}
           ref: refs/tags/${{ needs.create-release.outputs.tag }}
+
+      - name: Upload archive as GitHub Actions Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: markits-cli-${{ matrix.target }}
+          path: |
+            markits-*.tar.gz
+            markits-*.zip
+            target/${{ matrix.target }}/release/markits*
+          if-no-files-found: ignore
+
+  build-desktop:
+    name: Build Desktop (${{ matrix.platform }})
+    needs: create-release
+    permissions:
+      contents: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-22.04
+            platform: linux
+            args: ""
+            rust_targets: ""
+          - os: macos-latest
+            platform: macos-universal
+            args: "--target universal-apple-darwin"
+            rust_targets: "aarch64-apple-darwin x86_64-apple-darwin"
+          - os: windows-latest
+            platform: windows
+            args: ""
+            rust_targets: ""
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Linux system dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential curl wget file libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+          cache-dependency-path: apps/desktop/package-lock.json
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.rust_targets }}
+
+      - name: Install frontend dependencies
+        run: npm ci
+        working-directory: apps/desktop
+
+      - name: Build and release Tauri application
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          projectPath: apps/desktop
+          tagName: ${{ needs.create-release.outputs.tag }}
+          releaseName: "MarkIts ${{ needs.create-release.outputs.tag }}"
+          releaseBody: "MarkIts Desktop GUI Release ${{ needs.create-release.outputs.tag }}"
+          releaseDraft: false
+          prerelease: false
+          args: ${{ matrix.args }}
+
+      - name: Upload Desktop Artifacts to Actions
+        uses: actions/upload-artifact@v4
+        with:
+          name: markits-desktop-${{ matrix.platform }}
+          path: |
+            target/release/bundle/**/*.deb
+            target/release/bundle/**/*.AppImage
+            target/release/bundle/**/*.dmg
+            target/release/bundle/**/*.app.tar.gz
+            target/release/bundle/**/*.msi
+            target/release/bundle/**/*.exe
+            target/release/bundle/**/*.zip
+            target/*/release/bundle/**/*.deb
+            target/*/release/bundle/**/*.AppImage
+            target/*/release/bundle/**/*.dmg
+            target/*/release/bundle/**/*.app.tar.gz
+            target/*/release/bundle/**/*.msi
+            target/*/release/bundle/**/*.exe
+            target/*/release/bundle/**/*.zip
+            apps/desktop/src-tauri/target/**/bundle/**/*
+          if-no-files-found: ignore

@@ -66,9 +66,59 @@ fn validate_rect(rect: &TargetRect, value: &Value, path: &str) -> Result<()> {
     Ok(())
 }
 
+fn find_target_rect<'a>(name: &str, targets: &'a HashMap<String, TargetRect>) -> Option<&'a TargetRect> {
+    // 1. Exact match
+    if let Some(rect) = targets.get(name) {
+        return Some(rect);
+    }
+
+    // 2. Case-insensitive exact match
+    let lower_name = name.to_lowercase();
+    for (k, rect) in targets {
+        if k.to_lowercase() == lower_name {
+            return Some(rect);
+        }
+    }
+
+    // 3. Trimming common Japanese / English suffixes: "保存ボタン" -> "保存", "Submit button" -> "Submit"
+    let stripped = name
+        .trim_end_matches("ボタン")
+        .trim_end_matches(" button")
+        .trim_end_matches(" Button")
+        .trim();
+    if !stripped.is_empty() && stripped != name {
+        if let Some(rect) = targets.get(stripped) {
+            return Some(rect);
+        }
+        for (k, rect) in targets {
+            if k.to_lowercase() == stripped.to_lowercase() {
+                return Some(rect);
+            }
+        }
+    }
+
+    // 4. Substring / contains match (without role prefix)
+    for (k, rect) in targets {
+        if !k.contains(':') && !k.starts_with("ui-") && (k.contains(name) || name.contains(k.as_str())) {
+            return Some(rect);
+        }
+    }
+
+    // 5. Role-prefixed match (e.g. "button:保存")
+    for (k, rect) in targets {
+        if let Some((_role, el_name)) = k.split_once(':') {
+            if el_name == name || el_name == stripped || el_name.contains(name) || name.contains(el_name) {
+                return Some(rect);
+            }
+        }
+    }
+
+    None
+}
+
 fn named_target(value: &Value, targets: &HashMap<String, TargetRect>, path: &str) -> Result<Value> {
     if let Some(name) = value.as_str() {
-        let rect = targets.get(name).ok_or_else(|| {
+        let rect = find_target_rect(name, targets).ok_or_else(|| {
             let mut known: Vec<&str> = targets.keys().map(String::as_str).collect();
             known.sort_unstable();
             let hint = suggestion(name, &known)
@@ -199,7 +249,7 @@ pub fn prepare(json_str: &str) -> Result<PreparedInput> {
         .as_object_mut()
         .ok_or_else(|| invalid("scene: expected a JSON object"))?;
     for key in object.keys() {
-        if !["canvas", "shadow", "annotations", "targets"].contains(&key.as_str()) {
+        if !["canvas", "shadow", "annotations", "targets", "uimap", "ui_map", "ui_elements"].contains(&key.as_str()) {
             return Err(invalid(format!("scene: unknown field '{key}'")));
         }
     }
@@ -216,6 +266,32 @@ pub fn prepare(json_str: &str) -> Result<PreparedInput> {
             .map_err(|error| invalid(format!("targets.{name}: {error}")))?;
         validate_rect(&rect, value, &format!("targets.{name}"))?;
         targets.insert(name.clone(), rect);
+    }
+
+    let raw_uimap = object
+        .remove("uimap")
+        .or_else(|| object.remove("ui_map"))
+        .or_else(|| object.remove("ui_elements"));
+    let mut parsed_uimap = None;
+    if let Some(uimap_val) = raw_uimap {
+        let elements: Vec<crate::model::UiElement> = serde_json::from_value(uimap_val)
+            .map_err(|error| invalid(format!("uimap: {error}")))?;
+        for (idx, el) in elements.iter().enumerate() {
+            let rect = el.rect();
+            let trimmed = el.name.trim();
+            if !trimmed.is_empty() {
+                targets.entry(trimmed.to_string()).or_insert(rect);
+                targets.entry(format!("{}:{}", el.role, trimmed)).or_insert(rect);
+            }
+            targets.entry(format!("{}:{}", el.role, idx + 1)).or_insert(rect);
+            targets.entry(format!("ui-{}", idx + 1)).or_insert(rect);
+        }
+        parsed_uimap = Some(elements);
+    }
+    if let Some(ref elements) = parsed_uimap {
+        if !elements.is_empty() {
+            object.insert("uimap".to_owned(), serde_json::to_value(elements).unwrap_or(Value::Null));
+        }
     }
     let raw_annotations = match object.get("annotations") {
         None => Vec::new(),
