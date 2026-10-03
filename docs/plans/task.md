@@ -1,7 +1,6 @@
 | Step | Task | Status |
 | --- | --- | --- |
-| 1 | Explore project context (crop state, undo/redo, toggle behavior in editor.ts) | Completed |
-| 2 | Propose 2-3 approaches for reversible cropping and toggleable mark-crop | Completed |
-| 3 | Present design | Completed |
-| 4 | Write design doc | In Progress |
-| 5 | Transition to implementation | Pending |
+| 1 | Store BaseImageState and preserve crop history in editor.ts | Pending |
+| 2 | Implement toggleable auto-crop (toggleAutoCrop) | Pending |
+| 3 | Implement revert crop and undo support for manual crops | Pending |
+| 4 | Full workspace verification and desktop build | Pending |
