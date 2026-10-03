@@ -4,5 +4,5 @@
 | 2 | Ask clarifying questions and confirm prioritization with user | Completed |
 | 3 | Propose architecture and approaches for chosen capabilities | Completed |
 | 4 | Present design sections and get user approval | Completed |
-| 5 | Write design doc and commit | In Progress |
-| 6 | Transition to implementation plan | Pending |
+| 5 | Write design doc and commit | Completed |
+| 6 | Transition to implementation plan | Completed |
