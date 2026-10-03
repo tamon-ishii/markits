@@ -20,7 +20,7 @@
       </div>
 
       <div class="action-bar">
-        <button id="btn-trigger-capture" class="btn btn-primary" title="画面キャプチャ (PrintScreen)">
+        <button id="btn-trigger-capture" class="btn btn-primary" title="画面キャプチャ">
           📷 キャプチャ
         </button>
         <button id="btn-open-file" class="btn" title="画像ファイルを開く">
@@ -30,7 +30,6 @@
         <div id="editor-actions" class="editor-actions-group" style="display: none;">
           <div class="divider-v"></div>
           <button id="btn-toggle-snap" class="btn btn-toggle active" title="UI要素スナップ (Altで一時切替)">🧲 スナップ</button>
-          <span id="ui-detection-status" class="ui-detection-status" role="status" aria-live="polite">UI 検出なし</span>
           <button id="btn-crop" class="btn btn-toggle" title="キャンバスをクロップ (切り抜き)">✂️ クロップ</button>
           <button id="btn-autocrop" class="btn btn-toggle" title="マークに合わせてクロップ (トグル切替)">🎯 マークでクロップ</button>
           <button id="btn-revert-crop" class="btn btn-sm" title="クロップを解除して元の画像に戻す" style="display: none;">↺ クロップ解除</button>
@@ -66,15 +65,24 @@
         <div class="home-hero">
           <div class="hero-text">
             <h2>スクリーンキャプチャ & アノテーション</h2>
-            <p>いつでも <strong>PrintScreen</strong> キーを押すか、右上の「📷 キャプチャ」から画面を切り取れます。<br>過去に撮影したキャプチャは自動的に履歴に保存され、クリックするといつでもアノテーションを再編集できます。</p>
+            <p>いつでも設定した撮影ショートカットを押すか、右上の「📷 キャプチャ」から画面を切り取れます。<br>過去に撮影したキャプチャは自動的に履歴に保存され、クリックするといつでもアノテーションを再編集できます。</p>
           </div>
           <div class="hero-actions">
             <button id="btn-hero-capture" class="btn btn-primary btn-lg">
-              📷 今すぐ画面をキャプチャ (PrintScreen)
+              📷 今すぐ画面をキャプチャ
             </button>
             <button id="btn-hero-open" class="btn btn-lg">
               📂 既存の画像を開いて編集
             </button>
+          </div>
+          <div class="capture-shortcut-settings">
+            <label for="capture-shortcut">撮影ショートカット</label>
+            <select id="capture-shortcut" aria-label="撮影ショートカット">
+              <option value="PrintScreen">PrintScreen</option>
+              <option value="Alt+PrintScreen">Alt+PrintScreen</option>
+              <option value="Control+Shift+S">Ctrl+Shift+S</option>
+            </select>
+            <span id="capture-shortcut-status" role="status" aria-live="polite"></span>
           </div>
         </div>
 
@@ -193,7 +201,7 @@
         <div id="empty-state" class="empty-state">
           <div class="empty-icon">📸</div>
           <h3>キャプチャまたは画像を開いてください</h3>
-          <p>「キャプチャ」ボタンを押すか、PrintScreen キーで画面を切り取れます。<br>またはホーム画面から過去のキャプチャを選択して再編集できます。</p>
+          <p>「キャプチャ」ボタンを押すか、設定した撮影ショートカットで画面を切り取れます。<br>またはホーム画面から過去のキャプチャを選択して再編集できます。</p>
           <button id="btn-empty-capture" class="btn btn-primary">画面をキャプチャする</button>
         </div>
       </section>
@@ -242,58 +250,6 @@
         <span class="overlay-hint">ウィンドウをクリックしてキャプチャ / ドラッグで範囲指定</span>
         <button id="btn-capture-fullscreen" class="btn btn-sm btn-primary">🖥️ 全画面キャプチャ</button>
         <button id="btn-cancel-capture" class="btn btn-sm btn-danger">✕ キャンセル (Esc)</button>
-      </div>
-    </div>
-
-    <!-- Export Resolution Modal -->
-    <div id="modal-export" class="modal-backdrop" style="display: none;">
-      <div class="modal-card">
-        <div class="modal-header">
-          <h3>画像のエクスポート・解像度設定</h3>
-          <button id="btn-close-export-modal" class="btn-close" title="閉じる">×</button>
-        </div>
-        <div class="modal-body">
-          <div class="export-orig-info">
-            元画像サイズ: <span id="export-orig-dims" style="font-weight: 600; color: var(--primary);">1920 × 1080</span> px
-          </div>
-          
-          <div class="export-res-group">
-            <div class="res-input-wrap">
-              <label>横幅 (Width)</label>
-              <div class="input-unit">
-                <input type="number" id="export-width" min="10" max="10000" step="1" value="1920" />
-                <span>px</span>
-              </div>
-            </div>
-            
-            <button id="btn-aspect-lock" class="btn-aspect-lock active" title="アスペクト比を固定 (クリックで切替)">
-              🔒
-            </button>
-
-            <div class="res-input-wrap">
-              <label>高さ (Height)</label>
-              <div class="input-unit">
-                <input type="number" id="export-height" min="10" max="10000" step="1" value="1080" />
-                <span>px</span>
-              </div>
-            </div>
-          </div>
-
-          <div class="export-presets-label">クイックサイズ設定:</div>
-          <div class="export-presets">
-            <button type="button" class="preset-chip active" data-preset="original">元サイズ (100%)</button>
-            <button type="button" class="preset-chip" data-preset="w800">横幅 800px</button>
-            <button type="button" class="preset-chip" data-preset="w1200">横幅 1200px</button>
-            <button type="button" class="preset-chip" data-preset="w1920">横幅 1920px (FHD)</button>
-            <button type="button" class="preset-chip" data-preset="scale-50">50%</button>
-            <button type="button" class="preset-chip" data-preset="scale-200">200%</button>
-          </div>
-        </div>
-        <div class="modal-footer">
-          <button id="btn-modal-cancel" class="btn">キャンセル</button>
-          <button id="btn-modal-copy" class="btn" title="指定解像度でクリップボードにコピー">📋 コピー</button>
-          <button id="btn-modal-save" class="btn btn-success" title="指定解像度で保存">💾 このサイズで保存</button>
-        </div>
       </div>
     </div>
 

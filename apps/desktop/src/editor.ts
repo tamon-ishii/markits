@@ -80,6 +80,7 @@ export class AnnotationEditor {
   private initialSceneJson: string = '';
   private initialBgDataUrl: string = '';
   private initialIsAutoCropped: boolean = false;
+  private initialUiElementsJson: string = '[]';
 
   // Dragging state
   private isDraggingHandle: boolean = false;
@@ -241,6 +242,7 @@ export class AnnotationEditor {
       this.initialSceneJson = this.getSceneJson();
       this.initialBgDataUrl = this.bgImgEl.src;
       this.initialIsAutoCropped = this.isAutoCropped;
+      this.initialUiElementsJson = JSON.stringify(this.uiElements);
     }
     this.render();
     this.updateInspector();
@@ -317,7 +319,8 @@ export class AnnotationEditor {
     return (
       this.getSceneJson() !== this.initialSceneJson ||
       this.bgImgEl.src !== this.initialBgDataUrl ||
-      this.isAutoCropped !== this.initialIsAutoCropped
+      this.isAutoCropped !== this.initialIsAutoCropped ||
+      JSON.stringify(this.uiElements) !== this.initialUiElementsJson
     );
   }
 
@@ -325,6 +328,7 @@ export class AnnotationEditor {
     this.initialSceneJson = this.getSceneJson();
     this.initialBgDataUrl = this.bgImgEl.src;
     this.initialIsAutoCropped = this.isAutoCropped;
+    this.initialUiElementsJson = JSON.stringify(this.uiElements);
   }
 
   public getCropState(): {
@@ -396,6 +400,9 @@ export class AnnotationEditor {
     switch (anno.type) {
       case 'arrow': {
         const res: any = { ...base };
+        if (anno.line_style) res.line_style = anno.line_style;
+        if (anno.arrowhead) res.arrowhead = anno.arrowhead;
+        if (anno.arrow_skin) res.arrow_skin = anno.arrow_skin;
         if (anno.start && anno.end) {
           res.start = [Math.round(anno.start[0]), Math.round(anno.start[1])];
           res.end = [Math.round(anno.end[0]), Math.round(anno.end[1])];
@@ -414,7 +421,6 @@ export class AnnotationEditor {
           const placement = (anno as any).text_placement ?? (anno as any).text_position;
           if (placement) {
             res.text_placement = placement;
-            res.text_position = placement;
           }
         }
         if (anno.position) res.position = anno.position;
@@ -424,6 +430,9 @@ export class AnnotationEditor {
       }
       case 'bezier-arrow': {
         const res: any = { ...base };
+        if (anno.line_style) res.line_style = anno.line_style;
+        if (anno.arrowhead) res.arrowhead = anno.arrowhead;
+        if (anno.arrow_skin) res.arrow_skin = anno.arrow_skin;
         res.start = [Math.round(anno.start[0]), Math.round(anno.start[1])];
         res.control = [Math.round(anno.control[0]), Math.round(anno.control[1])];
         res.end = [Math.round(anno.end[0]), Math.round(anno.end[1])];
@@ -436,7 +445,6 @@ export class AnnotationEditor {
           const placement = (anno as any).text_placement ?? (anno as any).text_position;
           if (placement) {
             res.text_placement = placement;
-            res.text_position = placement;
           }
         }
         if (anno.position) res.position = anno.position;
@@ -1436,7 +1444,7 @@ export class AnnotationEditor {
           start: [Math.round(x - 80), Math.round(y - 60)],
           end: [Math.round(x), Math.round(y)],
           style: 'primary',
-          stroke_width: 2.5,
+          stroke_width: 4,
           text: '',
           has_text: false,
           box: true,
@@ -1451,7 +1459,7 @@ export class AnnotationEditor {
           text: '',
           has_text: false,
           style: 'primary',
-          stroke_width: 2.5,
+          stroke_width: 4,
           box: true,
           position: 'auto',
         };
@@ -1627,6 +1635,25 @@ export class AnnotationEditor {
         hitLine.dataset.handleType = 'select-anno';
         hitLine.dataset.annotationIndex = i.toString();
         this.handlesLayerEl.appendChild(hitLine);
+        {
+          const length = Math.hypot(end[0] - start[0], end[1] - start[1]);
+          const skin = arrow.arrow_skin ?? 'classic';
+          const strokeWidth = arrow.stroke_width ?? 4;
+          const sketchOutline = Math.min(Math.max(strokeWidth * 0.2, 1), 2);
+          const headLength = skin === 'classic' || skin === 'sketch' ? Math.min(Math.max(strokeWidth * 3.5, 18), 30, length * 0.45) : Math.min(Math.max(length * 0.26, 18), 90, length * 0.45);
+          const headHalf = skin === 'classic' ? Math.min(Math.max(strokeWidth * 2.3, 10), 22) : skin === 'sketch' ? Math.min(Math.min(Math.max(strokeWidth * 2.3, 10), 22) - sketchOutline * 0.5, length * 0.26) : Math.min(Math.max(length * 0.12, 10), 65, length * 0.25);
+          const radius = headHalf + 8;
+          const neckFraction = 1 - headLength / Math.max(length, 1);
+          const headHit = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+          headHit.setAttribute('cx', String(start[0] + (end[0] - start[0]) * neckFraction));
+          headHit.setAttribute('cy', String(start[1] + (end[1] - start[1]) * neckFraction));
+          headHit.setAttribute('r', String(radius));
+          headHit.setAttribute('fill', 'transparent');
+          headHit.style.cursor = 'pointer';
+          headHit.dataset.handleType = 'select-anno';
+          headHit.dataset.annotationIndex = i.toString();
+          this.handlesLayerEl.appendChild(headHit);
+        }
       } else if (anno.type === 'bezier-arrow') {
         const b = anno as BezierArrowAnnotation;
         const hitPath = document.createElementNS('http://www.w3.org/2000/svg', 'path');
@@ -1639,6 +1666,26 @@ export class AnnotationEditor {
         hitPath.dataset.handleType = 'select-anno';
         hitPath.dataset.annotationIndex = i.toString();
         this.handlesLayerEl.appendChild(hitPath);
+        {
+          const length = Math.hypot(b.control[0] - b.start[0], b.control[1] - b.start[1]) + Math.hypot(b.end[0] - b.control[0], b.end[1] - b.control[1]);
+          const skin = b.arrow_skin ?? 'classic';
+          const strokeWidth = b.stroke_width ?? 4;
+          const sketchOutline = Math.min(Math.max(strokeWidth * 0.2, 1), 2);
+          const headLength = skin === 'classic' || skin === 'sketch' ? Math.min(Math.max(strokeWidth * 3.5, 18), 30, length * 0.45) : Math.min(Math.max(length * 0.26, 18), 90, length * 0.45);
+          const headHalf = skin === 'classic' ? Math.min(Math.max(strokeWidth * 2.3, 10), 22) : skin === 'sketch' ? Math.min(Math.min(Math.max(strokeWidth * 2.3, 10), 22) - sketchOutline * 0.5, length * 0.26) : Math.min(Math.max(length * 0.12, 10), 65, length * 0.25);
+          const radius = headHalf + 8;
+          const t = 1 - headLength / Math.max(length, 1);
+          const inv = 1 - t;
+          const headHit = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+          headHit.setAttribute('cx', String(inv * inv * b.start[0] + 2 * inv * t * b.control[0] + t * t * b.end[0]));
+          headHit.setAttribute('cy', String(inv * inv * b.start[1] + 2 * inv * t * b.control[1] + t * t * b.end[1]));
+          headHit.setAttribute('r', String(radius));
+          headHit.setAttribute('fill', 'transparent');
+          headHit.style.cursor = 'pointer';
+          headHit.dataset.handleType = 'select-anno';
+          headHit.dataset.annotationIndex = i.toString();
+          this.handlesLayerEl.appendChild(headHit);
+        }
       } else if ('target' in anno && Array.isArray((anno as any).target)) {
         const [x, y, w, h] = (anno as any).target;
         const hitRect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
@@ -1781,10 +1828,22 @@ export class AnnotationEditor {
       </div>
     `;
 
+    html += `
+      <div class="form-group">
+        <label>マークのスタイル</label>
+        <div class="stroke-presets">
+          <button type="button" class="mark-style-preset" data-mark-style="standard">標準</button>
+          <button type="button" class="mark-style-preset" data-mark-style="bold">強調</button>
+          <button type="button" class="mark-style-preset" data-mark-style="subtle">控えめ</button>
+          <button type="button" class="mark-style-preset" data-mark-style="guide">手順</button>
+        </div>
+      </div>
+    `;
+
     // Stroke width (線の太さ) controls for arrows and shapes
     const supportsStrokeWidth = ['arrow', 'bezier-arrow', 'step-arrow', 'rect', 'rounded-rect', 'circle', 'divider'].includes(anno.type);
     if (supportsStrokeWidth) {
-      const currentStroke = (anno as any).stroke_width ?? 2.5;
+      const currentStroke = (anno as any).stroke_width ?? (anno.type === 'arrow' || anno.type === 'bezier-arrow' ? 4 : 2.5);
       html += `
         <div class="form-group">
           <label>線の太さ (Stroke Width): <span id="stroke-width-val">${currentStroke}px</span></label>
@@ -1804,7 +1863,35 @@ export class AnnotationEditor {
     if (isArrowType) {
       const hasText = (anno as any).has_text !== undefined ? Boolean((anno as any).has_text) : Boolean((anno as any).text && String((anno as any).text).trim().length > 0);
       const textVal = (anno as any).text ?? 'クリック';
+      const arrowSkin = (anno as any).arrow_skin ?? 'classic';
       html += `
+        <div class="form-group">
+          <label>矢印の形</label>
+          <div class="arrow-skin-options" role="group" aria-label="矢印の形">
+            <button type="button" class="arrow-skin-option ${arrowSkin === 'classic' ? 'active' : ''}" data-arrow-skin="classic" aria-pressed="${arrowSkin === 'classic'}" title="標準">
+              <svg viewBox="0 0 80 30" aria-hidden="true"><path d="M 7 15 H 57" stroke="currentColor" stroke-width="4" stroke-linecap="round"/><path d="M 55 5 L 74 15 L 55 25 Z" fill="currentColor"/></svg><span>標準</span>
+            </button>
+            <button type="button" class="arrow-skin-option ${arrowSkin === 'sketch' ? 'active' : ''}" data-arrow-skin="sketch" aria-pressed="${arrowSkin === 'sketch'}" title="手描き風">
+              <svg viewBox="0 0 80 30" aria-hidden="true"><defs><pattern id="arrow-skin-preview-hatch" width="7" height="7" patternUnits="userSpaceOnUse" patternTransform="rotate(35)"><path d="M 0 0 V 7" stroke="currentColor" stroke-width="1.3"/></pattern></defs><path d="M 5 11 L 53 11 L 53 3 L 75 15 L 53 27 L 53 19 L 5 19 Z" fill="url(#arrow-skin-preview-hatch)" stroke="currentColor" stroke-width="2.5" stroke-linejoin="round"/></svg><span>手描き風</span>
+            </button>
+            <button type="button" class="arrow-skin-option ${arrowSkin === 'bold' ? 'active' : ''}" data-arrow-skin="bold" aria-pressed="${arrowSkin === 'bold'}" title="先細り">
+              <svg viewBox="0 0 80 30" aria-hidden="true"><path d="M 5 15 L 55 11 L 55 3 L 75 15 L 55 27 L 55 19 Z" fill="currentColor"/></svg><span>先細り</span>
+            </button>
+          </div>
+        </div>
+        <div class="form-group">
+          <label>標準の線</label>
+          <select id="prop-arrow-line-style" class="form-control" ${arrowSkin !== 'classic' ? 'disabled' : ''}>
+            <option value="solid" ${(anno as any).line_style === undefined || (anno as any).line_style === 'solid' ? 'selected' : ''}>実線</option>
+            <option value="dashed" ${(anno as any).line_style === 'dashed' ? 'selected' : ''}>破線</option>
+            <option value="dotted" ${(anno as any).line_style === 'dotted' ? 'selected' : ''}>点線</option>
+          </select>
+          <label>標準の先端</label>
+          <select id="prop-arrowhead" class="form-control" ${arrowSkin !== 'classic' ? 'disabled' : ''}>
+            <option value="filled" ${(anno as any).arrowhead === undefined || (anno as any).arrowhead === 'filled' ? 'selected' : ''}>塗りつぶし</option>
+            <option value="open" ${(anno as any).arrowhead === 'open' ? 'selected' : ''}>輪郭のみ</option>
+          </select>
+        </div>
         <div class="form-group">
           <label class="checkbox-label" style="display: flex; align-items: center; gap: 8px; cursor: pointer; font-weight: 600; margin-bottom: 6px;">
             <input type="checkbox" id="prop-has-text" ${hasText ? 'checked' : ''} />
@@ -1815,11 +1902,12 @@ export class AnnotationEditor {
             <textarea id="prop-text" class="form-control" placeholder="矢印に添えるテキストを入力...">${textVal}</textarea>
             
             <div class="form-group" style="margin-top: 8px; margin-bottom: 8px;">
-              <label style="font-size: 12px; font-weight: 600; color: var(--text-color); margin-bottom: 4px; display: block;">テキストの配置位置</label>
+              <label style="font-size: 12px; font-weight: 600; color: var(--text-color); margin-bottom: 4px; display: block;">ラベルの位置</label>
               <select id="prop-arrow-text-placement" class="form-control">
-                <option value="middle" ${((anno as any).text_placement ?? (anno as any).text_position ?? 'middle') === 'middle' ? 'selected' : ''}>矢印の中間 (中央)</option>
-                <option value="end" ${((anno as any).text_placement ?? (anno as any).text_position) === 'end' ? 'selected' : ''}>矢印の終点 (先端)</option>
+                <option value="middle" ${((anno as any).text_placement ?? (anno as any).text_position ?? 'middle') === 'middle' ? 'selected' : ''}>中央</option>
+                <option value="end" ${((anno as any).text_placement ?? (anno as any).text_position) === 'end' ? 'selected' : ''}>矢印の終端</option>
               </select>
+              <div class="arrow-placement-hint">ラベルの大きさに合わせて、矢印の線や終端と重ならない位置に置きます。</div>
             </div>
 
             <label class="checkbox-label" style="display: flex; align-items: center; gap: 6px; cursor: pointer; margin-top: 8px; font-size: 12px; color: var(--text-muted);">
@@ -1874,19 +1962,25 @@ export class AnnotationEditor {
       `;
     }
 
-    // Position Hint
-    if ('position' in anno || isArrowType) {
+    // Position Hint affects the text around curved arrows and the placement of other anchored marks.
+    const hasPositionHint = anno.type === 'bezier-arrow'
+      ? Boolean((anno as any).has_text ?? ((anno as any).text && String((anno as any).text).trim().length > 0))
+      : !isArrowType && 'position' in anno;
+    if (hasPositionHint) {
       const pos = (anno as any).position ?? 'auto';
+      const isBezierArrow = anno.type === 'bezier-arrow';
       html += `
         <div class="form-group">
-          <label>配置位置 (Position Hint)</label>
+          <label>${isBezierArrow ? '曲線に対する文字位置' : '配置位置'}</label>
           <select id="prop-position" class="form-control">
-            <option value="auto" ${pos === 'auto' ? 'selected' : ''}>自動 (auto)</option>
-            <option value="top" ${pos === 'top' ? 'selected' : ''}>上 (top)</option>
-            <option value="bottom" ${pos === 'bottom' ? 'selected' : ''}>下 (bottom)</option>
-            <option value="left" ${pos === 'left' ? 'selected' : ''}>左 (left)</option>
-            <option value="right" ${pos === 'right' ? 'selected' : ''}>右 (right)</option>
+            <option value="auto" ${pos === 'auto' ? 'selected' : ''}>${isBezierArrow ? '曲線の外側（自動）' : '自動'}</option>
+            <option value="top" ${pos === 'top' ? 'selected' : ''}>${isBezierArrow ? '曲線の上' : '上'}</option>
+            <option value="bottom" ${pos === 'bottom' ? 'selected' : ''}>${isBezierArrow ? '曲線の下' : '下'}</option>
+            <option value="left" ${pos === 'left' ? 'selected' : ''}>左</option>
+            <option value="right" ${pos === 'right' ? 'selected' : ''}>右</option>
+            ${isBezierArrow ? `<option value="center" ${pos === 'center' ? 'selected' : ''}>曲線上（中央）</option>` : ''}
           </select>
+          ${isBezierArrow ? '<div class="arrow-placement-hint">文字の置き場所を変えます。矢印の向きや位置は変わりません。</div>' : ''}
         </div>
       `;
     }
@@ -1912,6 +2006,32 @@ export class AnnotationEditor {
         });
         this.pushState();
         this.scheduleRender();
+      });
+    });
+
+    const markStylePresets: Record<string, { style: SemanticStyle; stroke: number; shadow: boolean; outline: boolean }> = {
+      standard: { style: 'primary', stroke: 2.5, shadow: false, outline: true },
+      bold: { style: 'danger', stroke: 7, shadow: true, outline: true },
+      subtle: { style: 'secondary', stroke: 1.5, shadow: false, outline: false },
+      guide: { style: 'step', stroke: 4.5, shadow: true, outline: true },
+    };
+    const presetSupportsStroke = ['arrow', 'bezier-arrow', 'step-arrow', 'rect', 'rounded-rect', 'circle'].includes(anno.type);
+    const presetSupportsShadow = !['spotlight', 'divider'].includes(anno.type);
+    const presetSupportsOutline = ['arrow', 'bezier-arrow', 'callout', 'label', 'pin'].includes(anno.type);
+    this.inspectorEl.querySelectorAll('.mark-style-preset').forEach((button) => {
+      const key = button.getAttribute('data-mark-style') ?? '';
+      const preset = markStylePresets[key];
+      if (!preset) return;
+      if (anno.style === preset.style && (!presetSupportsStroke || (anno as any).stroke_width === preset.stroke) &&
+          (!presetSupportsShadow || anno.shadow === preset.shadow)) button.classList.add('active');
+      button.addEventListener('click', () => {
+        anno.style = preset.style;
+        if (presetSupportsStroke) (anno as any).stroke_width = preset.stroke;
+        if (presetSupportsShadow) anno.shadow = preset.shadow;
+        if (presetSupportsOutline) (anno as any).outline = preset.outline;
+        this.pushState();
+        this.scheduleRender();
+        this.updateInspector();
       });
     });
 
@@ -1951,6 +2071,22 @@ export class AnnotationEditor {
 
     // Text toggle checkbox for arrows
     const hasTextCheckbox = document.getElementById('prop-has-text') as HTMLInputElement | null;
+    this.inspectorEl.querySelectorAll<HTMLButtonElement>('.arrow-skin-option').forEach((button) => {
+      button.addEventListener('click', () => {
+        (anno as any).arrow_skin = button.dataset.arrowSkin;
+        this.pushState();
+        this.updateInspector();
+        this.scheduleRender();
+      });
+    });
+    for (const [id, key] of [['prop-arrow-line-style', 'line_style'], ['prop-arrowhead', 'arrowhead']] as const) {
+      const select = document.getElementById(id) as HTMLSelectElement | null;
+      select?.addEventListener('change', () => {
+        (anno as any)[key] = select.value;
+        this.pushState();
+        this.scheduleRender();
+      });
+    }
     const textEditContainer = document.getElementById('text-edit-container') as HTMLElement | null;
     if (hasTextCheckbox) {
       hasTextCheckbox.addEventListener('change', () => {
@@ -1986,7 +2122,8 @@ export class AnnotationEditor {
       placementSelect.addEventListener('change', () => {
         const val = placementSelect.value as 'middle' | 'end';
         (anno as any).text_placement = val;
-        (anno as any).text_position = val;
+        delete (anno as any).text_position;
+        if (anno.type === 'bezier-arrow') delete (anno as any).t;
         this.pushState();
         this.scheduleRender();
       });
@@ -2360,29 +2497,26 @@ export class AnnotationEditor {
     let minY = Infinity;
     let maxX = -Infinity;
     let maxY = -Infinity;
+    const includePoint = (point: [number, number], padding = 0) => {
+      minX = Math.min(minX, point[0] - padding);
+      minY = Math.min(minY, point[1] - padding);
+      maxX = Math.max(maxX, point[0] + padding);
+      maxY = Math.max(maxY, point[1] + padding);
+    };
 
     for (const anno of this.scene.annotations) {
       if (anno.type === 'arrow') {
-        if (anno.start) {
-          minX = Math.min(minX, anno.start[0]);
-          minY = Math.min(minY, anno.start[1]);
-          maxX = Math.max(maxX, anno.start[0]);
-          maxY = Math.max(maxY, anno.start[1]);
-        }
-        if (anno.end) {
-          minX = Math.min(minX, anno.end[0]);
-          minY = Math.min(minY, anno.end[1]);
-          maxX = Math.max(maxX, anno.end[0]);
-          maxY = Math.max(maxY, anno.end[1]);
-        }
+        const length = anno.start && anno.end ? Math.hypot(anno.end[0] - anno.start[0], anno.end[1] - anno.start[1]) : 0;
+        const strokeWidth = (anno as any).stroke_width ?? 4;
+        const padding = anno.arrow_skin === 'bold' ? Math.min(65, Math.max(10, length * 0.12)) + 3 : Math.min(Math.max(strokeWidth * 2.3, 10), 22) + 3;
+        if (anno.start) includePoint(anno.start, padding);
+        if (anno.end) includePoint(anno.end, padding);
       } else if (anno.type === 'bezier-arrow') {
+        const length = Math.hypot(anno.control[0] - anno.start[0], anno.control[1] - anno.start[1]) + Math.hypot(anno.end[0] - anno.control[0], anno.end[1] - anno.control[1]);
+        const strokeWidth = (anno as any).stroke_width ?? 4;
+        const padding = anno.arrow_skin === 'bold' ? Math.min(65, Math.max(10, length * 0.12)) + 3 : Math.min(Math.max(strokeWidth * 2.3, 10), 22) + 3;
         for (const pt of [anno.start, anno.control, anno.end]) {
-          if (pt) {
-            minX = Math.min(minX, pt[0]);
-            minY = Math.min(minY, pt[1]);
-            maxX = Math.max(maxX, pt[0]);
-            maxY = Math.max(maxY, pt[1]);
-          }
+          if (pt) includePoint(pt, padding);
         }
       } else if ('target' in anno && Array.isArray(anno.target)) {
         const [x, y, w, h] = anno.target;

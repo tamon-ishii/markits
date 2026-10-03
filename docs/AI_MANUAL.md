@@ -13,6 +13,15 @@ markits capture screenshot.png
 # Capture with desktop UI detection (embeds UIMap into PNG metadata)
 markits capture screenshot.png --detect-ui
 
+# List displays, then capture the second display (indices start at 0)
+markits capture --list-screens
+markits capture second-display.png --screen 1
+
+# List windows, then capture one by a partial title, window ID, or process ID
+markits capture --list-windows
+markits capture app-window.png --window "設定"
+markits capture app-window.png --pid 1234
+
 # REUSE UIMAP: Fast capture carrying over UIMap metadata from a previous screenshot
 markits capture screenshot2.png --uimap screenshot.png
 
@@ -132,7 +141,7 @@ If coordinates are used directly, `target` is `[x, y, width, height]` in image p
 | Dim outside a region | `{"type":"spotlight","target":"保存"}` |
 | High-level click instruction | `{"type":"instruction","action":"click","target":"保存","text":"Click here"}` |
 
-Other supported types: `pin`, `arrow`, `bezier-arrow`, `bullseye`, `divider`. `arrow` and `bezier-arrow` support text labels (`"text":"Label"`) with `"text_placement": "middle"` (default) or `"end"` (tip of the arrow).
+Other supported types: `pin`, `arrow`, `bezier-arrow`, `bullseye`, `divider`. `arrow` and `bezier-arrow` support text labels (`"text":"Label"`) with `"text_placement": "middle"` (default) or `"end"`. `middle` uses the shaft center as its anchor and moves the label clear of the line according to its bounds and arrow direction. `end` places it beyond the tail, on the side without the triangular head. For Bezier arrows, `position` controls the side used for a centered label.
 
 ## Reuse targets
 

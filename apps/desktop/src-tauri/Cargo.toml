@@ -1,6 +1,6 @@
 [package]
 name = "markits-desktop"
-version = "0.6.1"
+version = "0.7.0"
 edition = "2024"
 
 [lib]
@@ -30,6 +30,7 @@ base64 = "0.22"
 crc32fast = "1.4"
 arboard = "3.6"
 dirs = "6.0"
+chrono = "0.4"
 thiserror = "2.0"
 tokio = { version = "1", features = ["time"] }
 xa11y = { version = "0.15.1", default-features = false }

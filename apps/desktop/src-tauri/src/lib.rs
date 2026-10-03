@@ -4,11 +4,11 @@ pub mod history;
 pub mod metadata;
 pub mod ui_elements;
 
-use std::sync::{atomic::AtomicU64, Mutex};
+use std::sync::{Mutex, atomic::AtomicU64};
 use tauri::{
+    AppHandle, Emitter, Manager,
     menu::{Menu, MenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
-    AppHandle, Emitter, Manager,
 };
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut};
 
@@ -18,6 +18,78 @@ pub struct AppState {
     pub overlay_ready: Mutex<bool>,
     pub pending_capture: Mutex<Option<capture::CapturedImage>>,
     pub capture_generation: AtomicU64,
+    pub shortcut: Mutex<String>,
+    pub shortcut_warning: Mutex<Option<String>>,
+}
+
+const CAPTURE_SHORTCUTS: &[&str] = &["PrintScreen", "Alt+PrintScreen", "Control+Shift+S"];
+
+fn shortcut_config_path() -> std::path::PathBuf {
+    dirs::config_dir()
+        .unwrap_or_else(|| std::path::PathBuf::from("."))
+        .join("markits")
+        .join("capture-shortcut.txt")
+}
+
+fn read_shortcut() -> String {
+    std::fs::read_to_string(shortcut_config_path())
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| CAPTURE_SHORTCUTS.contains(&value.as_str()))
+        .unwrap_or_else(|| CAPTURE_SHORTCUTS[0].to_string())
+}
+
+#[derive(serde::Serialize)]
+struct ShortcutStatus {
+    shortcut: String,
+    warning: Option<String>,
+}
+
+#[tauri::command]
+fn cmd_get_capture_shortcut(app: AppHandle) -> Result<ShortcutStatus, String> {
+    let state = app.state::<AppState>();
+    Ok(ShortcutStatus {
+        shortcut: state.shortcut.lock().map_err(|e| e.to_string())?.clone(),
+        warning: state
+            .shortcut_warning
+            .lock()
+            .map_err(|e| e.to_string())?
+            .clone(),
+    })
+}
+
+#[tauri::command]
+fn cmd_set_capture_shortcut(app: AppHandle, shortcut: String) -> Result<ShortcutStatus, String> {
+    if !CAPTURE_SHORTCUTS.contains(&shortcut.as_str()) {
+        return Err("Unsupported capture shortcut".to_string());
+    }
+    let state = app.state::<AppState>();
+    let previous = state.shortcut.lock().map_err(|e| e.to_string())?.clone();
+    if previous != shortcut {
+        if let Ok(old) = previous.parse::<Shortcut>() {
+            let _ = app.global_shortcut().unregister(old);
+        }
+        *state.shortcut.lock().map_err(|e| e.to_string())? = shortcut.clone();
+        if let Err(error) = register_capture_shortcuts(&app) {
+            *state.shortcut.lock().map_err(|e| e.to_string())? = previous;
+            let _ = register_capture_shortcuts(&app);
+            return Err(error);
+        }
+        let path = shortcut_config_path();
+        let persist = (|| -> Result<(), std::io::Error> {
+            if let Some(parent) = path.parent() { std::fs::create_dir_all(parent)?; }
+            std::fs::write(path, &shortcut)
+        })();
+        if let Err(error) = persist {
+            if let Ok(new_shortcut) = shortcut.parse::<Shortcut>() {
+                let _ = app.global_shortcut().unregister(new_shortcut);
+            }
+            *state.shortcut.lock().map_err(|e| e.to_string())? = previous;
+            let _ = register_capture_shortcuts(&app);
+            return Err(format!("ショートカット設定を保存できません: {error}"));
+        }
+    }
+    cmd_get_capture_shortcut(app)
 }
 
 fn trigger_capture(app: &AppHandle) {
@@ -35,29 +107,36 @@ fn trigger_capture(app: &AppHandle) {
 fn show_editor(app: &AppHandle) {
     if let Some(window) = app.get_webview_window("main") {
         commands::force_raise_window(&window);
-        register_capture_shortcuts(app);
+        let _ = register_capture_shortcuts(app);
     }
 }
 
-fn register_capture_shortcuts(app: &AppHandle) {
-    for key in ["PrintScreen", "Alt+PrintScreen", "Control+Shift+S"] {
-        if let Ok(shortcut) = key.parse::<Shortcut>() {
-            if app.global_shortcut().is_registered(shortcut) {
-                continue;
-            }
-            let handle = app.clone();
-            let _ = app.global_shortcut().on_shortcut(shortcut, move |_app, _sc, event| {
-                if event.state() == tauri_plugin_global_shortcut::ShortcutState::Pressed {
-                    trigger_capture(&handle);
-                }
-            });
-        }
+fn register_capture_shortcuts(app: &AppHandle) -> Result<(), String> {
+    let state = app.state::<AppState>();
+    let key = state.shortcut.lock().map_err(|e| e.to_string())?.clone();
+    let shortcut = key.parse::<Shortcut>().map_err(|e| e.to_string())?;
+    if app.global_shortcut().is_registered(shortcut) {
+        return Ok(());
     }
+    let handle = app.clone();
+    let result = app
+        .global_shortcut()
+        .on_shortcut(shortcut, move |_app, _sc, event| {
+            if event.state() == tauri_plugin_global_shortcut::ShortcutState::Pressed {
+                trigger_capture(&handle);
+            }
+        })
+        .map_err(|e| format!("ショートカット {key} を登録できません: {e}"));
+    *state.shortcut_warning.lock().map_err(|e| e.to_string())? = result.as_ref().err().cloned();
+    result
 }
 
 pub fn run() {
     tauri::Builder::default()
-        .manage(AppState::default())
+        .manage(AppState {
+            shortcut: Mutex::new(read_shortcut()),
+            ..AppState::default()
+        })
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_dialog::init())
@@ -78,24 +157,23 @@ pub fn run() {
             commands::cmd_delete_history_item,
             commands::cmd_save_to_history,
             commands::cmd_raise_window,
-            commands::cmd_fetch_detailed_ui_elements
+            commands::cmd_fetch_detailed_ui_elements,
+            cmd_get_capture_shortcut,
+            cmd_set_capture_shortcut
         ])
-        .on_window_event(|window, event| {
-            match event {
-                tauri::WindowEvent::CloseRequested { api, .. } => {
-                    api.prevent_close();
-                    if window.label() == "overlay" {
-                        let _ = commands::cmd_cancel_capture(window.app_handle().clone());
-                    } else {
-                        let _ = window.app_handle().global_shortcut().unregister_all();
-                        let _ = window.hide();
-                    }
+        .on_window_event(|window, event| match event {
+            tauri::WindowEvent::CloseRequested { api, .. } => {
+                api.prevent_close();
+                if window.label() == "overlay" {
+                    let _ = commands::cmd_cancel_capture(window.app_handle().clone());
+                } else {
+                    let _ = window.hide();
                 }
-                tauri::WindowEvent::Focused(true) if window.label() == "main" => {
-                    register_capture_shortcuts(window.app_handle());
-                }
-                _ => {}
             }
+            tauri::WindowEvent::Focused(true) if window.label() == "main" => {
+                let _ = register_capture_shortcuts(window.app_handle());
+            }
+            _ => {}
         })
         .setup(|app| {
             // Build system tray menu
@@ -103,14 +181,24 @@ pub fn run() {
             let capture_item = MenuItem::with_id(
                 app,
                 "capture",
-                "Capture Screen (PrintScreen)",
+                "Capture Screen",
                 true,
                 None::<&str>,
             )?;
-            let cancel_item = MenuItem::with_id(app, "cancel", "Cancel Capture", true, None::<&str>)?;
+            let cancel_item =
+                MenuItem::with_id(app, "cancel", "Cancel Capture", true, None::<&str>)?;
             let open_item = MenuItem::with_id(app, "open", "Open Image...", true, None::<&str>)?;
             let quit_item = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
-            let menu = Menu::with_items(app, &[&show_item, &capture_item, &cancel_item, &open_item, &quit_item])?;
+            let menu = Menu::with_items(
+                app,
+                &[
+                    &show_item,
+                    &capture_item,
+                    &cancel_item,
+                    &open_item,
+                    &quit_item,
+                ],
+            )?;
 
             let _tray = TrayIconBuilder::new()
                 .icon(app.default_window_icon().unwrap().clone())
@@ -150,7 +238,7 @@ pub fn run() {
                 })
                 .build(app)?;
 
-            register_capture_shortcuts(app.handle());
+            let _ = register_capture_shortcuts(app.handle());
 
             // Ensure main window is shown and raised on initial launch
             if let Some(window) = app.get_webview_window("main") {

@@ -28,6 +28,10 @@ The system SHALL register global shortcuts (including PrintScreen key and config
 - **WHEN** the configured shortcut is already reserved by the operating system or another application
 - **THEN** the application notifies the user with a warning and provides an interface to change the shortcut keybinding
 
+#### Scenario: Keep shortcut after editor closes
+- **WHEN** the user closes the editor window while MarkIts remains in the tray
+- **THEN** the selected capture shortcut remains registered
+
 ### Requirement: Window Lifecycle Management
 The system SHALL manage distinct windows for the capture overlay and the annotation editor, ensuring windows are opened, focused, and closed without terminating the background tray process.
 

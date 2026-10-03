@@ -617,6 +617,24 @@ MarkIts では、色コードを直接指定する代わりに、デザインシ
 
 ## インストール & CLI 利用方法
 
+### 一括注釈・テンプレート・連続撮影
+
+```sh
+# 複数マークを一度に描画し、チームの既定スタイルを適用
+markits annotate-batch screenshot.png examples/batch_marks.json --template examples/team_style.json -o annotated.png
+
+# 3秒後から1秒間隔で3枚撮影（capture_001.png など）
+markits capture-series capture.png --delay-ms 3000 --count 3 --interval-ms 1000
+```
+
+`annotate-batch` のマークファイルは注釈配列、または `annotations` 配列を持つ JSON です。テンプレートは `style`、`position`、`shadow`、`outline`、`stroke_width`、矢印用の `arrow_skin`、`line_style`、`arrowhead` の既定値を指定します。個々のマークの値が優先されます。`--uimap` に指定した PNG と対象画像の寸法が異なる場合は警告が出ます。
+
+デスクトップの「共有用に保存」は矩形マークの内側を黒塗りし、元画像と編集用メタデータを除去します。共有前に矩形で隠す範囲を指定してください。通常の保存は再編集に必要な情報を保持します。
+
+デスクトップの選択中マークには「標準」「強調」「控えめ」「手順」のスタイルプリセットがあります。直線矢印と曲線矢印では、形のプレビューから `arrow_skin` の `classic`（標準）/ `sketch`（太い輪郭と斜線を持つ手描き風）/ `bold`（先細りの塗り矢印）を選べます。`line_style` の `solid` / `dashed` / `dotted` と `arrowhead` の `filled` / `open` は標準形に適用されます。
+
+矢印の `text_placement` はラベルを置く基準位置です。`middle` は矢印の中央、`end` は三角の先端ではなく矢印の始点側（矢印のない終端）です。ラベルの大きさと矢印の向きを使って、線や端と重ならない側へ配置します。曲線矢印の `position` は中央ラベルを曲線のどちら側に置くかのヒントです。
+
 ### ビルド済みバイナリのダウンロード
 [GitHub Releases](https://github.com/tamon-ishii/markits/releases) より、各 OS 向けの最適化済み実行可能バイナリをダウンロードしてそのまま利用できます：
 - **Linux**: `x86_64` (glibc / musl static), `aarch64` (ARM64)

@@ -1,5 +1,5 @@
 export type SemanticStyle = 'primary' | 'secondary' | 'warning' | 'danger' | 'info' | 'step';
-export type PositionHint = 'top' | 'bottom' | 'left' | 'right' | 'auto';
+export type PositionHint = 'top' | 'bottom' | 'left' | 'right' | 'center' | 'auto';
 
 export interface Canvas {
   width: number;
@@ -27,6 +27,9 @@ export type ArrowTextPlacement = 'middle' | 'end';
 
 export interface ArrowAnnotation extends BaseAnnotation {
   type: 'arrow';
+  line_style?: 'solid' | 'dashed' | 'dotted';
+  arrowhead?: 'filled' | 'open';
+  arrow_skin?: 'classic' | 'sketch' | 'bold';
   target?: [number, number, number, number];
   position?: PositionHint;
   start?: [number, number];
@@ -43,6 +46,9 @@ export interface ArrowAnnotation extends BaseAnnotation {
 
 export interface BezierArrowAnnotation extends BaseAnnotation {
   type: 'bezier-arrow';
+  line_style?: 'solid' | 'dashed' | 'dotted';
+  arrowhead?: 'filled' | 'open';
+  arrow_skin?: 'classic' | 'sketch' | 'bold';
   start: [number, number];
   control: [number, number];
   end: [number, number];

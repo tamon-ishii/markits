@@ -48,7 +48,10 @@ pub fn generate_thumbnail_bytes(bytes: &[u8], max_size: u32) -> Result<Vec<u8>, 
     Ok(cursor.into_inner())
 }
 
-pub fn generate_thumbnail_data_url(bytes: &[u8], max_size: u32) -> Result<String, image::ImageError> {
+pub fn generate_thumbnail_data_url(
+    bytes: &[u8],
+    max_size: u32,
+) -> Result<String, image::ImageError> {
     let thumb_bytes = generate_thumbnail_bytes(bytes, max_size)?;
     let b64 = base64::engine::general_purpose::STANDARD.encode(&thumb_bytes);
     Ok(format!("data:image/png;base64,{}", b64))
@@ -93,7 +96,8 @@ pub fn save_or_update_history_item(
     let base_path = history_dir.join(format!("{}.base.png", id));
 
     // Embed annotations, UI elements, and crop_info if present
-    let final_bytes = metadata::embed_metadata(png_bytes, annotations_json, ui_elements, crop_info)?;
+    let final_bytes =
+        metadata::embed_metadata(png_bytes, annotations_json, ui_elements, crop_info)?;
 
     fs::write(&file_path, &final_bytes)?;
 
@@ -116,7 +120,8 @@ pub fn save_or_update_history_item(
 
     // Render composed image for thumbnail if annotations exist
     let thumb_source_bytes = if let Some(json_str) = annotations_json {
-        markits::render_composed_png_bytes(json_str, png_bytes).unwrap_or_else(|_| png_bytes.to_vec())
+        markits::render_composed_png_bytes(json_str, png_bytes)
+            .unwrap_or_else(|_| png_bytes.to_vec())
     } else {
         png_bytes.to_vec()
     };
@@ -158,7 +163,10 @@ pub fn list_history() -> Result<Vec<HistoryItem>, HistoryError> {
         };
 
         // Skip non-PNG files, thumbnail files, and base image files
-        if !file_name.ends_with(".png") || file_name.ends_with(".thumb.png") || file_name.ends_with(".base.png") {
+        if !file_name.ends_with(".png")
+            || file_name.ends_with(".thumb.png")
+            || file_name.ends_with(".base.png")
+        {
             continue;
         }
 
@@ -200,7 +208,8 @@ pub fn list_history() -> Result<Vec<HistoryItem>, HistoryError> {
             Some(tb) => tb,
             None => {
                 let thumb_source_bytes = if let Some(ref json) = header_info.annotations_json {
-                    markits::render_composed_png_bytes(json, &bytes).unwrap_or_else(|_| bytes.clone())
+                    markits::render_composed_png_bytes(json, &bytes)
+                        .unwrap_or_else(|_| bytes.clone())
                 } else {
                     bytes.clone()
                 };
@@ -222,7 +231,8 @@ pub fn list_history() -> Result<Vec<HistoryItem>, HistoryError> {
             String::new()
         };
 
-        let is_cropped = header_info.crop_info.is_some() || history_dir.join(format!("{}.base.png", file_stem)).exists();
+        let is_cropped = header_info.crop_info.is_some()
+            || history_dir.join(format!("{}.base.png", file_stem)).exists();
 
         items.push(HistoryItem {
             id: file_stem.to_string(),
@@ -285,19 +295,15 @@ pub fn delete_history_item(id: &str) -> Result<(), HistoryError> {
 }
 
 fn format_timestamp(secs: u64) -> String {
-    // Simple human-readable format without external chrono dependency
-    let days_since_epoch = secs / 86400;
-    let time_of_day = secs % 86400;
-    let hours = (time_of_day / 3600) % 24;
-    let minutes = (time_of_day % 3600) / 60;
-
-    // Approximate year and date
-    let year = 1970 + days_since_epoch / 365;
-    let day_of_year = (days_since_epoch % 365) + 1;
-    let month = (day_of_year / 30).clamp(1, 12);
-    let day = (day_of_year % 30).max(1);
-
-    format!("{:04}-{:02}-{:02} {:02}:{:02}", year, month, day, hours, minutes)
+    use chrono::TimeZone;
+    let Ok(secs) = i64::try_from(secs) else {
+        return "Invalid date".to_string();
+    };
+    chrono::Local
+        .timestamp_opt(secs, 0)
+        .single()
+        .map(|date| date.format("%Y-%m-%d %H:%M").to_string())
+        .unwrap_or_else(|| "Invalid date".to_string())
 }
 
 #[cfg(test)]
@@ -314,22 +320,27 @@ mod tests {
     }
 
     #[test]
+    fn timestamp_uses_real_calendar() {
+        let date = format_timestamp(1_704_067_200); // 2024-01-01 00:00 UTC
+        assert!(date.starts_with("2024-"), "{date}");
+    }
+
+    #[test]
     fn test_save_load_delete_history() {
         use crate::ui_elements::DetectedUiElement;
 
         let dummy = create_dummy_png();
         let json = r#"{"canvas":{"width":16,"height":16},"annotations":[{"type":"rect","target":[2,2,8,8]}]}"#;
-        let elements = vec![
-            DetectedUiElement {
-                role: "button".into(),
-                name: Some("OK".into()),
-                window_id: None, pid: None,
-                x: 2.0,
-                y: 2.0,
-                width: 8.0,
-                height: 8.0,
-            }
-        ];
+        let elements = vec![DetectedUiElement {
+            role: "button".into(),
+            name: Some("OK".into()),
+            window_id: None,
+            pid: None,
+            x: 2.0,
+            y: 2.0,
+            width: 8.0,
+            height: 8.0,
+        }];
 
         let item = save_capture_to_history(&dummy, Some(json), Some(&elements)).unwrap();
         assert_eq!(item.width, 16);
@@ -355,7 +366,9 @@ mod tests {
         let img_cropped: ImageBuffer<Rgba<u8>, Vec<u8>> =
             ImageBuffer::from_pixel(8, 8, Rgba([255, 100, 0, 255]));
         let mut buffer = Cursor::new(Vec::new());
-        img_cropped.write_to(&mut buffer, image::ImageFormat::Png).unwrap();
+        img_cropped
+            .write_to(&mut buffer, image::ImageFormat::Png)
+            .unwrap();
         let cropped_dummy = buffer.into_inner();
 
         let crop = metadata::CropInfo {
@@ -389,7 +402,10 @@ mod tests {
         assert_eq!(loaded.base_height, Some(16));
 
         let list = list_history().unwrap();
-        let found = list.iter().find(|h| h.id == item.id).expect("should find item in list");
+        let found = list
+            .iter()
+            .find(|h| h.id == item.id)
+            .expect("should find item in list");
         assert!(found.is_cropped);
         assert_eq!(found.width, 8);
         assert_eq!(found.height, 8);
@@ -398,15 +414,9 @@ mod tests {
         assert!(!list.iter().any(|h| h.id.ends_with(".base")));
 
         // Test uncrop update: saving without base image removes crop
-        let uncropped_item = save_or_update_history_item(
-            Some(&item.id),
-            &base_dummy,
-            None,
-            None,
-            None,
-            None,
-        )
-        .unwrap();
+        let uncropped_item =
+            save_or_update_history_item(Some(&item.id), &base_dummy, None, None, None, None)
+                .unwrap();
         assert_eq!(uncropped_item.width, 16);
         assert_eq!(uncropped_item.height, 16);
         assert!(!uncropped_item.is_cropped);

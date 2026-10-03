@@ -114,6 +114,31 @@ enum Commands {
         #[arg(short, long)]
         output: std::path::PathBuf,
     },
+    /// Apply several marks from a JSON array in one pass
+    AnnotateBatch {
+        image: std::path::PathBuf,
+        marks: std::path::PathBuf,
+        #[arg(short, long)]
+        output: std::path::PathBuf,
+        #[arg(long)]
+        uimap: Option<std::path::PathBuf>,
+        /// JSON object of default style, position, shadow, outline and stroke_width
+        #[arg(long)]
+        template: Option<std::path::PathBuf>,
+    },
+    /// Capture numbered screenshots after an optional delay
+    CaptureSeries {
+        /// Base PNG path; files are written as name_001.png, name_002.png, ...
+        output: std::path::PathBuf,
+        #[arg(long, default_value_t = 1)]
+        count: u32,
+        #[arg(long, default_value_t = 0)]
+        delay_ms: u64,
+        #[arg(long, default_value_t = 1000)]
+        interval_ms: u64,
+        #[arg(long)]
+        screen: Option<usize>,
+    },
     /// Cut a rectangular region from a PNG or JPEG and save the actual pixels
     Crop {
         /// Source PNG or JPEG image
@@ -216,6 +241,21 @@ fn read_input(input: &str) -> Result<String, Box<dyn std::error::Error>> {
     }
 }
 
+fn warn_uimap_if_stale(path: &std::path::Path, width: u32, height: u32) {
+    if let Ok(info) = raster::inspect_image(path) {
+        if info.width != width || info.height != height {
+            eprintln!("Warning: UIMap source is {}x{}, but target image is {}x{}; targets may be misplaced.",
+                info.width, info.height, width, height);
+        }
+    }
+}
+
+fn series_path(base: &std::path::Path, index: u32) -> std::path::PathBuf {
+    let stem = base.file_stem().and_then(|v| v.to_str()).unwrap_or("capture");
+    let name = format!("{stem}_{index:03}.png");
+    base.with_file_name(name)
+}
+
 fn run() -> Result<(), Box<dyn std::error::Error>> {
     let cli = Cli::parse();
 
@@ -232,6 +272,10 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         } => {
             let mut json_content = read_input(&input)?;
             if let Some(uimap_path) = uimap {
+                if let Some(ref image_path) = image {
+                    let info = raster::inspect_image(image_path)?;
+                    warn_uimap_if_stale(&uimap_path, info.width, info.height);
+                }
                 let elements = raster::load_uimap_from_path(&uimap_path)?;
                 json_content =
                     raster::with_image_canvas_and_uimap(&json_content, 0, 0, Some(&elements))?;
@@ -382,6 +426,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             let info = raster::inspect_image(&image)?;
             let mut external_uimap = None;
             if let Some(uimap_path) = uimap {
+                warn_uimap_if_stale(&uimap_path, info.width, info.height);
                 let parsed = raster::load_uimap_from_path(&uimap_path)?;
                 external_uimap = Some(parsed);
             }
@@ -405,7 +450,10 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 anno_obj.insert("position".to_string(), serde_json::Value::String(position));
             }
             if let Some(t) = text {
-                if !matches!(mark.as_str(), "rect" | "rounded-rect" | "spotlight" | "circle") {
+                if !matches!(
+                    mark.as_str(),
+                    "rect" | "rounded-rect" | "spotlight" | "circle"
+                ) {
                     anno_obj.insert("text".to_string(), serde_json::Value::String(t));
                 }
             }
@@ -438,6 +486,67 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             fs::write(&output, png_bytes)?;
             println!("Successfully annotated and saved to {}", output.display());
         }
+        Commands::AnnotateBatch { image, marks, output, uimap, template } => {
+            let info = raster::inspect_image(&image)?;
+            let marks_value: serde_json::Value = serde_json::from_str(&fs::read_to_string(&marks)?)?;
+            let mut annotations = if let Some(items) = marks_value.as_array() {
+                items.clone()
+            } else {
+                marks_value.get("annotations").and_then(|v| v.as_array())
+                    .ok_or("Marks file must be a JSON array or contain annotations")?.clone()
+            };
+            if annotations.is_empty() { return Err("Marks file contains no annotations".into()); }
+            if let Some(path) = template {
+                let defaults: serde_json::Value = serde_json::from_str(&fs::read_to_string(path)?)?;
+                let defaults = defaults.as_object().ok_or("Template must be a JSON object")?;
+                for mark in &mut annotations {
+                    let object = mark.as_object_mut().ok_or("Every mark must be a JSON object")?;
+                    let mark_type = object.get("type").and_then(|value| value.as_str()).unwrap_or("").to_string();
+                    for key in ["style", "position", "shadow", "outline", "stroke_width", "line_style", "arrowhead", "arrow_skin"] {
+                        let supported = match key {
+                            "position" => matches!(mark_type.as_str(), "arrow" | "bezier-arrow" | "callout" | "pin" | "label" | "badge" | "step-arrow"),
+                            "shadow" => !matches!(mark_type.as_str(), "spotlight" | "divider"),
+                            "outline" => matches!(mark_type.as_str(), "arrow" | "bezier-arrow" | "callout" | "pin" | "label"),
+                            "stroke_width" => matches!(mark_type.as_str(), "arrow" | "bezier-arrow" | "rect" | "rounded-rect" | "circle" | "step-arrow"),
+                            "line_style" | "arrowhead" | "arrow_skin" => matches!(mark_type.as_str(), "arrow" | "bezier-arrow"),
+                            _ => true,
+                        };
+                        if !supported { continue; }
+                        if !object.contains_key(key) {
+                            if let Some(value) = defaults.get(key) { object.insert(key.to_string(), value.clone()); }
+                        }
+                    }
+                }
+            }
+            let effective_uimap = if let Some(path) = uimap {
+                warn_uimap_if_stale(&path, info.width, info.height);
+                Some(raster::load_uimap_from_path(&path)?)
+            } else { info.uimap };
+            let mut scene = serde_json::json!({
+                "canvas": {"width": info.width, "height": info.height},
+                "annotations": annotations
+            });
+            if let Some(elements) = effective_uimap { scene["uimap"] = serde_json::to_value(elements)?; }
+            let source = fs::read(&image)?;
+            let png = raster::render_composed_png_bytes(&serde_json::to_string(&scene)?, &source)?;
+            fs::write(output, png)?;
+        }
+        Commands::CaptureSeries { output, count, delay_ms, interval_ms, screen } => {
+            if count == 0 || count > 1000 { return Err("--count must be between 1 and 1000".into()); }
+            if delay_ms > 3_600_000 || interval_ms > 3_600_000 { return Err("Delay and interval must be at most one hour".into()); }
+            std::thread::sleep(std::time::Duration::from_millis(delay_ms));
+            for index in 1..=count {
+                let captured = if let Some(selected) = screen {
+                    markits::capture::capture_screen(selected)?
+                } else {
+                    markits::capture::capture_primary_screen()?
+                };
+                let path = series_path(&output, index);
+                fs::write(&path, captured.raw_png)?;
+                println!("{}", path.display());
+                if index < count { std::thread::sleep(std::time::Duration::from_millis(interval_ms)); }
+            }
+        }
         Commands::Capture {
             output,
             output_flag,
@@ -467,7 +576,10 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 if json {
                     println!("{}", serde_json::to_string_pretty(&screens)?);
                 } else {
-                    println!("{:<7} {:<12} {:<12} {:<14} {:<8}", "Index", "Resolution", "Offset", "Scale Factor", "Primary");
+                    println!(
+                        "{:<7} {:<12} {:<12} {:<14} {:<8}",
+                        "Index", "Resolution", "Offset", "Scale Factor", "Primary"
+                    );
                     println!("{}", "-".repeat(58));
                     for s in screens {
                         println!(
@@ -488,10 +600,16 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 if json {
                     println!("{}", serde_json::to_string_pretty(&windows)?);
                 } else {
-                    println!("{:<10} {:<8} {:<16} {:<16} {:<25}", "Window ID", "PID", "App Name", "Bounds", "Title");
+                    println!(
+                        "{:<10} {:<8} {:<16} {:<16} {:<25}",
+                        "Window ID", "PID", "App Name", "Bounds", "Title"
+                    );
                     println!("{}", "-".repeat(82));
                     for w in windows {
-                        let pid_str = w.pid.map(|p| p.to_string()).unwrap_or_else(|| "-".to_string());
+                        let pid_str = w
+                            .pid
+                            .map(|p| p.to_string())
+                            .unwrap_or_else(|| "-".to_string());
                         let bounds_str = format!("{},{} {}x{}", w.x, w.y, w.width, w.height);
                         let truncated_title = if w.title.chars().count() > 25 {
                             format!("{}...", w.title.chars().take(22).collect::<String>())
@@ -500,11 +618,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                         };
                         println!(
                             "{:<10} {:<8} {:<16} {:<16} {:<25}",
-                            w.id,
-                            pid_str,
-                            w.app_name,
-                            bounds_str,
-                            truncated_title
+                            w.id, pid_str, w.app_name, bounds_str, truncated_title
                         );
                     }
                 }
@@ -515,36 +629,107 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 .or(output_flag)
                 .ok_or("Output destination path (.png) is required")?;
 
+            let region_args = [x.is_some(), y.is_some(), width.is_some(), height.is_some()];
+            if region_args.iter().any(|present| *present)
+                && !region_args.iter().all(|present| *present)
+            {
+                return Err("--x, --y, --width and --height must be provided together".into());
+            }
+            if (window.is_some() as u8 + pid.is_some() as u8 + region_args[0] as u8) > 1 {
+                return Err("--window, --pid and region coordinates cannot be combined".into());
+            }
+            if screen.is_some() && (window.is_some() || pid.is_some()) {
+                return Err("--screen cannot be combined with --window or --pid".into());
+            }
+            let is_window_capture = window.is_some() || pid.is_some();
+            let window_for_uimap = if detect_ui && uimap.is_none() && is_window_capture {
+                let query = if let Some(ref title_or_id) = window {
+                    markits::capture::WindowQuery::TitleOrId(title_or_id.clone())
+                } else {
+                    markits::capture::WindowQuery::Pid(pid.expect("window capture has a query"))
+                };
+                markits::capture::list_windows()?
+                    .into_iter()
+                    .find(|item| item.matches_query(&query))
+            } else {
+                None
+            };
+
             let captured = if let Some(query_str) = window {
-                markits::capture::capture_window_by_query(&markits::capture::WindowQuery::TitleOrId(query_str))?
+                markits::capture::capture_window_by_query(
+                    &markits::capture::WindowQuery::TitleOrId(query_str),
+                )?
             } else if let Some(target_pid) = pid {
-                markits::capture::capture_window_by_query(&markits::capture::WindowQuery::Pid(target_pid))?
+                markits::capture::capture_window_by_query(&markits::capture::WindowQuery::Pid(
+                    target_pid,
+                ))?
             } else if let (Some(x), Some(y), Some(w), Some(h)) = (x, y, width, height) {
-                markits::capture::capture_region(x, y, w, h)?
+                markits::capture::capture_region_on_screen(screen, x, y, w, h)?
             } else if let Some(screen_idx) = screen {
                 markits::capture::capture_screen(screen_idx)?
             } else {
                 markits::capture::capture_primary_screen()?
             };
 
+            let screen_info = if !is_window_capture {
+                let screens = markits::capture::list_screens()?;
+                let selected = screen
+                    .unwrap_or_else(|| screens.iter().position(|s| s.is_primary).unwrap_or(0));
+                screens.get(selected).cloned()
+            } else {
+                None
+            };
+
             let mut effective_uimap = None;
             if let Some(uimap_path) = uimap {
+                warn_uimap_if_stale(&uimap_path, captured.width, captured.height);
                 effective_uimap = Some(raster::load_uimap_from_path(&uimap_path)?);
             } else if detect_ui {
-                let bounds = if let (Some(x), Some(y), Some(w), Some(h)) = (x, y, width, height) {
+                let bounds = if let Some(ref selected_window) = window_for_uimap {
+                    Some((
+                        selected_window.x as f64,
+                        selected_window.y as f64,
+                        selected_window.width as f64,
+                        selected_window.height as f64,
+                    ))
+                } else if let (Some(x), Some(y), Some(w), Some(h)) = (x, y, width, height) {
                     Some((x as f64, y as f64, w as f64, h as f64))
                 } else {
                     None
                 };
-                let detected = markits::ui_elements::capture_desktop_detailed_elements(0, 0, bounds);
-                let elements: Vec<markits::UiElement> = if let (Some(x), Some(y), Some(w), Some(h)) = (x, y, width, height) {
-                    markits::ui_elements::filter_elements_for_crop(&detected, x as f64, y as f64, w as f64, h as f64)
+                let origin_x = screen_info.as_ref().map_or(0, |s| s.x);
+                let origin_y = screen_info.as_ref().map_or(0, |s| s.y);
+                let detected = markits::ui_elements::capture_desktop_detailed_elements(
+                    origin_x, origin_y, bounds,
+                );
+                let elements: Vec<markits::UiElement> =
+                    if let Some(ref selected_window) = window_for_uimap {
+                        let mut cropped = markits::ui_elements::filter_elements_for_crop(
+                            &detected,
+                            selected_window.x as f64,
+                            selected_window.y as f64,
+                            selected_window.width as f64,
+                            selected_window.height as f64,
+                        );
+                        let sx = captured.width as f64 / selected_window.width.max(1) as f64;
+                        let sy = captured.height as f64 / selected_window.height.max(1) as f64;
+                        for element in &mut cropped {
+                            element.x *= sx;
+                            element.y *= sy;
+                            element.width *= sx;
+                            element.height *= sy;
+                        }
+                        cropped.into_iter().map(Into::into).collect()
+                    } else if let (Some(x), Some(y), Some(w), Some(h)) = (x, y, width, height) {
+                        markits::ui_elements::filter_elements_for_crop(
+                            &detected, x as f64, y as f64, w as f64, h as f64,
+                        )
                         .into_iter()
                         .map(Into::into)
                         .collect()
-                } else {
-                    detected.into_iter().map(Into::into).collect()
-                };
+                    } else {
+                        detected.into_iter().map(Into::into).collect()
+                    };
                 effective_uimap = Some(elements);
             }
 
@@ -574,7 +759,10 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                     anno_obj.insert("position".to_string(), serde_json::Value::String(position));
                 }
                 if let Some(t) = text {
-                    if !matches!(mark.as_str(), "rect" | "rounded-rect" | "spotlight" | "circle") {
+                    if !matches!(
+                        mark.as_str(),
+                        "rect" | "rounded-rect" | "spotlight" | "circle"
+                    ) {
                         anno_obj.insert("text".to_string(), serde_json::Value::String(t));
                     }
                 }
@@ -604,10 +792,15 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                     if crop { Some(crop_margin) } else { None },
                 )?;
                 fs::write(&output_path, rendered_bytes)?;
-                println!("Screenshot captured, annotated, and saved to {}", output_path.display());
+                println!(
+                    "Screenshot captured, annotated, and saved to {}",
+                    output_path.display()
+                );
             } else {
                 if crop {
-                    eprintln!("Warning: --crop was specified, but no --target annotation was provided. Outputting full image.");
+                    eprintln!(
+                        "Warning: --crop was specified, but no --target annotation was provided. Outputting full image."
+                    );
                 }
                 fs::write(&output_path, png_bytes)?;
                 if let Some(ref elements) = effective_uimap {

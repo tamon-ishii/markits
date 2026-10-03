@@ -7,6 +7,7 @@ use thiserror::Error;
 pub const MARKITS_KEYWORD: &str = "markits:annotations";
 pub const MARKITS_UI_ELEMENTS_KEYWORD: &str = "markits:ui_elements";
 pub const MARKITS_CROP_KEYWORD: &str = "markits:crop_info";
+pub const MARKITS_SOURCE_KEYWORD: &str = "markits:source_image";
 const PNG_SIGNATURE: &[u8; 8] = b"\x89PNG\r\n\x1a\n";
 
 #[derive(Error, Debug)]
@@ -90,51 +91,12 @@ pub fn inspect_png_header(png_bytes: &[u8]) -> Result<PngHeaderInfo, MetadataErr
 }
 
 /// Extract arbitrary tEXt chunk value for the given keyword.
-pub fn extract_text_chunk(png_bytes: &[u8], target_keyword: &str) -> Result<Option<String>, MetadataError> {
-    if png_bytes.len() < 8 || &png_bytes[0..8] != PNG_SIGNATURE {
-        return Err(MetadataError::InvalidSignature);
-    }
-
-    let mut cursor = Cursor::new(&png_bytes[8..]);
-
-    while (cursor.position() as usize) < cursor.get_ref().len() {
-        let mut len_buf = [0u8; 4];
-        if cursor.read_exact(&mut len_buf).is_err() {
-            break;
-        }
-        let length = u32::from_be_bytes(len_buf) as usize;
-
-        let mut type_buf = [0u8; 4];
-        if cursor.read_exact(&mut type_buf).is_err() {
-            break;
-        }
-
-        if &type_buf == b"tEXt" {
-            let mut data = vec![0u8; length];
-            cursor.read_exact(&mut data)?;
-            let mut crc_buf = [0u8; 4];
-            cursor.read_exact(&mut crc_buf)?;
-
-            // Format: keyword + null separator (0x00) + text
-            if let Some(null_pos) = data.iter().position(|&b| b == 0) {
-                if let Ok(keyword) = std::str::from_utf8(&data[..null_pos]) {
-                    if keyword == target_keyword {
-                        let text = String::from_utf8(data[null_pos + 1..].to_vec())?;
-                        return Ok(Some(text));
-                    }
-                }
-            }
-        } else {
-            // Fast skip payload + 4 bytes CRC without allocating
-            let new_pos = cursor.position() + length as u64 + 4;
-            if new_pos as usize > cursor.get_ref().len() {
-                break;
-            }
-            cursor.set_position(new_pos);
-        }
-    }
-
-    Ok(None)
+pub fn extract_text_chunk(
+    png_bytes: &[u8],
+    target_keyword: &str,
+) -> Result<Option<String>, MetadataError> {
+    markits::raster::read_png_text_chunk(png_bytes, target_keyword)
+        .map_err(|_| MetadataError::InvalidSignature)
 }
 
 /// Extract MarkIts annotations JSON from a PNG byte slice if present.
@@ -143,7 +105,9 @@ pub fn extract_annotations(png_bytes: &[u8]) -> Result<Option<String>, MetadataE
 }
 
 /// Extract MarkIts UI elements from a PNG byte slice if present.
-pub fn extract_ui_elements(png_bytes: &[u8]) -> Result<Option<Vec<crate::ui_elements::DetectedUiElement>>, MetadataError> {
+pub fn extract_ui_elements(
+    png_bytes: &[u8],
+) -> Result<Option<Vec<crate::ui_elements::DetectedUiElement>>, MetadataError> {
     if let Some(json_str) = extract_text_chunk(png_bytes, MARKITS_UI_ELEMENTS_KEYWORD)? {
         let elements: Vec<crate::ui_elements::DetectedUiElement> = serde_json::from_str(&json_str)?;
         Ok(Some(elements))
@@ -190,6 +154,12 @@ pub fn remove_text_chunk(png_bytes: &[u8], keyword: &str) -> Result<Vec<u8>, Met
 
         let mut type_buf = [0u8; 4];
         cursor.read_exact(&mut type_buf)?;
+        if length
+            .checked_add(4)
+            .is_none_or(|needed| needed > cursor.get_ref().len() - cursor.position() as usize)
+        {
+            return Err(MetadataError::InvalidSignature);
+        }
 
         let mut data = vec![0u8; length];
         cursor.read_exact(&mut data)?;
@@ -219,7 +189,11 @@ pub fn remove_text_chunk(png_bytes: &[u8], keyword: &str) -> Result<Vec<u8>, Met
 
 /// Embed or update a tEXt chunk into a PNG byte slice.
 /// The chunk is inserted right after the IHDR chunk. Any existing chunk with the same keyword is replaced.
-pub fn embed_text_chunk(png_bytes: &[u8], keyword: &str, text: &str) -> Result<Vec<u8>, MetadataError> {
+pub fn embed_text_chunk(
+    png_bytes: &[u8],
+    keyword: &str,
+    text: &str,
+) -> Result<Vec<u8>, MetadataError> {
     if png_bytes.len() < 8 || &png_bytes[0..8] != PNG_SIGNATURE {
         return Err(MetadataError::InvalidSignature);
     }
@@ -233,7 +207,9 @@ pub fn embed_text_chunk(png_bytes: &[u8], keyword: &str, text: &str) -> Result<V
     chunk_data.push(0u8);
     chunk_data.extend_from_slice(text.as_bytes());
 
-    let chunk_len = (chunk_data.len() as u32).to_be_bytes();
+    let chunk_len = u32::try_from(chunk_data.len())
+        .map_err(|_| MetadataError::InvalidSignature)?
+        .to_be_bytes();
     let chunk_type = b"tEXt";
 
     let mut hasher = Hasher::new();
@@ -261,6 +237,12 @@ pub fn embed_text_chunk(png_bytes: &[u8], keyword: &str, text: &str) -> Result<V
 
         let mut type_buf = [0u8; 4];
         cursor.read_exact(&mut type_buf)?;
+        if length
+            .checked_add(4)
+            .is_none_or(|needed| needed > cursor.get_ref().len() - cursor.position() as usize)
+        {
+            return Err(MetadataError::InvalidSignature);
+        }
 
         let mut data = vec![0u8; length];
         cursor.read_exact(&mut data)?;
@@ -299,12 +281,18 @@ pub fn embed_text_chunk(png_bytes: &[u8], keyword: &str, text: &str) -> Result<V
 }
 
 /// Embed or update MarkIts annotations JSON into a PNG byte slice.
-pub fn embed_annotations(png_bytes: &[u8], annotations_json: &str) -> Result<Vec<u8>, MetadataError> {
+pub fn embed_annotations(
+    png_bytes: &[u8],
+    annotations_json: &str,
+) -> Result<Vec<u8>, MetadataError> {
     embed_text_chunk(png_bytes, MARKITS_KEYWORD, annotations_json)
 }
 
 /// Embed or update MarkIts UI elements into a PNG byte slice.
-pub fn embed_ui_elements(png_bytes: &[u8], elements: &[crate::ui_elements::DetectedUiElement]) -> Result<Vec<u8>, MetadataError> {
+pub fn embed_ui_elements(
+    png_bytes: &[u8],
+    elements: &[crate::ui_elements::DetectedUiElement],
+) -> Result<Vec<u8>, MetadataError> {
     let json_str = serde_json::to_string(elements)?;
     embed_text_chunk(png_bytes, MARKITS_UI_ELEMENTS_KEYWORD, &json_str)
 }
@@ -335,18 +323,19 @@ pub fn embed_metadata(
 /// the dimensions, Base64 data URL, and any restored metadata.
 pub fn load_image_with_metadata(bytes: &[u8]) -> Result<LoadedImageResult, MetadataError> {
     let img = image::load_from_memory(bytes)?;
-    let width = img.width();
-    let height = img.height();
+    let mut width = img.width();
+    let mut height = img.height();
 
     // Check if it's a PNG and has embedded annotations, UI elements, or crop info
-    let (annotations_json, ui_elements, crop_info) = if bytes.len() >= 8 && &bytes[0..8] == PNG_SIGNATURE {
-        let ann = extract_annotations(bytes).unwrap_or(None);
-        let uis = extract_ui_elements(bytes).unwrap_or(None);
-        let crop = extract_crop_info(bytes).unwrap_or(None);
-        (ann, uis, crop)
-    } else {
-        (None, None, None)
-    };
+    let (annotations_json, ui_elements, crop_info) =
+        if bytes.len() >= 8 && &bytes[0..8] == PNG_SIGNATURE {
+            let ann = extract_annotations(bytes).unwrap_or(None);
+            let uis = extract_ui_elements(bytes).unwrap_or(None);
+            let crop = extract_crop_info(bytes).unwrap_or(None);
+            (ann, uis, crop)
+        } else {
+            (None, None, None)
+        };
 
     let b64 = base64::engine::general_purpose::STANDARD.encode(bytes);
     let mime = if bytes.len() >= 8 && &bytes[0..8] == PNG_SIGNATURE {
@@ -354,7 +343,26 @@ pub fn load_image_with_metadata(bytes: &[u8]) -> Result<LoadedImageResult, Metad
     } else {
         "image/jpeg"
     };
-    let image_data_url = format!("data:{};base64,{}", mime, b64);
+    let mut image_data_url = format!("data:{};base64,{}", mime, b64);
+    // Exported pixels already contain the marks. Restore the original background
+    // before the editor draws the editable scene over it.
+    if annotations_json.is_some() && mime == "image/png" {
+        if let Some(source) = extract_text_chunk(bytes, MARKITS_SOURCE_KEYWORD)? {
+            if let Some((header, payload)) = source.split_once(',') {
+                if header.starts_with("data:image/") && header.ends_with(";base64") {
+                    if let Ok(source_bytes) =
+                        base64::engine::general_purpose::STANDARD.decode(payload)
+                    {
+                        if let Ok(source_image) = image::load_from_memory(&source_bytes) {
+                            width = source_image.width();
+                            height = source_image.height();
+                            image_data_url = source;
+                        }
+                    }
+                }
+            }
+        }
+    }
 
     Ok(LoadedImageResult {
         width,
@@ -374,10 +382,22 @@ pub fn load_image_with_metadata(bytes: &[u8]) -> Result<LoadedImageResult, Metad
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn rejects_chunk_length_larger_than_remaining_input() {
+        let mut png = create_test_png();
+        // First chunk is IHDR; make its declared length impossible.
+        png[8..12].copy_from_slice(&u32::MAX.to_be_bytes());
+        assert!(matches!(
+            extract_text_chunk(&png, MARKITS_KEYWORD),
+            Err(MetadataError::InvalidSignature)
+        ));
+    }
     use image::{ImageBuffer, Rgba};
 
     fn create_test_png() -> Vec<u8> {
-        let img: ImageBuffer<Rgba<u8>, Vec<u8>> = ImageBuffer::from_pixel(10, 10, Rgba([255, 0, 0, 255]));
+        let img: ImageBuffer<Rgba<u8>, Vec<u8>> =
+            ImageBuffer::from_pixel(10, 10, Rgba([255, 0, 0, 255]));
         let mut buffer = Cursor::new(Vec::new());
         img.write_to(&mut buffer, image::ImageFormat::Png).unwrap();
         buffer.into_inner()
@@ -416,10 +436,16 @@ mod tests {
         let updated_json = r#"{"version":2,"updated":true}"#;
 
         let png_v1 = embed_annotations(&png, initial_json).unwrap();
-        assert_eq!(extract_annotations(&png_v1).unwrap(), Some(initial_json.to_string()));
+        assert_eq!(
+            extract_annotations(&png_v1).unwrap(),
+            Some(initial_json.to_string())
+        );
 
         let png_v2 = embed_annotations(&png_v1, updated_json).unwrap();
-        assert_eq!(extract_annotations(&png_v2).unwrap(), Some(updated_json.to_string()));
+        assert_eq!(
+            extract_annotations(&png_v2).unwrap(),
+            Some(updated_json.to_string())
+        );
     }
 
     #[test]
@@ -429,7 +455,11 @@ mod tests {
         assert_eq!(res_plain.width, 10);
         assert_eq!(res_plain.height, 10);
         assert_eq!(res_plain.annotations_json, None);
-        assert!(res_plain.image_data_url.starts_with("data:image/png;base64,"));
+        assert!(
+            res_plain
+                .image_data_url
+                .starts_with("data:image/png;base64,")
+        );
 
         let json_data = r#"{"canvas":{"width":10,"height":10},"annotations":[{"type":"rect","target":[0,0,5,5]}]}"#;
         let meta_png = embed_annotations(&plain_png, json_data).unwrap();
@@ -462,27 +492,29 @@ mod tests {
         use crate::ui_elements::DetectedUiElement;
 
         let plain_png = create_test_png();
-        let elements = vec![
-            DetectedUiElement {
-                role: "button".into(),
-                name: Some("Submit".into()),
-                window_id: None, pid: None,
-                x: 10.0,
-                y: 20.0,
-                width: 80.0,
-                height: 30.0,
-            },
-        ];
+        let elements = vec![DetectedUiElement {
+            role: "button".into(),
+            name: Some("Submit".into()),
+            window_id: None,
+            pid: None,
+            x: 10.0,
+            y: 20.0,
+            width: 80.0,
+            height: 30.0,
+        }];
 
         let embedded = embed_ui_elements(&plain_png, &elements).unwrap();
-        let extracted = extract_ui_elements(&embedded).unwrap().expect("should find ui elements");
+        let extracted = extract_ui_elements(&embedded)
+            .unwrap()
+            .expect("should find ui elements");
         assert_eq!(extracted.len(), 1);
         assert_eq!(extracted[0].role, "button");
         assert_eq!(extracted[0].name.as_deref(), Some("Submit"));
         assert_eq!(extracted[0].x, 10.0);
 
         // Also test combined embedding and load_image_with_metadata
-        let combined = embed_metadata(&plain_png, Some(r#"{"test":true}"#), Some(&elements), None).unwrap();
+        let combined =
+            embed_metadata(&plain_png, Some(r#"{"test":true}"#), Some(&elements), None).unwrap();
         let loaded = load_image_with_metadata(&combined).unwrap();
         assert_eq!(loaded.annotations_json.as_deref(), Some(r#"{"test":true}"#));
         assert!(loaded.ui_elements.is_some());
@@ -502,7 +534,9 @@ mod tests {
         };
 
         let embedded = embed_crop_info(&plain_png, &crop).unwrap();
-        let extracted = extract_crop_info(&embedded).unwrap().expect("should find crop info");
+        let extracted = extract_crop_info(&embedded)
+            .unwrap()
+            .expect("should find crop info");
         assert_eq!(extracted, crop);
 
         // Test inspect_png_header

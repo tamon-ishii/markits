@@ -1,9 +1,135 @@
 use crate::error::Result;
-use crate::layout::{LayoutEngine, ResolvedAnnotation, ResolvedScene};
-use crate::model::{Scene, SemanticStyle};
+use crate::layout::{LayoutEngine, Point, ResolvedAnnotation, ResolvedScene};
+use crate::model::{ArrowSkin, ArrowheadStyle, LineStyle, Scene, SemanticStyle};
 use crate::theme::Theme;
 use serde::Serialize;
 
+fn arrow_dash(style: LineStyle) -> &'static str {
+    match style { LineStyle::Solid => "", LineStyle::Dashed => " stroke-dasharray=\"9 6\"", LineStyle::Dotted => " stroke-dasharray=\"2 5\"" }
+}
+
+fn classic_arrow(points: &[Point], curve_control: Option<Point>, color: &str, width: f64, line_style: LineStyle, arrowhead: ArrowheadStyle, filter: &str) -> String {
+    let Some(tip) = points.last() else { return String::new(); };
+    let length: f64 = points.windows(2).map(|pair| pair[0].distance_to(&pair[1])).sum();
+    if length < 5.0 {
+        return format!("  <line x1=\"{}\" y1=\"{}\" x2=\"{}\" y2=\"{}\" stroke=\"{color}\" stroke-width=\"{width}\" stroke-linecap=\"round\"{filter}/>\n", points[0].x, points[0].y, tip.x, tip.y);
+    }
+    let head_length = (width * 3.5).clamp(18.0, 30.0);
+    let head_half = (width * 2.3).clamp(10.0, 22.0);
+    let stop_distance = match arrowhead {
+        ArrowheadStyle::Filled => length - head_length + width.min(head_length * 0.25),
+        ArrowheadStyle::Open => length - width * 0.5,
+    }.clamp(0.0, length);
+    let mut distance = 0.0;
+    let mut stop_t = 1.0;
+    let mut stop_point = *tip;
+    for (index, pair) in points.windows(2).enumerate() {
+        let segment = pair[0].distance_to(&pair[1]);
+        if distance + segment >= stop_distance && segment > f64::EPSILON {
+            let t = (stop_distance - distance) / segment;
+            stop_t = (index as f64 + t) / (points.len() - 1) as f64;
+            stop_point = Point::new(pair[0].x + (pair[1].x - pair[0].x) * t, pair[0].y + (pair[1].y - pair[0].y) * t);
+            break;
+        }
+        distance += segment;
+    }
+    let shaft_shape = if let Some(control) = curve_control {
+        let start = points[0];
+        let control_x = start.x + (control.x - start.x) * stop_t;
+        let control_y = start.y + (control.y - start.y) * stop_t;
+        let inv = 1.0 - stop_t;
+        let end_x = inv * inv * start.x + 2.0 * inv * stop_t * control.x + stop_t * stop_t * tip.x;
+        let end_y = inv * inv * start.y + 2.0 * inv * stop_t * control.y + stop_t * stop_t * tip.y;
+        format!("<path d=\"M {} {} Q {:.2} {:.2} {:.2} {:.2}\"", start.x, start.y, control_x, control_y, end_x, end_y)
+    } else {
+        format!("<line x1=\"{}\" y1=\"{}\" x2=\"{:.2}\" y2=\"{:.2}\"", points[0].x, points[0].y, stop_point.x, stop_point.y)
+    };
+    let shaft = format!("    {shaft_shape} class=\"classic-arrow-shaft\" fill=\"none\" stroke=\"{color}\" stroke-width=\"{width}\" stroke-linecap=\"round\"{} />\n", arrow_dash(line_style));
+    let previous = points[points.len() - 2];
+    let dx = tip.x - previous.x;
+    let dy = tip.y - previous.y;
+    let tangent_length = (dx * dx + dy * dy).sqrt().max(f64::EPSILON);
+    let ux = dx / tangent_length;
+    let uy = dy / tangent_length;
+    let base_x = tip.x - ux * head_length;
+    let base_y = tip.y - uy * head_length;
+    let left_x = base_x - uy * head_half;
+    let left_y = base_y + ux * head_half;
+    let right_x = base_x + uy * head_half;
+    let right_y = base_y - ux * head_half;
+    let head_shape = format!("M {left_x:.2} {left_y:.2} L {:.2} {:.2} L {right_x:.2} {right_y:.2}", tip.x, tip.y);
+    let head = match arrowhead {
+        ArrowheadStyle::Filled => format!("    <path class=\"classic-arrow-head\" d=\"{head_shape} Z\" fill=\"{color}\"/>\n"),
+        ArrowheadStyle::Open => format!("    <path class=\"classic-arrow-head\" d=\"{head_shape}\" fill=\"none\" stroke=\"{color}\" stroke-width=\"{}\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/>\n", width.max(2.5)),
+    };
+    format!("  <g{filter}>\n{shaft}{head}  </g>\n")
+}
+
+/// Draws a single silhouette along the arrow's centre line. A taper and a wide head
+/// are part of the same path, so curved arrows keep their shape around bends.
+fn skin_arrow(points: &[Point], color: &str, width: f64, skin: ArrowSkin, key: &str, filter: &str) -> Option<String> {
+    if points.len() < 2 { return None; }
+    let mut distances = vec![0.0; points.len()];
+    for i in 1..points.len() {
+        distances[i] = distances[i - 1] + ((points[i].x - points[i - 1].x).powi(2) + (points[i].y - points[i - 1].y).powi(2)).sqrt();
+    }
+    let length = *distances.last()?;
+    if length < 5.0 { return None; }
+    let sketch_outline = (width * 0.2).clamp(1.0, 2.0);
+    let (head_length, head_half) = match skin {
+        ArrowSkin::Bold => ((length * 0.26).clamp(18.0, 90.0).min(length * 0.45), (length * 0.12).clamp(10.0, 65.0).min(length * 0.25)),
+        ArrowSkin::Sketch => ((width * 3.5).clamp(18.0, 30.0).min(length * 0.45), ((width * 2.3).clamp(10.0, 22.0) - sketch_outline * 0.5).min(length * 0.26)),
+        ArrowSkin::Classic => return None,
+    };
+    let neck_distance = length - head_length;
+    let mut body = Vec::new();
+    for i in 0..points.len() - 1 {
+        if distances[i] < neck_distance { body.push((points[i], distances[i])); }
+        if distances[i + 1] >= neck_distance {
+            let segment = (distances[i + 1] - distances[i]).max(f64::EPSILON);
+            let t = (neck_distance - distances[i]) / segment;
+            body.push((Point::new(points[i].x + (points[i + 1].x - points[i].x) * t, points[i].y + (points[i + 1].y - points[i].y) * t), neck_distance));
+            break;
+        }
+    }
+    let mut left = Vec::with_capacity(body.len());
+    let mut right = Vec::with_capacity(body.len());
+    for i in 0..body.len() {
+        let prev = if i == 0 { body[i].0 } else { body[i - 1].0 };
+        let next = if i + 1 == body.len() { points[points.len() - 1] } else { body[i + 1].0 };
+        let dx = next.x - prev.x;
+        let dy = next.y - prev.y;
+        let direction_length = (dx * dx + dy * dy).sqrt().max(f64::EPSILON);
+        let nx = -dy / direction_length;
+        let ny = dx / direction_length;
+        let progress = (body[i].1 / neck_distance).clamp(0.0, 1.0);
+        let half_width = match skin {
+            ArrowSkin::Bold => 0.6 + ((width * 1.7).max(head_half * 0.36) - 0.6) * progress,
+            ArrowSkin::Sketch => ((width - sketch_outline) * 0.5).max(0.5).min(head_half * 0.65),
+            ArrowSkin::Classic => return None,
+        };
+        let p = body[i].0;
+        left.push(Point::new(p.x + nx * half_width, p.y + ny * half_width));
+        right.push(Point::new(p.x - nx * half_width, p.y - ny * half_width));
+    }
+    let neck = body.last()?.0;
+    let tip = *points.last()?;
+    let dx = tip.x - neck.x;
+    let dy = tip.y - neck.y;
+    let direction_length = (dx * dx + dy * dy).sqrt().max(f64::EPSILON);
+    let nx = -dy / direction_length;
+    let ny = dx / direction_length;
+    let mut path = format!("M {:.2} {:.2}", left[0].x, left[0].y);
+    for p in left.iter().skip(1) { path.push_str(&format!(" L {:.2} {:.2}", p.x, p.y)); }
+    path.push_str(&format!(" L {:.2} {:.2} L {:.2} {:.2} L {:.2} {:.2}", neck.x + nx * head_half, neck.y + ny * head_half, tip.x, tip.y, neck.x - nx * head_half, neck.y - ny * head_half));
+    for p in right.iter().rev() { path.push_str(&format!(" L {:.2} {:.2}", p.x, p.y)); }
+    path.push_str(" Z");
+    match skin {
+        ArrowSkin::Bold => Some(format!("  <path d=\"{path}\" fill=\"{color}\"{filter}/>\n")),
+        ArrowSkin::Sketch => Some(format!("  <path d=\"{path}\" fill=\"url(#arrow-hatch-{key})\" stroke=\"{color}\" stroke-width=\"{sketch_outline}\" stroke-linecap=\"round\" stroke-linejoin=\"round\"{filter}/>\n")),
+        ArrowSkin::Classic => None,
+    }
+}
 /// Geometry returned alongside the SVG for editor and automation clients.
 #[derive(Debug, Clone, Serialize)]
 pub struct LayoutElement {
@@ -178,18 +304,33 @@ impl SvgRenderer {
 "#,
                 key, tokens.stroke_color
             ));
+            svg.push_str(&format!(
+                "    <marker id=\"arrowhead-open-{}\" viewBox=\"0 0 10 10\" refX=\"7\" refY=\"5\" markerWidth=\"6\" markerHeight=\"6\" orient=\"auto-start-reverse\"><path d=\"M 0 1.5 L 8 5 L 0 8.5\" fill=\"none\" stroke=\"{}\" stroke-width=\"1.6\"/></marker>\n",
+                key, tokens.stroke_color
+            ));
+            svg.push_str(&format!(
+                "    <pattern id=\"arrow-hatch-{}\" width=\"12\" height=\"12\" patternUnits=\"userSpaceOnUse\" patternTransform=\"rotate(35)\"><path d=\"M 0 0 V 12\" stroke=\"{}\" stroke-width=\"2.2\"/></pattern>\n",
+                key, tokens.stroke_color
+            ));
         }
 
         // Spotlight masks
+        // Bleed past the SVG viewport so antialiasing cannot expose a light strip
+        // where the dimming layer meets the editor canvas edge.
+        let spotlight_bleed = 2;
+        let mask_width = w + spotlight_bleed * 2;
+        let mask_height = h + spotlight_bleed * 2;
         for (idx, ann) in scene.annotations.iter().enumerate() {
             if let ResolvedAnnotation::Spotlight { target, .. } = ann {
                 svg.push_str(&format!(
-                    r#"    <mask id="spotlight-mask-{}">
-      <rect width="100%" height="100%" fill="white"/>
+                    r#"    <mask id="spotlight-mask-{}" maskUnits="userSpaceOnUse" maskContentUnits="userSpaceOnUse" x="-{}" y="-{}" width="{}" height="{}">
+      <rect x="-{}" y="-{}" width="{}" height="{}" fill="white"/>
       <rect x="{}" y="{}" width="{}" height="{}" rx="{}" ry="{}" fill="black"/>
     </mask>
 "#,
-                    idx, target.x, target.y, target.width, target.height, self.theme.corner_radius, self.theme.corner_radius
+                    idx, spotlight_bleed, spotlight_bleed, mask_width, mask_height,
+                    spotlight_bleed, spotlight_bleed, mask_width, mask_height,
+                    target.x, target.y, target.width, target.height, self.theme.corner_radius, self.theme.corner_radius
                 ));
             }
         }
@@ -202,9 +343,10 @@ impl SvgRenderer {
                 let tokens = self.theme.tokens_for(*style);
                 svg.push_str(&format!(
                     r#"  <!-- Spotlight -->
-  <rect width="100%" height="100%" fill="{}" opacity="{}" mask="url(#spotlight-mask-{})"/>
+  <rect x="-{}" y="-{}" width="{}" height="{}" fill="{}" opacity="{}" mask="url(#spotlight-mask-{})"/>
   <rect x="{}" y="{}" width="{}" height="{}" rx="{}" ry="{}" fill="none" stroke="{}" stroke-width="{}" stroke-dasharray="4 3"/>
 "#,
+                    spotlight_bleed, spotlight_bleed, mask_width, mask_height,
                     self.theme.spotlight_backdrop,
                     self.theme.spotlight_opacity,
                     idx,
@@ -274,16 +416,13 @@ impl SvgRenderer {
                         center.x, center.y, dot_radius, tokens.stroke_color
                     ));
                 }
-                ResolvedAnnotation::Arrow { start, end, text, style, shadow, stroke_width, boxed, outline, text_placement } => {
+                ResolvedAnnotation::Arrow { start, end, text, style, shadow, stroke_width, line_style, arrowhead, arrow_skin, boxed, outline, text_placement } => {
                     let tokens = self.theme.tokens_for(*style);
-                    let sw = stroke_width.unwrap_or(tokens.stroke_width);
+                    let sw = stroke_width.unwrap_or(4.0);
                     let key = style_key(*style);
                     let filter_attr = if *shadow { r#" filter="url(#markits-shadow)""# } else { "" };
-                    svg.push_str(&format!(
-                        r#"  <line x1="{}" y1="{}" x2="{}" y2="{}" stroke="{}" stroke-width="{}" stroke-linecap="round" marker-end="url(#arrowhead-{})"{}/>
-"#,
-                        start.x, start.y, end.x, end.y, tokens.stroke_color, sw, key, filter_attr
-                    ));
+                    svg.push_str(&skin_arrow(&[*start, *end], &tokens.stroke_color, sw, *arrow_skin, key, filter_attr)
+                        .unwrap_or_else(|| classic_arrow(&[*start, *end], None, &tokens.stroke_color, sw, *line_style, *arrowhead, filter_attr)));
 
                     if let Some(txt) = text {
                         if !txt.trim().is_empty() {
@@ -291,32 +430,33 @@ impl SvgRenderer {
                             let dx = end.x - start.x;
                             let dy = end.y - start.y;
                             let len = (dx * dx + dy * dy).sqrt().max(0.001);
-                            let dir_x = dx / len;
-                            let dir_y = dy / len;
-                            let perp_x = -dy / len;
-                            let perp_y = dx / len;
-
-                            let (base_x, base_y) = match text_placement {
-                                crate::model::ArrowTextPlacement::End => {
-                                    let tip_offset = (len * 0.25).min(20.0);
-                                    (end.x - dir_x * tip_offset, end.y - dir_y * tip_offset)
-                                }
-                                crate::model::ArrowTextPlacement::Middle => {
-                                    ((start.x + end.x) / 2.0, (start.y + end.y) / 2.0)
-                                }
-                            };
-
                             let font_size = self.theme.font_size;
                             let text_dim = crate::layout::estimate_text_dimensions(txt, font_size);
                             let pill_w = text_dim.width + 16.0;
                             let pill_h = text_dim.height + 8.0;
                             let rx = self.theme.corner_radius;
                             let ry = self.theme.corner_radius;
-
-                            // Offset slightly perpendicular to arrow so line doesn't strike through text
-                            let offset_dist = pill_h / 2.0 + sw + 4.0;
-                            let cx = base_x + perp_x * offset_dist;
-                            let cy = base_y + perp_y * offset_dist;
+                            let (base_x, base_y) = ((start.x + end.x) / 2.0, (start.y + end.y) / 2.0);
+                            let clearance = sw / 2.0 + 6.0;
+                            let (cx, cy) = match text_placement {
+                                crate::model::ArrowTextPlacement::End => {
+                                    // Place the label beyond the tail, accounting for its full bounds.
+                                    let ux = -dx / len;
+                                    let uy = -dy / len;
+                                    let extent = pill_w / 2.0 * ux.abs() + pill_h / 2.0 * uy.abs();
+                                    (start.x + ux * (extent + clearance), start.y + uy * (extent + clearance))
+                                }
+                                crate::model::ArrowTextPlacement::Middle => {
+                                    // Put labels beside the shaft: above/below horizontal arrows,
+                                    // and to the right of vertical arrows.
+                                    if dx.abs() >= dy.abs() {
+                                        let side = if dx >= 0.0 { -1.0 } else { 1.0 };
+                                        (base_x, base_y + side * (pill_h / 2.0 + clearance))
+                                    } else {
+                                        (base_x + pill_w / 2.0 + clearance, base_y)
+                                    }
+                                }
+                            };
                             let box_x = cx - pill_w / 2.0;
                             let box_y = cy - pill_h / 2.0;
 
@@ -356,16 +496,19 @@ impl SvgRenderer {
                         }
                     }
                 }
-                ResolvedAnnotation::BezierArrow { start, control, end, style, shadow, stroke_width, .. } => {
+                ResolvedAnnotation::BezierArrow { start, control, end, style, shadow, stroke_width, line_style, arrowhead, arrow_skin, .. } => {
                     let tokens = self.theme.tokens_for(*style);
-                    let sw = stroke_width.unwrap_or(tokens.stroke_width);
+                    let sw = stroke_width.unwrap_or(4.0);
                     let key = style_key(*style);
                     let filter_attr = if *shadow { r#" filter="url(#markits-shadow)""# } else { "" };
-                    svg.push_str(&format!(
-                        r#"  <path d="M {} {} Q {} {} {} {}" fill="none" stroke="{}" stroke-width="{}" stroke-linecap="round" marker-end="url(#arrowhead-{})"{}/>
-"#,
-                        start.x, start.y, control.x, control.y, end.x, end.y, tokens.stroke_color, sw, key, filter_attr
-                    ));
+                    let points: Vec<Point> = (0..=40).map(|step| {
+                        let t = step as f64 / 40.0;
+                        let inv = 1.0 - t;
+                        Point::new(inv * inv * start.x + 2.0 * inv * t * control.x + t * t * end.x,
+                                   inv * inv * start.y + 2.0 * inv * t * control.y + t * t * end.y)
+                    }).collect();
+                    svg.push_str(&skin_arrow(&points, &tokens.stroke_color, sw, *arrow_skin, key, filter_attr)
+                        .unwrap_or_else(|| classic_arrow(&points, Some(*control), &tokens.stroke_color, sw, *line_style, *arrowhead, filter_attr)));
                 }
                 _ => {}
             }
@@ -662,6 +805,52 @@ pub fn render_with_layout_from_json(json_str: &str) -> Result<RenderResult> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn arrow_line_and_head_styles_render() {
+        let json = r#"{"canvas":{"width":100,"height":80},"annotations":[
+          {"type":"arrow","start":[5,5],"end":[50,30],"line_style":"dashed","arrowhead":"open"},
+          {"type":"bezier-arrow","start":[5,40],"control":[30,10],"end":[60,40],"line_style":"dotted"}
+        ]}"#;
+        let svg = render_from_json(json).unwrap();
+        assert!(svg.contains("stroke-dasharray=\"9 6\""));
+        assert!(svg.contains("stroke-dasharray=\"2 5\""));
+        assert!(svg.contains("class=\"classic-arrow-head\""));
+        assert!(svg.lines().any(|line| line.contains("class=\"classic-arrow-head\"") && line.contains("fill=\"none\"")));
+    }
+
+    #[test]
+    fn arrow_skins_render_for_straight_and_curved_arrows() {
+        for arrow_type in ["arrow", "bezier-arrow"] {
+            let geometry = if arrow_type == "arrow" { "\"start\":[5,5],\"end\":[50,30]" } else { "\"start\":[5,5],\"control\":[20,35],\"end\":[50,30]" };
+            for (skin, expected) in [
+                ("classic", "class=\"classic-arrow-head\""),
+                ("sketch", "fill=\"url(#arrow-hatch-primary)\""),
+                ("bold", "fill=\"#"),
+            ] {
+                let json = format!("{{\"canvas\":{{\"width\":100,\"height\":80}},\"annotations\":[{{\"type\":\"{arrow_type}\",{geometry},\"arrow_skin\":\"{skin}\"}}]}}");
+                let svg = render_from_json(&json).unwrap();
+                assert!(svg.contains(expected), "{arrow_type} {skin}");
+                if skin == "sketch" {
+                    assert!(svg.contains("<pattern id=\"arrow-hatch-primary\""));
+                }
+                if skin != "classic" {
+                    let arrow_layer = svg.split("<!-- Layer 3").next().unwrap_or(&svg);
+                    assert!(arrow_layer.contains("<path d=\"M "), "{arrow_type} {skin}");
+                    assert!(!arrow_layer.contains("marker-end=\"url(#arrowhead-bold"));
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn thick_classic_arrow_shaft_stops_inside_filled_head() {
+        let svg = render_from_json(r#"{"canvas":{"width":790,"height":602},"annotations":[{"type":"arrow","start":[165,286],"end":[370,254],"stroke_width":11}]}"#).unwrap();
+        let shaft = svg.lines().find(|line| line.contains("classic-arrow-shaft")).unwrap();
+        let shaft_end_x: f64 = shaft.split("x2=\"").nth(1).unwrap().split('"').next().unwrap().parse().unwrap();
+        assert!(shaft_end_x < 350.0);
+        assert!(svg.contains("L 370.00 254.00"));
+    }
     use crate::model::Canvas;
 
     #[test]
@@ -727,6 +916,14 @@ mod tests {
         assert!(svg.contains("mask=\"url(#spotlight-mask-0)\""));
         assert!(svg.contains("<circle"));
         assert!(svg.contains(">1</text>"));
+    }
+
+    #[test]
+    fn spotlight_mask_and_overlay_bleed_past_all_canvas_edges() {
+        let svg = render_from_json(r#"{"canvas":{"width":100,"height":80},"annotations":[{"type":"spotlight","target":[30,20,20,20]}]}"#).unwrap();
+        assert!(svg.contains("maskUnits=\"userSpaceOnUse\" maskContentUnits=\"userSpaceOnUse\" x=\"-2\" y=\"-2\" width=\"104\" height=\"84\""));
+        assert!(svg.contains("<rect x=\"-2\" y=\"-2\" width=\"104\" height=\"84\" fill=\"white\"/>"));
+        assert!(svg.contains("<rect x=\"-2\" y=\"-2\" width=\"104\" height=\"84\" fill=\"#000000\" opacity="));
     }
 
     #[test]
@@ -823,8 +1020,8 @@ mod tests {
         }"#;
 
         let svg = render_from_json(json).unwrap();
-        assert!(svg.contains("<path d=\"M 100 400 Q 300 150 500 400\""));
-        assert!(svg.contains("marker-end=\"url(#arrowhead-primary)\""));
+        assert!(svg.contains("<path d=\"M 100 400 Q "));
+        assert!(svg.contains("class=\"classic-arrow-head\""));
         assert!(svg.contains("fill=\"none\""));
         assert!(svg.contains("データ同期"));
         assert!(svg.contains("<filter id=\"markits-shadow\""));
@@ -851,7 +1048,7 @@ mod tests {
         }"#;
 
         let svg = render_from_json(json).unwrap();
-        assert!(svg.contains("<path d=\"M 100 300 Q 250 100 400 300\""));
+        assert!(svg.contains("<path d=\"M 100 300 Q "));
         assert!(svg.contains("枠なしテキスト"));
         // When box is false, NO rect should be rendered for text
         assert!(!svg.contains("<rect"));

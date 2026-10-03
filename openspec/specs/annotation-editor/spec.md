@@ -1,5 +1,12 @@
 # annotation-editor Specification
 
+## Style presets
+
+The editor SHALL offer selectable mark style presets that update the supported semantic color, stroke width, shadow, and outline fields of the selected annotation and render the change immediately.
+For straight and curved arrows, the editor SHALL also offer solid, dashed, and dotted lines and filled or open arrowheads.
+For straight and curved arrows, the editor SHALL offer three arrow skins with previews: classic, hand-drawn outline with diagonal hatching throughout the shaft and head, and tapered filled arrow. The selected skin SHALL change the entire shaft and head immediately and persist in the annotation data. Line pattern and arrowhead controls apply to the classic skin.
+The arrow text placement control SHALL identify whether it moves the label to the shaft's middle or near the tip, render the selected position immediately, and serialize only the canonical `text_placement` field.
+
 ## Purpose
 
 Provides an interactive graphical canvas editor for placing, manipulating handles, customizing typography, and applying semantic styles to MarkIts annotations on top of captured images.

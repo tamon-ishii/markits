@@ -1,5 +1,6 @@
 use base64::Engine;
-use image::{imageops, RgbaImage};
+use image::codecs::png::{CompressionType, FilterType, PngEncoder};
+use image::{imageops, ExtendedColorType, ImageEncoder, RgbaImage};
 use screenshots::Screen;
 use serde::{Deserialize, Serialize};
 use std::io::Cursor;
@@ -31,7 +32,8 @@ pub struct CapturedImage {
 /// Convert an RgbaImage to PNG bytes and Base64 data URL.
 pub fn rgba_to_captured_image(img: &RgbaImage) -> Result<CapturedImage, CaptureError> {
     let mut cursor = Cursor::new(Vec::new());
-    img.write_to(&mut cursor, image::ImageFormat::Png)?;
+    PngEncoder::new_with_quality(&mut cursor, CompressionType::Fast, FilterType::Sub)
+        .write_image(img.as_raw(), img.width(), img.height(), ExtendedColorType::Rgba8)?;
     let raw_png = cursor.into_inner();
 
     let b64 = base64::engine::general_purpose::STANDARD.encode(&raw_png);

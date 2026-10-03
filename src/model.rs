@@ -271,6 +271,18 @@ pub enum ArrowTextPlacement {
     End,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "kebab-case")]
+pub enum LineStyle { #[default] Solid, Dashed, Dotted }
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "kebab-case")]
+pub enum ArrowheadStyle { #[default] Filled, Open }
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "kebab-case")]
+pub enum ArrowSkin { #[default] Classic, Sketch, Bold }
+
 fn default_true() -> bool {
     true
 }
@@ -288,6 +300,12 @@ pub enum Annotation {
         end: Option<Point2D>,
         #[serde(default, alias = "stroke_width", alias = "width", alias = "thickness", alias = "line_width")]
         stroke_width: Option<f64>,
+        #[serde(default)]
+        line_style: LineStyle,
+        #[serde(default)]
+        arrowhead: ArrowheadStyle,
+        #[serde(default)]
+        arrow_skin: ArrowSkin,
         #[serde(default)]
         step: Option<u32>,
         #[serde(default)]
@@ -481,6 +499,12 @@ pub enum Annotation {
         end: Option<Point2D>,
         #[serde(default, alias = "stroke_width", alias = "width", alias = "thickness", alias = "line_width")]
         stroke_width: Option<f64>,
+        #[serde(default)]
+        line_style: LineStyle,
+        #[serde(default)]
+        arrowhead: ArrowheadStyle,
+        #[serde(default)]
+        arrow_skin: ArrowSkin,
         #[serde(default)]
         text: Option<String>,
         #[serde(default)]

@@ -43,6 +43,7 @@ The system SHALL render clean SVG elements for supported annotation types:
 
 ### Requirement: Spotlight SVG Masking
 For `spotlight` annotations, the system SHALL generate an SVG `<mask>` and semi-transparent overlay covering the canvas while cutting out or highlighting the target area.
+The spotlight overlay and mask SHALL extend beyond the canvas viewport before clipping so the editor does not show an undimmed strip at the canvas edges.
 
 #### Scenario: Render spotlight mask
 - **WHEN** a scene contains a `spotlight` annotation over a target rectangle

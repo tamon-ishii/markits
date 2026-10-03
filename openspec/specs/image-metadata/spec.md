@@ -22,7 +22,11 @@ The system SHALL inspect opened PNG image files for MarkIts metadata chunks, ext
 
 #### Scenario: Re-editing a previously saved MarkIts PNG
 - **WHEN** user opens a PNG file previously created by MarkIts Desktop into the editor
-- **THEN** the system extracts the background image and restores all annotations into the editor, allowing handles and text to be edited again
+- **THEN** the system extracts the original, unannotated background image and restores all annotations into the editor in their original coordinate system, allowing handles and text to be edited again without drawing annotations twice
+
+#### Scenario: Re-editing a resized export
+- **WHEN** user opens a MarkIts PNG exported at a different resolution
+- **THEN** the editor restores the original background dimensions and annotation coordinates while the PNG pixels retain the selected export resolution
 
 #### Scenario: Opening an image without MarkIts metadata
 - **WHEN** user opens an image that contains no MarkIts metadata
@@ -34,3 +38,10 @@ The system SHALL support copying the rendered composite image directly to the sy
 #### Scenario: Copy to clipboard
 - **WHEN** user clicks "Copy to Clipboard" or presses Ctrl+C (Cmd+C)
 - **THEN** the rendered composite image is written to the system clipboard as a standard bitmap/image format and a notification confirms success
+
+### Requirement: Safe Share Export
+The system SHALL offer a share mode that replaces pixels inside visible rectangular marks with opaque black and omits editable scene, UIMap, and original-image metadata from the exported PNG.
+
+#### Scenario: Share an image with masked private content
+- **WHEN** the user enables share mode and saves or copies an image with rectangle marks
+- **THEN** the rectangle interiors are black in the exported pixels, and saved PNG metadata cannot reveal the original pixels

@@ -154,7 +154,7 @@ fn test_complex_multi_annotation_scene() {
     assert!(svg.contains("<filter id=\"markits-shadow\""));
     assert!(svg.contains("<marker id=\"arrowhead-primary\""));
     assert!(svg.contains("<marker id=\"arrowhead-secondary\""));
-    assert!(svg.contains("<mask id=\"spotlight-mask-0\">"));
+    assert!(svg.contains("<mask id=\"spotlight-mask-0\" maskUnits=\"userSpaceOnUse\""));
 
     // Validate rendered annotations content
     assert!(svg.contains("設定を保存します"));
@@ -298,10 +298,9 @@ fn test_bezier_arrow_full_workflow() {
     }"#;
 
     let svg = render_from_json(json).expect("Should render bezier arrow SVG");
-    assert!(svg.contains("<path d=\"M 100 300 Q 350 100 600 300\""));
-    assert!(svg.contains("<path d=\"M 650 300 Q 850 500 1050 300\""));
-    assert!(svg.contains("marker-end=\"url(#arrowhead-info)\""));
-    assert!(svg.contains("marker-end=\"url(#arrowhead-pink)\""));
+    assert!(svg.contains("<path d=\"M 100 300 Q "));
+    assert!(svg.contains("<path d=\"M 650 300 Q "));
+    assert_eq!(svg.matches("class=\"classic-arrow-head\"").count(), 2);
     assert!(svg.contains("非同期キュー転送"));
     assert!(svg.contains("DB書き込み"));
     assert!(svg.contains("paint-order=\"stroke fill\"")); // for unboxed text
@@ -329,9 +328,9 @@ fn test_explicit_arrow_render() {
     }"#;
 
     let svg = render_from_json(json).expect("Should render explicit arrow SVG");
-    assert!(svg.contains("<line x1=\"120\" y1=\"150\" x2=\"450\" y2=\"300\""));
-    assert!(svg.contains("marker-end=\"url(#arrowhead-warning)\""));
-    assert!(svg.contains("<line x1=\"50\" y1=\"50\" x2=\"200\" y2=\"100\""));
+    assert!(svg.contains("<line x1=\"120\" y1=\"150\""));
+    assert!(svg.contains("class=\"classic-arrow-head\""));
+    assert!(svg.contains("<line x1=\"50\" y1=\"50\""));
     assert!(svg.contains(">3</text>"));
 }
 
@@ -369,6 +368,19 @@ fn test_arrow_and_bezier_arrow_text_placement_middle_and_end() {
     assert!(svg.contains("中間ラベル"));
     assert!(svg.contains("終点ラベル"));
     assert!(svg.contains("ベジェ終点"));
+    let label_x = |label: &str| -> f64 {
+        svg.lines()
+            .find(|line| line.contains(label) && line.contains("<text x="))
+            .and_then(|line| line.split("x=\"").nth(1))
+            .and_then(|value| value.split('"').next())
+            .unwrap()
+            .parse()
+            .unwrap()
+    };
+    assert!((label_x("中間ラベル") - 300.0).abs() < 1e-6);
+    // End labels are outside the tail (the endpoint without the arrowhead).
+    assert!(label_x("終点ラベル") < 100.0);
+    assert!(label_x("ベジェ終点") < 100.0);
 }
 
 #[test]
@@ -398,4 +410,3 @@ fn test_uimap_and_named_ui_targets() {
     let spot_elem = result.elements.iter().find(|e| e.id.contains("annotation-3")).unwrap();
     assert_eq!(spot_elem.bounds, [220.0, 80.0, 90.0, 32.0]);
 }
-

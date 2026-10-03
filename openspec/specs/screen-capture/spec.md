@@ -28,6 +28,10 @@ The system SHALL allow capturing the entire desktop screen (or selected monitor 
 - **WHEN** user initiates a full-screen capture command
 - **THEN** the entire desktop canvas is captured at native display resolution and loaded directly into the editor
 
+#### Scenario: CLI region on a selected monitor
+- **WHEN** the CLI receives `--screen` with all four region coordinates
+- **THEN** the region is cropped from that monitor using monitor-local pixel coordinates, and detected UI elements use the cropped image origin
+
 ### Requirement: Window Selection Mode
 The system SHALL detect window boundaries under the cursor and allow the user to capture an entire window with a single click.
 

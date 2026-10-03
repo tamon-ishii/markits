@@ -3,8 +3,8 @@ use crate::history::{self, HistoryItem};
 use crate::metadata;
 use base64::Engine;
 use image::GenericImageView;
-use std::fs;
 use std::collections::HashSet;
+use std::fs;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
@@ -30,14 +30,16 @@ pub async fn cmd_capture_screen(app: tauri::AppHandle) -> Result<capture::Captur
         let _ = w.hide();
     }
 
-    let res = tauri::async_runtime::spawn_blocking(|| -> Result<capture::CapturedImage, capture::CaptureError> {
-        // Wait for OS window manager fade-out/unmap animation to completely finish (e.g. GNOME Mutter ~250ms)
-        std::thread::sleep(std::time::Duration::from_millis(350));
-        let mut captured = capture::capture_primary_screen()?;
-        let elements = crate::ui_elements::capture_desktop_windows(0, 0);
-        captured.ui_elements = elements;
-        Ok(captured)
-    })
+    let res = tauri::async_runtime::spawn_blocking(
+        || -> Result<capture::CapturedImage, capture::CaptureError> {
+            // Wait for OS window manager fade-out/unmap animation to completely finish (e.g. GNOME Mutter ~250ms)
+            std::thread::sleep(std::time::Duration::from_millis(350));
+            let mut captured = capture::capture_primary_screen()?;
+            let elements = crate::ui_elements::capture_desktop_windows(0, 0);
+            captured.ui_elements = elements;
+            Ok(captured)
+        },
+    )
     .await;
 
     if let Some(ref w) = window {
@@ -49,35 +51,49 @@ pub async fn cmd_capture_screen(app: tauri::AppHandle) -> Result<capture::Captur
 
 #[tauri::command]
 pub async fn cmd_start_capture(app: tauri::AppHandle) -> Result<(), String> {
-    let generation = app.state::<crate::AppState>()
-        .capture_generation.fetch_add(1, Ordering::SeqCst) + 1;
+    let generation = app
+        .state::<crate::AppState>()
+        .capture_generation
+        .fetch_add(1, Ordering::SeqCst)
+        + 1;
     let main_win = app.get_webview_window("main");
     if let Some(ref w) = main_win {
         let _ = w.hide();
     }
 
-    let res = tauri::async_runtime::spawn_blocking(|| -> Result<capture::CapturedImage, capture::CaptureError> {
-        // Wait for OS window manager fade-out/unmap animation to completely finish (e.g. GNOME Mutter ~250ms)
-        std::thread::sleep(std::time::Duration::from_millis(350));
-        let mut cap = capture::capture_primary_screen()?;
-        let elements = crate::ui_elements::capture_desktop_windows(0, 0);
-        cap.ui_elements = elements;
-        Ok(cap)
-    })
+    let res = tauri::async_runtime::spawn_blocking(
+        || -> Result<capture::CapturedImage, capture::CaptureError> {
+            // Wait for OS window manager fade-out/unmap animation to completely finish (e.g. GNOME Mutter ~250ms)
+            std::thread::sleep(std::time::Duration::from_millis(350));
+            let mut cap = capture::capture_primary_screen()?;
+            let elements = crate::ui_elements::capture_desktop_windows(0, 0);
+            cap.ui_elements = elements;
+            Ok(cap)
+        },
+    )
     .await;
 
-    if app.state::<crate::AppState>().capture_generation.load(Ordering::SeqCst) != generation {
+    if app
+        .state::<crate::AppState>()
+        .capture_generation
+        .load(Ordering::SeqCst)
+        != generation
+    {
         return Ok(());
     }
 
     let captured = match res {
         Ok(Ok(captured)) => captured,
         Ok(Err(err)) => {
-            if let Some(ref w) = main_win { force_raise_window(w); }
+            if let Some(ref w) = main_win {
+                force_raise_window(w);
+            }
             return Err(err.to_string());
         }
         Err(err) => {
-            if let Some(ref w) = main_win { force_raise_window(w); }
+            if let Some(ref w) = main_win {
+                force_raise_window(w);
+            }
             return Err(err.to_string());
         }
     };
@@ -87,12 +103,21 @@ pub async fn cmd_start_capture(app: tauri::AppHandle) -> Result<(), String> {
         *state.pending_capture.lock().map_err(|e| e.to_string())? = Some(captured);
         show_overlay_window(&overlay_win);
         if *state.overlay_ready.lock().map_err(|e| e.to_string())? {
-            if let Some(capture) = state.pending_capture.lock().map_err(|e| e.to_string())?.take() {
-                overlay_win.emit("show-capture-overlay", &capture).map_err(|e| e.to_string())?;
+            if let Some(capture) = state
+                .pending_capture
+                .lock()
+                .map_err(|e| e.to_string())?
+                .take()
+            {
+                overlay_win
+                    .emit("show-capture-overlay", &capture)
+                    .map_err(|e| e.to_string())?;
             }
         }
     } else {
-        if let Some(ref w) = main_win { force_raise_window(w); }
+        if let Some(ref w) = main_win {
+            force_raise_window(w);
+        }
         return Err("Capture overlay window is unavailable".to_string());
     }
 
@@ -103,10 +128,18 @@ pub async fn cmd_start_capture(app: tauri::AppHandle) -> Result<(), String> {
 pub fn cmd_overlay_ready(app: tauri::AppHandle) -> Result<(), String> {
     let state = app.state::<crate::AppState>();
     *state.overlay_ready.lock().map_err(|e| e.to_string())? = true;
-    if let Some(capture) = state.pending_capture.lock().map_err(|e| e.to_string())?.take() {
-        let overlay = app.get_webview_window("overlay")
+    if let Some(capture) = state
+        .pending_capture
+        .lock()
+        .map_err(|e| e.to_string())?
+        .take()
+    {
+        let overlay = app
+            .get_webview_window("overlay")
             .ok_or("Capture overlay window is unavailable")?;
-        overlay.emit("show-capture-overlay", &capture).map_err(|e| e.to_string())?;
+        overlay
+            .emit("show-capture-overlay", &capture)
+            .map_err(|e| e.to_string())?;
     }
     Ok(())
 }
@@ -118,7 +151,10 @@ pub async fn cmd_finish_capture(
     crop_rect: Option<CropRectInput>,
     ui_elements: Vec<crate::ui_elements::DetectedUiElement>,
 ) -> Result<(), String> {
-    let generation = app.state::<crate::AppState>().capture_generation.load(Ordering::SeqCst);
+    let generation = app
+        .state::<crate::AppState>()
+        .capture_generation
+        .load(Ordering::SeqCst);
     if let Some(overlay_win) = app.get_webview_window("overlay") {
         let _ = overlay_win.hide();
     }
@@ -130,10 +166,16 @@ pub async fn cmd_finish_capture(
         &ui_elements,
         crop_rect.as_ref().map(|c| (c.x, c.y, c.width, c.height)),
     );
-    let capture_elements = selected_window.as_ref()
+    let capture_elements = selected_window
+        .as_ref()
         .map(|window| vec![window.clone()])
         .unwrap_or(ui_elements);
-    if app.state::<crate::AppState>().capture_generation.load(Ordering::SeqCst) != generation {
+    if app
+        .state::<crate::AppState>()
+        .capture_generation
+        .load(Ordering::SeqCst)
+        != generation
+    {
         return Ok(());
     }
     let scan_crop = crop_rect.as_ref().map(|c| (c.x, c.y, c.width, c.height));
@@ -237,53 +279,89 @@ pub async fn cmd_finish_capture(
     // Instantly notify frontend and raise main window! Zero lag!
     if let Some(main_win) = app.get_webview_window("main") {
         force_raise_window(&main_win);
-        main_win.emit("capture-finished", &loaded_res).map_err(|e| e.to_string())?;
+        main_win
+            .emit("capture-finished", &loaded_res)
+            .map_err(|e| e.to_string())?;
 
         // Accessibility queries can block indefinitely in another application.
         // Deliver the image first, then add snap targets only if the query finishes.
         if let (Some(target), Some(history_id)) = (selected_window, loaded_res.history_id.clone()) {
-            let _ = main_win.emit("capture-ui-scan-status", serde_json::json!({
-                "history_id": history_id, "status": "started"
-            }));
+            let _ = main_win.emit(
+                "capture-ui-scan-status",
+                serde_json::json!({
+                    "history_id": history_id, "status": "started"
+                }),
+            );
             // A restarted app can reuse its window title. Cache timeouts by process
             // so a stale accessibility endpoint does not suppress its replacement.
-            let target_key = match (target.window_id.as_deref(), crate::ui_elements::target_process_id(&target)) {
+            let target_key = match (
+                target.window_id.as_deref(),
+                crate::ui_elements::target_process_id(&target),
+            ) {
                 (Some(id), pid) => format!("id:{id}:pid:{pid:?}"),
                 (None, Some(pid)) => format!("pid:{pid}"),
-                (None, None) => format!("window:{}:{:.0}:{:.0}:{:.0}:{:.0}",
-                    target.name.as_deref().unwrap_or_default(), target.x, target.y,
-                    target.width, target.height),
+                (None, None) => format!(
+                    "window:{}:{:.0}:{:.0}:{:.0}:{:.0}",
+                    target.name.as_deref().unwrap_or_default(),
+                    target.x,
+                    target.y,
+                    target.width,
+                    target.height
+                ),
             };
-            let known_timeout = DETAIL_SCAN_FAILURES.get_or_init(Default::default)
-                .lock().is_ok_and(|keys| keys.contains(&target_key));
+            let known_timeout = DETAIL_SCAN_FAILURES
+                .get_or_init(Default::default)
+                .lock()
+                .is_ok_and(|keys| keys.contains(&target_key));
             if !known_timeout {
                 let app_for_scan = app.clone();
                 tauri::async_runtime::spawn(async move {
                     let wait_started = Instant::now();
-                    while DETAIL_SCAN_RUNNING.compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst).is_err() {
-                        if app_for_scan.state::<crate::AppState>().capture_generation.load(Ordering::SeqCst) != generation {
+                    while DETAIL_SCAN_RUNNING
+                        .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+                        .is_err()
+                    {
+                        if app_for_scan
+                            .state::<crate::AppState>()
+                            .capture_generation
+                            .load(Ordering::SeqCst)
+                            != generation
+                        {
                             return;
                         }
                         if wait_started.elapsed() >= Duration::from_secs(4) {
                             if let Some(main) = app_for_scan.get_webview_window("main") {
-                                let _ = main.emit("capture-ui-scan-status", serde_json::json!({
-                                    "history_id": history_id, "status": "timeout"
-                                }));
+                                let _ = main.emit(
+                                    "capture-ui-scan-status",
+                                    serde_json::json!({
+                                        "history_id": history_id, "status": "timeout"
+                                    }),
+                                );
                             }
                             return;
                         }
                         tokio::time::sleep(Duration::from_millis(50)).await;
                     }
-                    let timed_out_while_waiting = DETAIL_SCAN_FAILURES.get_or_init(Default::default)
-                        .lock().is_ok_and(|keys| keys.contains(&target_key));
+                    let timed_out_while_waiting = DETAIL_SCAN_FAILURES
+                        .get_or_init(Default::default)
+                        .lock()
+                        .is_ok_and(|keys| keys.contains(&target_key));
                     if timed_out_while_waiting
-                        || app_for_scan.state::<crate::AppState>().capture_generation.load(Ordering::SeqCst) != generation {
+                        || app_for_scan
+                            .state::<crate::AppState>()
+                            .capture_generation
+                            .load(Ordering::SeqCst)
+                            != generation
+                    {
                         DETAIL_SCAN_RUNNING.store(false, Ordering::SeqCst);
                         if timed_out_while_waiting {
                             if let Some(main) = app_for_scan.get_webview_window("main") {
-                                let _ = main.emit("capture-ui-scan-status", serde_json::json!({
-                                    "history_id": history_id, "status": "timeout"
-                                }));
+                                let _ = main.emit(
+                                    "capture-ui-scan-status",
+                                    serde_json::json!({
+                                        "history_id": history_id, "status": "timeout"
+                                    }),
+                                );
                             }
                         }
                         return;
@@ -292,37 +370,62 @@ pub async fn cmd_finish_capture(
                         // Keep the slot occupied until the blocking call actually exits,
                         // including after the async timeout or a panic.
                         let _guard = DetailScanGuard;
-                        crate::ui_elements::capture_desktop_detailed_elements_for_window(0, 0, &target)
+                        crate::ui_elements::capture_desktop_detailed_elements_for_window(
+                            0, 0, &target,
+                        )
                     });
                     let scan_result = tokio::time::timeout(Duration::from_secs(3), scan).await;
                     if let Ok(Ok(elements)) = scan_result {
                         let elements = if let Some((x, y, w, h)) = scan_crop {
                             crate::ui_elements::filter_elements_for_crop(&elements, x, y, w, h)
-                        } else { elements };
-                        if app_for_scan.state::<crate::AppState>().capture_generation.load(Ordering::SeqCst) == generation {
+                        } else {
+                            elements
+                        };
+                        if app_for_scan
+                            .state::<crate::AppState>()
+                            .capture_generation
+                            .load(Ordering::SeqCst)
+                            == generation
+                        {
                             if let Some(main) = app_for_scan.get_webview_window("main") {
-                                let _ = main.emit("capture-ui-elements", serde_json::json!({
-                                    "history_id": history_id, "elements": elements
-                                }));
+                                let _ = main.emit(
+                                    "capture-ui-elements",
+                                    serde_json::json!({
+                                        "history_id": history_id, "elements": elements
+                                    }),
+                                );
                             }
                         }
                     } else {
-                        if let Ok(mut keys) = DETAIL_SCAN_FAILURES.get_or_init(Default::default).lock() {
+                        if let Ok(mut keys) =
+                            DETAIL_SCAN_FAILURES.get_or_init(Default::default).lock()
+                        {
                             keys.insert(target_key);
                         }
-                        if app_for_scan.state::<crate::AppState>().capture_generation.load(Ordering::SeqCst) == generation {
+                        if app_for_scan
+                            .state::<crate::AppState>()
+                            .capture_generation
+                            .load(Ordering::SeqCst)
+                            == generation
+                        {
                             if let Some(main) = app_for_scan.get_webview_window("main") {
-                                let _ = main.emit("capture-ui-scan-status", serde_json::json!({
-                                    "history_id": history_id, "status": "timeout"
-                                }));
+                                let _ = main.emit(
+                                    "capture-ui-scan-status",
+                                    serde_json::json!({
+                                        "history_id": history_id, "status": "timeout"
+                                    }),
+                                );
                             }
                         }
                     }
                 });
             } else {
-                let _ = main_win.emit("capture-ui-scan-status", serde_json::json!({
-                    "history_id": history_id, "status": "timeout"
-                }));
+                let _ = main_win.emit(
+                    "capture-ui-scan-status",
+                    serde_json::json!({
+                        "history_id": history_id, "status": "timeout"
+                    }),
+                );
             }
         }
     }
@@ -332,7 +435,9 @@ pub async fn cmd_finish_capture(
 
 #[tauri::command]
 pub fn cmd_cancel_capture(app: tauri::AppHandle) -> Result<(), String> {
-    app.state::<crate::AppState>().capture_generation.fetch_add(1, Ordering::SeqCst);
+    app.state::<crate::AppState>()
+        .capture_generation
+        .fetch_add(1, Ordering::SeqCst);
     if let Ok(mut pending) = app.state::<crate::AppState>().pending_capture.lock() {
         pending.take();
     }
@@ -359,7 +464,9 @@ pub async fn cmd_fetch_detailed_ui_elements(
 ) -> Result<Vec<crate::ui_elements::DetectedUiElement>, String> {
     tauri::async_runtime::spawn_blocking(move || {
         let filter = crop_rect.map(|c| (c.x, c.y, c.width, c.height));
-        Ok(crate::ui_elements::capture_desktop_detailed_elements(0, 0, filter))
+        Ok(crate::ui_elements::capture_desktop_detailed_elements(
+            0, 0, filter,
+        ))
     })
     .await
     .map_err(|e| e.to_string())?
@@ -412,12 +519,17 @@ pub async fn cmd_crop_and_load(
 
     let dynamic_img = image::load_from_memory(&png_bytes).map_err(|e| e.to_string())?;
     let rgba = dynamic_img.to_rgba8();
-    let cropped = capture::crop_rgba_image(&rgba, x, y, width, height).map_err(|e| e.to_string())?;
+    let cropped =
+        capture::crop_rgba_image(&rgba, x, y, width, height).map_err(|e| e.to_string())?;
     let captured = capture::rgba_to_captured_image(&cropped).map_err(|e| e.to_string())?;
 
     let cropped_elements = ui_elements.map(|elements| {
         crate::ui_elements::filter_elements_for_crop(
-            &elements, x as f64, y as f64, width as f64, height as f64,
+            &elements,
+            x as f64,
+            y as f64,
+            width as f64,
+            height as f64,
         )
     });
 
@@ -506,11 +618,9 @@ pub fn cmd_load_image(file_path: String) -> Result<metadata::LoadedImageResult, 
 
 #[tauri::command]
 pub async fn cmd_get_history() -> Result<Vec<HistoryItem>, String> {
-    tauri::async_runtime::spawn_blocking(|| {
-        history::list_history().map_err(|e| e.to_string())
-    })
-    .await
-    .map_err(|e| e.to_string())?
+    tauri::async_runtime::spawn_blocking(|| history::list_history().map_err(|e| e.to_string()))
+        .await
+        .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
@@ -560,9 +670,12 @@ pub fn cmd_compose_and_save(
         if ew > 0 && eh > 0 {
             let dynamic_img = image::load_from_memory(&composed_png).map_err(|e| e.to_string())?;
             if dynamic_img.width() != ew || dynamic_img.height() != eh {
-                let resized = dynamic_img.resize_exact(ew, eh, image::imageops::FilterType::Lanczos3);
+                let resized =
+                    dynamic_img.resize_exact(ew, eh, image::imageops::FilterType::Lanczos3);
                 let mut cursor = std::io::Cursor::new(Vec::new());
-                resized.write_to(&mut cursor, image::ImageFormat::Png).map_err(|e| e.to_string())?;
+                resized
+                    .write_to(&mut cursor, image::ImageFormat::Png)
+                    .map_err(|e| e.to_string())?;
                 cursor.into_inner()
             } else {
                 composed_png
@@ -580,6 +693,12 @@ pub fn cmd_compose_and_save(
         Some(&scene_json),
         ui_elements.as_deref(),
         None,
+    )
+    .map_err(|e| e.to_string())?;
+    let final_png = metadata::embed_text_chunk(
+        &final_png,
+        metadata::MARKITS_SOURCE_KEYWORD,
+        &background_data_url,
     )
     .map_err(|e| e.to_string())?;
 
@@ -674,7 +793,8 @@ mod tests {
         let elements = vec![crate::ui_elements::DetectedUiElement {
             role: "button".into(),
             name: Some("OK".into()),
-            window_id: None, pid: None,
+            window_id: None,
+            pid: None,
             x: 20.0,
             y: 20.0,
             width: 80.0,
@@ -695,6 +815,7 @@ mod tests {
         let loaded = cmd_load_image(test_output_str).unwrap();
         assert_eq!(loaded.width, 200);
         assert_eq!(loaded.height, 150);
+        assert_eq!(loaded.image_data_url, create_test_bg_data_url(200, 150));
         assert!(loaded.annotations_json.is_some());
         assert!(loaded.ui_elements.is_some());
         let loaded_uis = loaded.ui_elements.unwrap();
@@ -716,7 +837,8 @@ mod tests {
         let scene_json = r#"{"canvas":{"width":400,"height":300},"annotations":[{"type":"rect","target":[10,10,100,50]}]}"#;
 
         let temp_dir = std::env::temp_dir();
-        let test_output_path = temp_dir.join(format!("markits_scale_test_{}.png", std::process::id()));
+        let test_output_path =
+            temp_dir.join(format!("markits_scale_test_{}.png", std::process::id()));
         let test_output_str = test_output_path.to_str().unwrap().to_string();
 
         let save_res = cmd_compose_and_save(
@@ -729,10 +851,14 @@ mod tests {
         );
         assert!(save_res.is_ok(), "scaled save failed: {:?}", save_res);
 
+        let exported = image::open(&test_output_path).unwrap();
+        assert_eq!((exported.width(), exported.height()), (800, 600));
         let loaded = cmd_load_image(test_output_str).unwrap();
-        assert_eq!(loaded.width, 800);
-        assert_eq!(loaded.height, 600);
+        // Editing uses the original scene coordinate system.
+        assert_eq!((loaded.width, loaded.height), (400, 300));
+        assert_eq!(loaded.image_data_url, create_test_bg_data_url(400, 300));
 
         let _ = fs::remove_file(test_output_path);
     }
+
 }

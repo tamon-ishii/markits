@@ -1,0 +1,4 @@
+[
+  { "type": "badge", "target": [80, 80, 120, 40], "step": 1 },
+  { "type": "arrow", "target": [260, 80, 120, 40], "style": "danger" }
+]

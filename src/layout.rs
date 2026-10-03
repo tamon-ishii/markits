@@ -1,4 +1,4 @@
-use crate::model::{Annotation, ArrowTextPlacement, Canvas, PositionHint, Scene, SemanticStyle, TargetRect};
+use crate::model::{Annotation, ArrowSkin, ArrowTextPlacement, ArrowheadStyle, Canvas, LineStyle, PositionHint, Scene, SemanticStyle, TargetRect};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Point {
@@ -462,6 +462,9 @@ pub enum ResolvedAnnotation {
         style: SemanticStyle,
         shadow: bool,
         stroke_width: Option<f64>,
+        line_style: LineStyle,
+        arrowhead: ArrowheadStyle,
+        arrow_skin: ArrowSkin,
         boxed: bool,
         outline: bool,
         text_placement: ArrowTextPlacement,
@@ -562,6 +565,9 @@ pub enum ResolvedAnnotation {
         outline: bool,
         boxed: bool,
         stroke_width: Option<f64>,
+        line_style: LineStyle,
+        arrowhead: ArrowheadStyle,
+        arrow_skin: ArrowSkin,
     },
 }
 
@@ -931,6 +937,9 @@ impl LayoutEngine {
                     start: explicit_start,
                     end: explicit_end,
                     stroke_width,
+                    line_style,
+                    arrowhead,
+                    arrow_skin,
                     step,
                     text,
                     text_placement,
@@ -965,6 +974,9 @@ impl LayoutEngine {
                                 style: *style,
                                 shadow,
                                 stroke_width: *stroke_width,
+                                line_style: *line_style,
+                                arrowhead: *arrowhead,
+                                arrow_skin: *arrow_skin,
                                 boxed: arrow_boxed,
                                 outline: arrow_outline,
                                 text_placement: placement,
@@ -1029,6 +1041,9 @@ impl LayoutEngine {
                                 style: *style,
                                 shadow,
                                 stroke_width: *stroke_width,
+                                line_style: *line_style,
+                                arrowhead: *arrowhead,
+                                arrow_skin: *arrow_skin,
                                 boxed: arrow_boxed,
                                 outline: arrow_outline,
                                 text_placement: placement,
@@ -1136,6 +1151,9 @@ impl LayoutEngine {
                     text,
                     text_placement,
                     stroke_width,
+                    line_style,
+                    arrowhead,
+                    arrow_skin,
                     style,
                     position,
                     offset,
@@ -1184,10 +1202,15 @@ impl LayoutEngine {
                     };
 
                     let default_t = match text_placement {
-                        Some(ArrowTextPlacement::End) => 0.85,
+                        // The label's "矢印の終端" is the tail without the arrowhead.
+                        Some(ArrowTextPlacement::End) => 0.0,
                         _ => 0.5,
                     };
-                    let param_t = t.unwrap_or(default_t).clamp(0.0, 1.0);
+                    let param_t = if *text_placement == Some(ArrowTextPlacement::End) {
+                        0.0
+                    } else {
+                        t.unwrap_or(default_t).clamp(0.0, 1.0)
+                    };
                     let one_minus_t = 1.0 - param_t;
                     let b0 = one_minus_t * one_minus_t;
                     let b1 = 2.0 * one_minus_t * param_t;
@@ -1206,30 +1229,69 @@ impl LayoutEngine {
                             let half_h = dim.height / 2.0;
                             let half_w = dim.width / 2.0;
 
-                            let (center_x, center_y) = match position {
+                            let at_tail = *text_placement == Some(ArrowTextPlacement::End);
+                            let label_anchor = if at_tail {
+                                (s.x, s.y)
+                            } else {
+                                (mid_x, mid_y)
+                            };
+                            let (anchor_x, anchor_y) = label_anchor;
+                            let (center_x, center_y) = if at_tail {
+                                // Move outside the tail along the reverse initial tangent.
+                                let mut tx = s.x - c.x;
+                                let mut ty = s.y - c.y;
+                                let tangent_len = (tx * tx + ty * ty).sqrt();
+                                if tangent_len < 0.001 {
+                                    tx = s.x - e.x;
+                                    ty = s.y - e.y;
+                                }
+                                let tangent_len = (tx * tx + ty * ty).sqrt().max(0.001);
+                                tx /= tangent_len;
+                                ty /= tangent_len;
+                                let extent = half_w * tx.abs() + half_h * ty.abs();
+                                let distance = extent + gap + 4.0;
+                                (s.x + tx * distance, s.y + ty * distance)
+                            } else {
+                                match position {
                                 PositionHint::Center => {
-                                    if let Some(off) = offset {
-                                        (mid_x, mid_y - off)
+                                    // Use the curve tangent to choose a clear side, and include
+                                    // the label's projected bounds in the separation distance.
+                                    let mut tx = 2.0 * (1.0 - param_t) * (c.x - s.x)
+                                        + 2.0 * param_t * (e.x - c.x);
+                                    let mut ty = 2.0 * (1.0 - param_t) * (c.y - s.y)
+                                        + 2.0 * param_t * (e.y - c.y);
+                                    let tangent_len = (tx * tx + ty * ty).sqrt().max(0.001);
+                                    tx /= tangent_len;
+                                    ty /= tangent_len;
+                                    let distance = if tx.abs() >= ty.abs() {
+                                        half_h + gap
                                     } else {
-                                        (mid_x, mid_y)
+                                        half_w + gap
+                                    };
+                                    if tx.abs() >= ty.abs() {
+                                        let side = if tx >= 0.0 { -1.0 } else { 1.0 };
+                                        (anchor_x, anchor_y + side * distance)
+                                    } else {
+                                        (anchor_x + distance, anchor_y)
                                     }
                                 }
-                                PositionHint::Top => (mid_x, mid_y - (half_h + gap)),
-                                PositionHint::Bottom => (mid_x, mid_y + (half_h + gap)),
-                                PositionHint::Left => (mid_x - (half_w + gap), mid_y),
-                                PositionHint::Right => (mid_x + (half_w + gap), mid_y),
+                                PositionHint::Top => (anchor_x, anchor_y - (half_h + gap)),
+                                PositionHint::Bottom => (anchor_x, anchor_y + (half_h + gap)),
+                                PositionHint::Left => (anchor_x - (half_w + gap), anchor_y),
+                                PositionHint::Right => (anchor_x + (half_w + gap), anchor_y),
                                 _ => {
                                     // Auto: place on the convex (outer) side of the curve
                                     if vy < -5.0 {
                                         // Arches upwards -> place above curve
-                                        (mid_x, mid_y - (half_h + gap))
+                                        (anchor_x, anchor_y - (half_h + gap))
                                     } else if vy > 5.0 {
                                         // Arches downwards -> place below curve
-                                        (mid_x, mid_y + (half_h + gap))
+                                        (anchor_x, anchor_y + (half_h + gap))
                                     } else {
                                         // Mostly flat or vertical -> default above curve
-                                        (mid_x, mid_y - (half_h + gap))
+                                        (anchor_x, anchor_y - (half_h + gap))
                                     }
+                                }
                                 }
                             };
 
@@ -1267,6 +1329,9 @@ impl LayoutEngine {
                         outline,
                         boxed: is_boxed,
                         stroke_width: *stroke_width,
+                        line_style: *line_style,
+                        arrowhead: *arrowhead,
+                        arrow_skin: *arrow_skin,
                     });
                 }
             }
@@ -1470,6 +1535,9 @@ mod tests {
                     control: Some(Point2D::new(300.0, 100.0)),
                     end: Some(Point2D::new(500.0, 300.0)),
                     stroke_width: None,
+                    line_style: LineStyle::Solid,
+                    arrowhead: ArrowheadStyle::Filled,
+                    arrow_skin: ArrowSkin::Classic,
                     text: Some("Midpoint Text".to_string()),
                     style: SemanticStyle::Primary,
                     position: PositionHint::Center,
@@ -1486,6 +1554,9 @@ mod tests {
                     control: Some(Point2D::new(300.0, 100.0)),
                     end: Some(Point2D::new(500.0, 300.0)),
                     stroke_width: None,
+                    line_style: LineStyle::Solid,
+                    arrowhead: ArrowheadStyle::Filled,
+                    arrow_skin: ArrowSkin::Classic,
                     text: Some("Offset Text".to_string()),
                     style: SemanticStyle::Primary,
                     position: PositionHint::Top,
@@ -1515,12 +1586,11 @@ mod tests {
             assert_eq!(text.as_deref(), Some("Midpoint Text"));
             assert!(!boxed);
 
-            // Centered on curve at t=0.5:
-            // x = 0.25*100 + 0.5*300 + 0.25*500 = 25 + 150 + 125 = 300
-            // y = 0.25*300 + 0.5*100 + 0.25*300 = 75 + 50 + 75 = 200
+            // Anchored at t=0.5, then moved above the horizontal tangent so the
+            // label bounds clear the curve.
             let tr = text_rect.as_ref().expect("text_rect should be Some");
             assert!((tr.center_x() - 300.0).abs() < 1e-4);
-            assert!((tr.center_y() - 200.0).abs() < 1e-4);
+            assert!(tr.bottom() < 200.0);
         } else {
             panic!("Expected ResolvedAnnotation::BezierArrow");
         }

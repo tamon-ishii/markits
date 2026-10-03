@@ -1,6 +1,6 @@
+use crate::{Scene, Theme, UiElement, renderer};
 use base64::Engine;
 use image::{DynamicImage, ImageFormat};
-use crate::{Scene, Theme, UiElement, renderer};
 use resvg::{tiny_skia, usvg};
 use std::error::Error;
 use std::fs;
@@ -9,8 +9,12 @@ use std::path::Path;
 const PNG_SIGNATURE: &[u8; 8] = b"\x89PNG\r\n\x1a\n";
 
 pub fn extract_png_text_chunk(png_bytes: &[u8], target_keyword: &str) -> Option<String> {
+    read_png_text_chunk(png_bytes, target_keyword).ok().flatten()
+}
+
+pub fn read_png_text_chunk(png_bytes: &[u8], target_keyword: &str) -> Result<Option<String>, &'static str> {
     if png_bytes.len() < 8 || &png_bytes[0..8] != PNG_SIGNATURE {
-        return None;
+        return Err("Invalid PNG signature");
     }
 
     let mut cursor = std::io::Cursor::new(&png_bytes[8..]);
@@ -19,30 +23,38 @@ pub fn extract_png_text_chunk(png_bytes: &[u8], target_keyword: &str) -> Option<
     while (cursor.position() as usize) < cursor.get_ref().len() {
         let mut len_buf = [0u8; 4];
         if cursor.read_exact(&mut len_buf).is_err() {
-            break;
+            return Err("Truncated PNG chunk length");
         }
         let length = u32::from_be_bytes(len_buf) as usize;
 
         let mut type_buf = [0u8; 4];
         if cursor.read_exact(&mut type_buf).is_err() {
-            break;
+            return Err("Truncated PNG chunk type");
+        }
+        if length
+            .checked_add(4)
+            .is_none_or(|needed| needed > cursor.get_ref().len() - cursor.position() as usize)
+        {
+            return Err("Truncated PNG chunk data");
         }
 
         if &type_buf == b"tEXt" {
             let mut data = vec![0u8; length];
             if cursor.read_exact(&mut data).is_err() {
-                break;
+                return Err("Truncated PNG text");
             }
             let mut crc_buf = [0u8; 4];
-            let _ = cursor.read_exact(&mut crc_buf);
+            if cursor.read_exact(&mut crc_buf).is_err() {
+                return Err("Truncated PNG CRC");
+            }
 
             // Format: keyword + null separator (0x00) + text
             if let Some(null_pos) = data.iter().position(|&b| b == 0) {
                 if let Ok(keyword) = std::str::from_utf8(&data[..null_pos]) {
                     if keyword == target_keyword {
-                        if let Ok(text) = String::from_utf8(data[null_pos + 1..].to_vec()) {
-                            return Some(text);
-                        }
+                        let text = String::from_utf8(data[null_pos + 1..].to_vec())
+                            .map_err(|_| "Invalid PNG text UTF-8")?;
+                        return Ok(Some(text));
                     }
                 }
             }
@@ -52,13 +64,13 @@ pub fn extract_png_text_chunk(png_bytes: &[u8], target_keyword: &str) -> Option<
             let skip = (length + 4) as u64;
             let new_pos = cursor.position() + skip;
             if new_pos > cursor.get_ref().len() as u64 {
-                break;
+                return Err("Truncated PNG chunk");
             }
             cursor.set_position(new_pos);
         }
     }
 
-    None
+    Ok(None)
 }
 
 pub fn crc32(data: &[u8]) -> u32 {
@@ -91,6 +103,9 @@ pub fn embed_png_text_chunk(
     let mut ihdr_len_buf = [0u8; 4];
     cursor.read_exact(&mut ihdr_len_buf)?;
     let ihdr_len = u32::from_be_bytes(ihdr_len_buf) as usize;
+    if ihdr_len != 13 {
+        return Err("Invalid PNG IHDR length".into());
+    }
 
     let mut ihdr_type = [0u8; 4];
     cursor.read_exact(&mut ihdr_type)?;
@@ -136,6 +151,12 @@ pub fn embed_png_text_chunk(
         let mut type_buf = [0u8; 4];
         if cursor.read_exact(&mut type_buf).is_err() {
             break;
+        }
+        if length
+            .checked_add(4)
+            .is_none_or(|needed| needed > cursor.get_ref().len() - cursor.position() as usize)
+        {
+            return Err("Truncated PNG chunk".into());
         }
 
         let mut data = vec![0u8; length];
@@ -193,8 +214,12 @@ pub fn load_uimap_from_path(path: &Path) -> Result<Vec<UiElement>, Box<dyn Error
         }
         return Err(format!("No embedded UIMap found in PNG '{}'", path.display()).into());
     }
-    let text = std::str::from_utf8(&bytes)
-        .map_err(|e| format!("File '{}' is neither a valid PNG nor valid UTF-8 JSON: {e}", path.display()))?;
+    let text = std::str::from_utf8(&bytes).map_err(|e| {
+        format!(
+            "File '{}' is neither a valid PNG nor valid UTF-8 JSON: {e}",
+            path.display()
+        )
+    })?;
     let elements: Vec<UiElement> = serde_json::from_str(text)
         .map_err(|e| format!("Failed to parse UIMap JSON from '{}': {e}", path.display()))?;
     Ok(elements)
@@ -303,7 +328,10 @@ pub fn with_image_canvas_and_uimap(
             .or_insert_with(|| serde_json::json!({"width": width, "height": height}));
     }
 
-    if !root.contains_key("uimap") && !root.contains_key("ui_map") && !root.contains_key("ui_elements") {
+    if !root.contains_key("uimap")
+        && !root.contains_key("ui_map")
+        && !root.contains_key("ui_elements")
+    {
         if let Some(elements) = uimap {
             if !elements.is_empty() {
                 root.insert("uimap".to_string(), serde_json::to_value(elements)?);
@@ -396,7 +424,8 @@ pub fn filter_ui_elements_for_crop(
     elements
         .iter()
         .filter_map(|el| {
-            if el.x.abs() < 1.0 && el.y.abs() < 1.0 && (el.role == "menuitem" || el.name.is_empty()) {
+            if el.x.abs() < 1.0 && el.y.abs() < 1.0 && (el.role == "menuitem" || el.name.is_empty())
+            {
                 return None;
             }
             let new_x = el.x - crop_x;
@@ -424,7 +453,10 @@ pub fn filter_ui_elements_for_crop(
         .collect()
 }
 
-pub fn render_composed_png_bytes(json: &str, image_bytes: &[u8]) -> Result<Vec<u8>, Box<dyn Error>> {
+pub fn render_composed_png_bytes(
+    json: &str,
+    image_bytes: &[u8],
+) -> Result<Vec<u8>, Box<dyn Error>> {
     render_composed_png_bytes_with_crop(json, image_bytes, None)
 }
 
@@ -483,8 +515,8 @@ pub fn render_composed_png_bytes_with_crop(
         &rendered_font,
     );
     let tree = usvg::Tree::from_str(&composed, &options)?;
-    let mut pixmap = tiny_skia::Pixmap::new(width, height)
-        .ok_or("Image dimensions are too large to render")?;
+    let mut pixmap =
+        tiny_skia::Pixmap::new(width, height).ok_or("Image dimensions are too large to render")?;
     resvg::render(
         &tree,
         tiny_skia::Transform::identity(),
@@ -503,7 +535,8 @@ pub fn render_composed_png_bytes_with_crop(
             let crop_w = crop_right.saturating_sub(crop_x).max(1);
             let crop_h = crop_bottom.saturating_sub(crop_y).max(1);
 
-            let rendered_image = image::load_from_memory_with_format(&rendered_png, ImageFormat::Png)?;
+            let rendered_image =
+                image::load_from_memory_with_format(&rendered_png, ImageFormat::Png)?;
             let cropped = crop_image(&rendered_image, crop_x, crop_y, crop_w, crop_h)?;
             let mut out = std::io::Cursor::new(Vec::new());
             cropped.write_to(&mut out, ImageFormat::Png)?;
@@ -635,7 +668,9 @@ mod tests {
     fn test_render_composed_png_bytes_with_crop() {
         let base_img = image::RgbaImage::new(400, 300);
         let mut png_bytes = Vec::new();
-        base_img.write_to(&mut std::io::Cursor::new(&mut png_bytes), ImageFormat::Png).unwrap();
+        base_img
+            .write_to(&mut std::io::Cursor::new(&mut png_bytes), ImageFormat::Png)
+            .unwrap();
 
         let json = r#"{
             "annotations": [
@@ -646,7 +681,8 @@ mod tests {
             ]
         }"#;
 
-        let cropped_bytes = render_composed_png_bytes_with_crop(json, &png_bytes, Some(10)).unwrap();
+        let cropped_bytes =
+            render_composed_png_bytes_with_crop(json, &png_bytes, Some(10)).unwrap();
         let cropped_img = image::load_from_memory(&cropped_bytes).unwrap();
         assert_eq!(cropped_img.dimensions(), (100, 60));
     }

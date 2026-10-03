@@ -104,8 +104,30 @@ document.addEventListener('DOMContentLoaded', async () => {
   const homeView = document.getElementById('home-view')!;
   const editorView = document.getElementById('editor-view')!;
   const editorActions = document.getElementById('editor-actions')!;
+  const captureButton = document.getElementById('btn-trigger-capture')!;
+  const openButton = document.getElementById('btn-open-file')!;
   const historyGrid = document.getElementById('history-grid')!;
   const historyCount = document.getElementById('history-count')!;
+  const shortcutSelect = document.getElementById('capture-shortcut') as HTMLSelectElement | null;
+  const shortcutStatus = document.getElementById('capture-shortcut-status');
+  type ShortcutStatus = { shortcut: string; warning: string | null };
+  if (isTauri && shortcutSelect) {
+    const showShortcutStatus = (status: ShortcutStatus) => {
+      shortcutSelect.value = status.shortcut;
+      if (shortcutStatus) shortcutStatus.textContent = status.warning ?? '';
+    };
+    invokeTauri<ShortcutStatus>('cmd_get_capture_shortcut').then(showShortcutStatus)
+      .catch((error) => { if (shortcutStatus) shortcutStatus.textContent = String(error); });
+    shortcutSelect.addEventListener('change', async () => {
+      try {
+        showShortcutStatus(await invokeTauri<ShortcutStatus>('cmd_set_capture_shortcut', { shortcut: shortcutSelect.value }));
+      } catch (error) {
+        if (shortcutStatus) shortcutStatus.textContent = String(error);
+        const current = await invokeTauri<ShortcutStatus>('cmd_get_capture_shortcut');
+        shortcutSelect.value = current.shortcut;
+      }
+    });
+  }
 
   let currentHistoryId: string | null = null;
 
@@ -151,23 +173,31 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   const switchView = async (view: 'home' | 'editor') => {
     if (view === 'home') {
+      document.body.classList.remove('editor-view-active');
       // Switch view and tabs immediately for responsive UI
       tabHome.classList.add('active');
       tabEditor.classList.remove('active');
       homeView.style.display = 'block';
       editorView.style.display = 'none';
       editorActions.style.display = 'none';
+      captureButton.style.display = '';
+      openButton.style.display = '';
+      tabEditor.style.display = '';
 
       if (editor.hasImage()) {
         await autoSaveToHistory();
       }
       await loadHistory();
     } else {
+      document.body.classList.add('editor-view-active');
       tabHome.classList.remove('active');
       tabEditor.classList.add('active');
       homeView.style.display = 'none';
       editorView.style.display = 'flex';
       editorActions.style.display = 'flex';
+      captureButton.style.display = 'none';
+      openButton.style.display = 'none';
+      tabEditor.style.display = 'none';
       await raiseAppWindow();
     }
   };
@@ -184,8 +214,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
   });
 
-  const uiStatusEl = document.getElementById('ui-detection-status')!;
+  const uiStatusEl = document.getElementById('ui-detection-status');
   const setUiStatus = (state: 'idle' | 'scanning' | 'ready' | 'failed', label: string) => {
+    if (!uiStatusEl) return;
     uiStatusEl.dataset.state = state;
     uiStatusEl.textContent = label;
   };
@@ -271,7 +302,7 @@ document.addEventListener('DOMContentLoaded', async () => {
           <div class="history-empty">
             <div class="history-empty-icon">📸</div>
             <h4>まだキャプチャ履歴がありません</h4>
-            <p style="margin-top: 6px; font-size: 13px;">「画面をキャプチャ」ボタンまたは PrintScreen キーで撮影してみましょう。</p>
+            <p style="margin-top: 6px; font-size: 13px;">「画面をキャプチャ」ボタンまたは設定した撮影ショートカットで撮影してみましょう。</p>
           </div>
         `;
         return;
@@ -329,6 +360,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             currentHistoryId = item.id;
             editor.markClean();
             await switchView('editor');
+            if (loaded.ui_elements?.length) setUiStatus('ready', `保存済み UIMap ${loaded.ui_elements.length} 要素 · 位置の再確認を推奨`);
           } catch (e: any) {
             alert(`キャプチャの読み込みに失敗しました: ${e?.message ?? e}`);
           }
@@ -397,6 +429,7 @@ document.addEventListener('DOMContentLoaded', async () => {
           );
           currentHistoryId = null;
           await switchView('editor');
+          if (result.ui_elements?.length) setUiStatus('ready', `保存済み UIMap ${result.ui_elements.length} 要素 · 位置の再確認を推奨`);
         }
       } catch (e: any) {
         alert(`ファイル読み込みエラー: ${e?.message ?? e}`);
@@ -522,27 +555,14 @@ document.addEventListener('DOMContentLoaded', async () => {
     await autoSaveToHistory();
   });
 
-  // --- Export Resolution Modal Flow ---
-  const modalExport = document.getElementById('modal-export') as HTMLElement | null;
-  const exportOrigDims = document.getElementById('export-orig-dims') as HTMLElement | null;
-  const exportWidthInput = document.getElementById('export-width') as HTMLInputElement | null;
-  const exportHeightInput = document.getElementById('export-height') as HTMLInputElement | null;
-  const btnAspectLock = document.getElementById('btn-aspect-lock') as HTMLButtonElement | null;
-  const btnCloseExportModal = document.getElementById('btn-close-export-modal');
-  const btnModalCancel = document.getElementById('btn-modal-cancel');
-  const btnModalCopy = document.getElementById('btn-modal-copy');
-  const btnModalSave = document.getElementById('btn-modal-save');
+  // Output dimensions are edited in the inspector and used directly for save/copy.
+  const exportWidthInput = editorWidthInput;
+  const exportHeightInput = editorHeightInput;
 
-  let isAspectLocked = true;
   let originalWidth = 1920;
   let originalHeight = 1080;
-  let aspectRatio = originalWidth / originalHeight;
 
-  const closeExportModal = () => {
-    if (modalExport) modalExport.style.display = 'none';
-  };
-
-  const openExportModal = () => {
+  const prepareExport = () => {
     const bgDataUrl = editor.getBackgroundImageDataUrl();
     if (!bgDataUrl || bgDataUrl.length === 0) {
       alert('保存またはコピーする画像がありません。まずはキャプチャまたは画像を開いてください。');
@@ -552,118 +572,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     const scene = editor.getScene();
     originalWidth = scene.canvas.width;
     originalHeight = scene.canvas.height;
-    const currentOutput = editor.getOutputDimensions();
-    aspectRatio = originalWidth / Math.max(1, originalHeight);
-
-    if (exportOrigDims) {
-      exportOrigDims.textContent = `${originalWidth} × ${originalHeight}`;
-    }
-    if (exportWidthInput) {
-      exportWidthInput.value = currentOutput.width.toString();
-    }
-    if (exportHeightInput) {
-      exportHeightInput.value = currentOutput.height.toString();
-    }
-
-    isAspectLocked = editorAspectLocked;
-    if (btnAspectLock) {
-      btnAspectLock.classList.toggle('active', isAspectLocked);
-      btnAspectLock.textContent = isAspectLocked ? '🔒' : '🔓';
-    }
-
-    // Reset preset chips to original
-    document.querySelectorAll('.preset-chip').forEach((chip) => {
-      chip.classList.toggle('active', chip.getAttribute('data-preset') === 'original');
-    });
-
-    if (modalExport) {
-      modalExport.style.display = 'flex';
-    }
     return true;
   };
-
-  btnCloseExportModal?.addEventListener('click', closeExportModal);
-  btnModalCancel?.addEventListener('click', closeExportModal);
-
-  // Aspect lock toggle
-  btnAspectLock?.addEventListener('click', () => {
-    isAspectLocked = !isAspectLocked;
-    btnAspectLock.classList.toggle('active', isAspectLocked);
-    btnAspectLock.textContent = isAspectLocked ? '🔒' : '🔓';
-  });
-
-  const applyExportDimensionsToEditor = () => {
-    const width = exportWidthInput ? Number.parseInt(exportWidthInput.value, 10) : NaN;
-    const height = exportHeightInput ? Number.parseInt(exportHeightInput.value, 10) : NaN;
-    if (!Number.isFinite(width) || !Number.isFinite(height) || width < 10 || height < 10) return;
-    editor.setOutputDimensions(width, height);
-    if (editorWidthInput) editorWidthInput.value = String(width);
-    if (editorHeightInput) editorHeightInput.value = String(height);
-  };
-
-  // Width input change
-  exportWidthInput?.addEventListener('input', () => {
-    const w = parseInt(exportWidthInput.value, 10);
-    if (!isNaN(w) && w > 0 && isAspectLocked && exportHeightInput) {
-      const h = Math.max(1, Math.round(w / aspectRatio));
-      exportHeightInput.value = h.toString();
-    }
-    applyExportDimensionsToEditor();
-    document.querySelectorAll('.preset-chip').forEach((chip) => chip.classList.remove('active'));
-  });
-
-  // Height input change
-  exportHeightInput?.addEventListener('input', () => {
-    const h = parseInt(exportHeightInput.value, 10);
-    if (!isNaN(h) && h > 0 && isAspectLocked && exportWidthInput) {
-      const w = Math.max(1, Math.round(h * aspectRatio));
-      exportWidthInput.value = w.toString();
-    }
-    applyExportDimensionsToEditor();
-    document.querySelectorAll('.preset-chip').forEach((chip) => chip.classList.remove('active'));
-  });
-
-  // Preset chips
-  document.querySelectorAll('.preset-chip').forEach((chip) => {
-    chip.addEventListener('click', () => {
-      const preset = chip.getAttribute('data-preset');
-      let targetW = originalWidth;
-      let targetH = originalHeight;
-
-      switch (preset) {
-        case 'original':
-          targetW = originalWidth;
-          targetH = originalHeight;
-          break;
-        case 'w800':
-          targetW = 800;
-          targetH = Math.max(1, Math.round(800 / aspectRatio));
-          break;
-        case 'w1200':
-          targetW = 1200;
-          targetH = Math.max(1, Math.round(1200 / aspectRatio));
-          break;
-        case 'w1920':
-          targetW = 1920;
-          targetH = Math.max(1, Math.round(1920 / aspectRatio));
-          break;
-        case 'scale-50':
-          targetW = Math.max(1, Math.round(originalWidth * 0.5));
-          targetH = Math.max(1, Math.round(originalHeight * 0.5));
-          break;
-        case 'scale-200':
-          targetW = Math.max(1, Math.round(originalWidth * 2.0));
-          targetH = Math.max(1, Math.round(originalHeight * 2.0));
-          break;
-      }
-
-      if (exportWidthInput) exportWidthInput.value = targetW.toString();
-      if (exportHeightInput) exportHeightInput.value = targetH.toString();
-      applyExportDimensionsToEditor();
-
-      document.querySelectorAll('.preset-chip').forEach((c) => c.classList.toggle('active', c === chip));
-    });
-  });
 
   const getExportDimensions = (): { width: number | null; height: number | null } => {
     let w = exportWidthInput ? parseInt(exportWidthInput.value, 10) : originalWidth;
@@ -703,8 +613,7 @@ document.addEventListener('DOMContentLoaded', async () => {
           exportHeight: height,
         });
         await autoSaveToHistory();
-        closeExportModal();
-        alert('指定解像度のPNGファイルとして保存しました（再編集メタデータ付き）。');
+        alert('PNGファイルとして保存しました（再編集メタデータ付き）。');
       }
     } catch (e: any) {
       alert(`保存に失敗しました: ${e?.message ?? e}`);
@@ -729,26 +638,19 @@ document.addEventListener('DOMContentLoaded', async () => {
         exportHeight: height,
       });
       await autoSaveToHistory();
-      closeExportModal();
-      alert('クリップボードに指定解像度で画像をコピーしました！');
+      alert('クリップボードに画像をコピーしました。');
     } catch (e: any) {
       alert(`クリップボードへのコピーに失敗しました: ${e?.message ?? e}`);
     }
   };
 
-  // Header "Save" button triggers export modal
   document.getElementById('btn-save-file')?.addEventListener('click', () => {
-    openExportModal();
+    if (prepareExport()) void executeSaveWithResolution();
   });
 
-  // Header "Copy" button triggers export modal
   document.getElementById('btn-copy-clipboard')?.addEventListener('click', () => {
-    openExportModal();
+    if (prepareExport()) void executeCopyWithResolution();
   });
-
-  // Modal action buttons
-  btnModalSave?.addEventListener('click', executeSaveWithResolution);
-  btnModalCopy?.addEventListener('click', executeCopyWithResolution);
 
   // Toggle UI Snap button
   const btnToggleSnap = document.getElementById('btn-toggle-snap') as HTMLButtonElement;

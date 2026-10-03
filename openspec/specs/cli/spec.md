@@ -1,5 +1,9 @@
 # CLI Specification
 
+## Batch workflows
+
+The CLI SHALL support `annotate-batch` with a JSON array of marks and an optional JSON template of default style fields. It SHALL support `capture-series` with a bounded count, initial delay, and interval. When reusing a PNG UIMap whose dimensions differ from the target image, it SHALL warn on stderr.
+
 ## Purpose
 
 Provides a command-line interface for reading semantic annotation JSON from files or standard input and rendering SVG to standard output.

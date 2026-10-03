@@ -48,10 +48,6 @@ body.overlay-mode {
 body.overlay-mode #app-header,
 body.overlay-mode #home-view,
 body.overlay-mode #editor-view,
-body.overlay-mode #modal-export {
-  display: none !important;
-}
-
 body.overlay-mode #capture-overlay:not(.hidden) {
   display: block !important;
 }
@@ -107,6 +103,12 @@ body.overlay-mode #capture-overlay:not(.hidden) {
   background-color: var(--bg-active);
   border-color: var(--border-color);
   font-weight: 600;
+}
+
+body.editor-view-active #tab-editor,
+body.editor-view-active #btn-trigger-capture,
+body.editor-view-active #btn-open-file {
+  display: none !important;
 }
 
 .editor-actions-group {
@@ -304,7 +306,7 @@ body.overlay-mode #capture-overlay:not(.hidden) {
 .canvas-container {
   position: relative;
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.6);
-  border: 1px solid var(--border-color);
+  outline: 1px solid var(--border-color);
   background: white;
   line-height: 0;
   display: none;
@@ -1294,3 +1296,33 @@ textarea.form-control {
   justify-content: flex-end;
   gap: 10px;
 }
+.capture-shortcut-settings {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 12px;
+  font-size: 13px;
+}
+
+.capture-shortcut-settings select {
+  padding: 6px 8px;
+  border-radius: 6px;
+  color: inherit;
+  background: #1f2937;
+  border: 1px solid #4b5563;
+}
+
+#capture-shortcut-status { color: #fbbf24; }
+
+
+.mark-style-preset { cursor: pointer; border: 1px solid #4b5563; border-radius: 6px; padding: 6px 10px; color: inherit; background: #1f2937; }
+.mark-style-preset.active, .mark-style-preset:hover { border-color: #60a5fa; background: #1e3a8a; }
+
+.arrow-skin-options { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; margin-top: 6px; }
+.arrow-skin-option { display: flex; flex-direction: column; align-items: center; gap: 2px; min-width: 0; padding: 5px 2px; color: var(--text-main); background: var(--bg-panel); border: 1px solid var(--border-color); border-radius: 6px; cursor: pointer; font: inherit; font-size: 11px; }
+.arrow-skin-option svg { width: 100%; max-width: 80px; height: 30px; }
+.arrow-skin-option:hover, .arrow-skin-option.active { border-color: var(--primary); background: var(--bg-hover); }
+.arrow-skin-option.active { box-shadow: 0 0 0 1px var(--primary) inset; }
+.arrow-skin-option:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+.arrow-placement-hint { margin-top: 5px; color: var(--text-muted); font-size: 11px; line-height: 1.4; }
