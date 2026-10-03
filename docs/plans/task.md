@@ -1,8 +1,7 @@
 | Step | Task | Status |
 | --- | --- | --- |
-| 1 | Explore project context and evaluate proposed improvements | Completed |
-| 2 | Ask clarifying questions and confirm prioritization with user | Completed |
-| 3 | Propose architecture and approaches for chosen capabilities | Completed |
-| 4 | Present design sections and get user approval | Completed |
-| 5 | Write design doc and commit | Completed |
-| 6 | Transition to implementation plan | Completed |
+| 1 | Screen Enumeration and Screen Selection in src/capture.rs | Completed |
+| 2 | Window Enumeration and Targeted Capture in src/capture.rs | Completed |
+| 3 | High-DPI Coordinate Scaling and Scale-Factor Normalization | Completed |
+| 4 | CLI Flags & Handlers in src/cli.rs and src/main.rs | Completed |
+| 5 | Full Verification and Documentation Update | Completed |

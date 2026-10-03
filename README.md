@@ -26,11 +26,29 @@ MarkIts は、**AI（LLM）が自律的に画面を認識し、UI要素を指定
 
 ### 1. MarkIts 単体でのスクリーンショット撮影 (`markits capture`)
 
-外部ツールを介さず、MarkIts だけで画面全体のキャプチャや特定矩形の切り抜き撮影が可能です。
+外部ツールを介さず、MarkIts だけで画面全体のキャプチャや特定矩形の切り抜き、特定ウィンドウ/プロセスの直接撮影、マルチモニター選択が可能です。High-DPI ディスプレイ（スケールファクター）環境でも自動で座標整合が行われます。
 
 ```sh
-# 基本キャプチャ（高速: UI検出なし）
+# 基本キャプチャ（プライマリ画面）
 markits capture screen.png
+
+# 接続モニター一覧の確認（解像度・スケールファクター）
+markits capture --list-screens
+markits capture --list-screens --json
+
+# サブモニター（第2画面）のキャプチャ
+markits capture screen2.png --screen 1
+
+# 開いているウィンドウ一覧の確認（Window ID, PID, App Name, 座標）
+markits capture --list-windows
+markits capture --list-windows --json
+
+# ウィンドウ名（部分一致）またはWindow IDでウィンドウだけを直接撮影
+markits capture win.png --window "カレンダー"
+markits capture win.png --window 104857604
+
+# プロセスID (PID) を指定して対象ウィンドウを直接撮影
+markits capture proc.png --pid 10111
 
 # UI要素検出つきキャプチャ（UI要素を検出し、PNGメタデータにUIMapを埋め込み）
 markits capture screen.png --detect-ui
