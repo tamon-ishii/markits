@@ -133,3 +133,60 @@ fn test_capture_with_inline_box_annotation() {
         eprintln!("Capture skipped or failed due to screen environment: {}", stderr);
     }
 }
+
+#[test]
+fn test_cli_list_screens_and_windows() {
+    let output_screens = Command::new(env!("CARGO_BIN_EXE_markits"))
+        .args(["capture", "--list-screens", "--json"])
+        .output()
+        .expect("Failed to run capture --list-screens");
+    assert!(output_screens.status.success());
+    let stdout = String::from_utf8_lossy(&output_screens.stdout);
+    assert!(stdout.contains("scale_factor"));
+
+    let output_windows = Command::new(env!("CARGO_BIN_EXE_markits"))
+        .args(["capture", "--list-windows", "--json"])
+        .output()
+        .expect("Failed to run capture --list-windows");
+    assert!(output_windows.status.success());
+    let stdout = String::from_utf8_lossy(&output_windows.stdout);
+    assert!(stdout.starts_with('['));
+}
+
+#[test]
+fn test_cli_list_screens_and_windows_text_format() {
+    let output_screens = Command::new(env!("CARGO_BIN_EXE_markits"))
+        .args(["capture", "--list-screens"])
+        .output()
+        .expect("Failed to run capture --list-screens");
+    assert!(output_screens.status.success());
+    let stdout = String::from_utf8_lossy(&output_screens.stdout);
+    assert!(stdout.contains("Index"));
+    assert!(stdout.contains("Resolution"));
+
+    let output_windows = Command::new(env!("CARGO_BIN_EXE_markits"))
+        .args(["capture", "--list-windows"])
+        .output()
+        .expect("Failed to run capture --list-windows");
+    assert!(output_windows.status.success());
+    let stdout = String::from_utf8_lossy(&output_windows.stdout);
+    assert!(stdout.contains("Window ID"));
+}
+
+#[test]
+fn test_cli_capture_screen_out_of_bounds() {
+    let output = Command::new(env!("CARGO_BIN_EXE_markits"))
+        .args(["capture", "/tmp/dummy_screen_test.png", "--screen", "9999"])
+        .output()
+        .expect("Failed to run capture with screen out of bounds");
+    assert!(!output.status.success(), "Screen out of bounds should fail");
+}
+
+#[test]
+fn test_cli_capture_window_nonexistent() {
+    let output = Command::new(env!("CARGO_BIN_EXE_markits"))
+        .args(["capture", "/tmp/dummy_win_test.png", "--window", "NonExistentWindow9999999"])
+        .output()
+        .expect("Failed to run capture with nonexistent window");
+    assert!(!output.status.success(), "Nonexistent window query should fail");
+}

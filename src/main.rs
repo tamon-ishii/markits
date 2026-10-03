@@ -141,6 +141,24 @@ enum Commands {
         /// Destination PNG file (alternative to positional argument)
         #[arg(short, long = "output")]
         output_flag: Option<std::path::PathBuf>,
+        /// List all connected screens and exit
+        #[arg(long)]
+        list_screens: bool,
+        /// List all capturable top-level windows and exit
+        #[arg(long)]
+        list_windows: bool,
+        /// Screen/Monitor index to capture (0-indexed)
+        #[arg(long)]
+        screen: Option<usize>,
+        /// Target window title substring or ID to capture directly
+        #[arg(long)]
+        window: Option<String>,
+        /// Target process ID (PID) to capture directly
+        #[arg(long)]
+        pid: Option<u32>,
+        /// Output listings in JSON format
+        #[arg(long)]
+        json: bool,
         /// Detect desktop UI elements and embed UIMap metadata in the output PNG
         #[arg(long)]
         detect_ui: bool,
@@ -423,6 +441,12 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         Commands::Capture {
             output,
             output_flag,
+            list_screens,
+            list_windows,
+            screen,
+            window,
+            pid,
+            json,
             detect_ui,
             uimap,
             x,
@@ -438,12 +462,67 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             crop,
             crop_margin,
         } => {
+            if list_screens {
+                let screens = markits::capture::list_screens()?;
+                if json {
+                    println!("{}", serde_json::to_string_pretty(&screens)?);
+                } else {
+                    println!("{:<7} {:<12} {:<12} {:<14} {:<8}", "Index", "Resolution", "Offset", "Scale Factor", "Primary");
+                    println!("{}", "-".repeat(58));
+                    for s in screens {
+                        println!(
+                            "{:<7} {:<12} {:<12} {:<14.2} {:<8}",
+                            s.index,
+                            format!("{}x{}", s.width, s.height),
+                            format!("{},{}", s.x, s.y),
+                            s.scale_factor,
+                            if s.is_primary { "yes" } else { "no" }
+                        );
+                    }
+                }
+                return Ok(());
+            }
+
+            if list_windows {
+                let windows = markits::capture::list_windows()?;
+                if json {
+                    println!("{}", serde_json::to_string_pretty(&windows)?);
+                } else {
+                    println!("{:<10} {:<8} {:<16} {:<16} {:<25}", "Window ID", "PID", "App Name", "Bounds", "Title");
+                    println!("{}", "-".repeat(82));
+                    for w in windows {
+                        let pid_str = w.pid.map(|p| p.to_string()).unwrap_or_else(|| "-".to_string());
+                        let bounds_str = format!("{},{} {}x{}", w.x, w.y, w.width, w.height);
+                        let truncated_title = if w.title.chars().count() > 25 {
+                            format!("{}...", w.title.chars().take(22).collect::<String>())
+                        } else {
+                            w.title.clone()
+                        };
+                        println!(
+                            "{:<10} {:<8} {:<16} {:<16} {:<25}",
+                            w.id,
+                            pid_str,
+                            w.app_name,
+                            bounds_str,
+                            truncated_title
+                        );
+                    }
+                }
+                return Ok(());
+            }
+
             let output_path = output
                 .or(output_flag)
                 .ok_or("Output destination path (.png) is required")?;
 
-            let captured = if let (Some(x), Some(y), Some(w), Some(h)) = (x, y, width, height) {
+            let captured = if let Some(query_str) = window {
+                markits::capture::capture_window_by_query(&markits::capture::WindowQuery::TitleOrId(query_str))?
+            } else if let Some(target_pid) = pid {
+                markits::capture::capture_window_by_query(&markits::capture::WindowQuery::Pid(target_pid))?
+            } else if let (Some(x), Some(y), Some(w), Some(h)) = (x, y, width, height) {
                 markits::capture::capture_region(x, y, w, h)?
+            } else if let Some(screen_idx) = screen {
+                markits::capture::capture_screen(screen_idx)?
             } else {
                 markits::capture::capture_primary_screen()?
             };
