@@ -174,6 +174,8 @@ pub async fn cmd_finish_capture(
             &captured.raw_png,
             None,
             Some(&cropped_elements),
+            None,
+            None,
         )
         .map_err(|e| e.to_string())?;
 
@@ -184,6 +186,11 @@ pub async fn cmd_finish_capture(
             annotations_json: None,
             history_id: Some(item.id.clone()),
             ui_elements: Some(cropped_elements),
+            base_image_data_url: None,
+            base_width: None,
+            base_height: None,
+            base_ui_elements: None,
+            crop_info: None,
         };
 
         res
@@ -198,8 +205,15 @@ pub async fn cmd_finish_capture(
             .decode(base64_str)
             .map_err(|e| e.to_string())?;
 
-        let item = history::save_or_update_history_item(None, &png_bytes, None, Some(&capture_elements))
-            .map_err(|e| e.to_string())?;
+        let item = history::save_or_update_history_item(
+            None,
+            &png_bytes,
+            None,
+            Some(&capture_elements),
+            None,
+            None,
+        )
+        .map_err(|e| e.to_string())?;
 
         let img = image::load_from_memory(&png_bytes).map_err(|e| e.to_string())?;
         let res = metadata::LoadedImageResult {
@@ -209,6 +223,11 @@ pub async fn cmd_finish_capture(
             annotations_json: None,
             history_id: Some(item.id.clone()),
             ui_elements: Some(capture_elements),
+            base_image_data_url: None,
+            base_width: None,
+            base_height: None,
+            base_ui_elements: None,
+            crop_info: None,
         };
         res
     };
@@ -406,6 +425,8 @@ pub async fn cmd_crop_and_load(
         &captured.raw_png,
         None,
         cropped_elements.as_deref(),
+        None,
+        None,
     )
     .map_err(|e| e.to_string())?;
 
@@ -416,7 +437,28 @@ pub async fn cmd_crop_and_load(
         annotations_json: None,
         history_id: Some(item.id),
         ui_elements: cropped_elements,
+        base_image_data_url: None,
+        base_width: None,
+        base_height: None,
+        base_ui_elements: None,
+        crop_info: None,
     })
+}
+
+fn decode_data_url(data_url: &str) -> Result<Vec<u8>, String> {
+    let prefix = "data:";
+    let base64_str = if data_url.starts_with(prefix) {
+        if let Some(pos) = data_url.find(',') {
+            &data_url[pos + 1..]
+        } else {
+            data_url
+        }
+    } else {
+        data_url
+    };
+    base64::engine::general_purpose::STANDARD
+        .decode(base64_str)
+        .map_err(|e| format!("Base64 decode error: {}", e))
 }
 
 #[tauri::command]
@@ -425,28 +467,28 @@ pub async fn cmd_save_to_history(
     scene_json: Option<String>,
     existing_id: Option<String>,
     ui_elements: Option<Vec<crate::ui_elements::DetectedUiElement>>,
+    base_background_data_url: Option<String>,
+    crop_info: Option<metadata::CropInfo>,
 ) -> Result<history::HistoryItem, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        let prefix = "data:";
-        let base64_str = if background_data_url.starts_with(prefix) {
-            if let Some(pos) = background_data_url.find(',') {
-                &background_data_url[pos + 1..]
+        let bg_bytes = decode_data_url(&background_data_url)?;
+        let base_bg_bytes = if let Some(ref base_url) = base_background_data_url {
+            if base_url != &background_data_url {
+                Some(decode_data_url(base_url)?)
             } else {
-                &background_data_url
+                None
             }
         } else {
-            &background_data_url
+            None
         };
-
-        let bg_bytes = base64::engine::general_purpose::STANDARD
-            .decode(base64_str)
-            .map_err(|e| format!("Base64 decode error: {}", e))?;
 
         history::save_or_update_history_item(
             existing_id.as_deref(),
             &bg_bytes,
             scene_json.as_deref(),
             ui_elements.as_deref(),
+            base_bg_bytes.as_deref(),
+            crop_info.as_ref(),
         )
         .map_err(|e| e.to_string())
     })
@@ -535,6 +577,7 @@ pub fn cmd_compose_and_save(
         &final_png_bytes,
         Some(&scene_json),
         ui_elements.as_deref(),
+        None,
     )
     .map_err(|e| e.to_string())?;
 

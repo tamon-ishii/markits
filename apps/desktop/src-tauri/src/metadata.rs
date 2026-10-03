@@ -6,6 +6,7 @@ use thiserror::Error;
 
 pub const MARKITS_KEYWORD: &str = "markits:annotations";
 pub const MARKITS_UI_ELEMENTS_KEYWORD: &str = "markits:ui_elements";
+pub const MARKITS_CROP_KEYWORD: &str = "markits:crop_info";
 const PNG_SIGNATURE: &[u8; 8] = b"\x89PNG\r\n\x1a\n";
 
 #[derive(Error, Debug)]
@@ -22,6 +23,15 @@ pub enum MetadataError {
     Json(#[from] serde_json::Error),
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct CropInfo {
+    pub is_auto_cropped: bool,
+    pub offset_x: f64,
+    pub offset_y: f64,
+    pub base_width: u32,
+    pub base_height: u32,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LoadedImageResult {
     pub width: u32,
@@ -32,6 +42,16 @@ pub struct LoadedImageResult {
     pub history_id: Option<String>,
     #[serde(default)]
     pub ui_elements: Option<Vec<crate::ui_elements::DetectedUiElement>>,
+    #[serde(default)]
+    pub base_image_data_url: Option<String>,
+    #[serde(default)]
+    pub base_width: Option<u32>,
+    #[serde(default)]
+    pub base_height: Option<u32>,
+    #[serde(default)]
+    pub base_ui_elements: Option<Vec<crate::ui_elements::DetectedUiElement>>,
+    #[serde(default)]
+    pub crop_info: Option<CropInfo>,
 }
 
 #[derive(Debug, Clone)]
@@ -40,6 +60,7 @@ pub struct PngHeaderInfo {
     pub height: u32,
     pub has_annotations: bool,
     pub annotations_json: Option<String>,
+    pub crop_info: Option<CropInfo>,
 }
 
 /// Inspect PNG header and metadata chunks without decoding pixel data.
@@ -57,12 +78,14 @@ pub fn inspect_png_header(png_bytes: &[u8]) -> Result<PngHeaderInfo, MetadataErr
 
     let annotations_json = extract_annotations(png_bytes).unwrap_or(None);
     let has_annotations = annotations_json.is_some();
+    let crop_info = extract_crop_info(png_bytes).unwrap_or(None);
 
     Ok(PngHeaderInfo {
         width,
         height,
         has_annotations,
         annotations_json,
+        crop_info,
     })
 }
 
@@ -127,6 +150,71 @@ pub fn extract_ui_elements(png_bytes: &[u8]) -> Result<Option<Vec<crate::ui_elem
     } else {
         Ok(None)
     }
+}
+
+/// Extract MarkIts crop information from a PNG byte slice if present.
+pub fn extract_crop_info(png_bytes: &[u8]) -> Result<Option<CropInfo>, MetadataError> {
+    if let Some(json_str) = extract_text_chunk(png_bytes, MARKITS_CROP_KEYWORD)? {
+        let crop: CropInfo = serde_json::from_str(&json_str)?;
+        Ok(Some(crop))
+    } else {
+        Ok(None)
+    }
+}
+
+/// Embed or update MarkIts crop information into a PNG byte slice.
+pub fn embed_crop_info(png_bytes: &[u8], crop_info: &CropInfo) -> Result<Vec<u8>, MetadataError> {
+    let json_str = serde_json::to_string(crop_info)?;
+    embed_text_chunk(png_bytes, MARKITS_CROP_KEYWORD, &json_str)
+}
+
+/// Remove any tEXt chunk with the given keyword from a PNG byte slice.
+pub fn remove_text_chunk(png_bytes: &[u8], keyword: &str) -> Result<Vec<u8>, MetadataError> {
+    if png_bytes.len() < 8 || &png_bytes[0..8] != PNG_SIGNATURE {
+        return Err(MetadataError::InvalidSignature);
+    }
+
+    let mut output = Vec::with_capacity(png_bytes.len());
+    output.extend_from_slice(PNG_SIGNATURE);
+
+    let mut cursor = Cursor::new(&png_bytes[8..]);
+
+    while (cursor.position() as usize) < cursor.get_ref().len() {
+        let chunk_start_pos = 8 + cursor.position() as usize;
+
+        let mut len_buf = [0u8; 4];
+        if cursor.read_exact(&mut len_buf).is_err() {
+            break;
+        }
+        let length = u32::from_be_bytes(len_buf) as usize;
+
+        let mut type_buf = [0u8; 4];
+        cursor.read_exact(&mut type_buf)?;
+
+        let mut data = vec![0u8; length];
+        cursor.read_exact(&mut data)?;
+
+        let mut crc_buf = [0u8; 4];
+        cursor.read_exact(&mut crc_buf)?;
+
+        let total_chunk_len = 4 + 4 + length + 4;
+        let original_chunk = &png_bytes[chunk_start_pos..chunk_start_pos + total_chunk_len];
+
+        // Skip existing chunk with same keyword
+        if &type_buf == b"tEXt" {
+            if let Some(null_pos) = data.iter().position(|&b| b == 0) {
+                if let Ok(kw) = std::str::from_utf8(&data[..null_pos]) {
+                    if kw == keyword {
+                        continue;
+                    }
+                }
+            }
+        }
+
+        output.extend_from_slice(original_chunk);
+    }
+
+    Ok(output)
 }
 
 /// Embed or update a tEXt chunk into a PNG byte slice.
@@ -221,11 +309,12 @@ pub fn embed_ui_elements(png_bytes: &[u8], elements: &[crate::ui_elements::Detec
     embed_text_chunk(png_bytes, MARKITS_UI_ELEMENTS_KEYWORD, &json_str)
 }
 
-/// Embed both annotations and UI elements into a PNG byte slice.
+/// Embed annotations, UI elements, and optional crop info into a PNG byte slice.
 pub fn embed_metadata(
     png_bytes: &[u8],
     annotations_json: Option<&str>,
     ui_elements: Option<&[crate::ui_elements::DetectedUiElement]>,
+    crop_info: Option<&CropInfo>,
 ) -> Result<Vec<u8>, MetadataError> {
     let mut current = png_bytes.to_vec();
     if let Some(ann) = annotations_json {
@@ -234,23 +323,29 @@ pub fn embed_metadata(
     if let Some(els) = ui_elements {
         current = embed_ui_elements(&current, els)?;
     }
+    if let Some(crop) = crop_info {
+        current = embed_crop_info(&current, crop)?;
+    } else {
+        current = remove_text_chunk(&current, MARKITS_CROP_KEYWORD)?;
+    }
     Ok(current)
 }
 
-/// Load an image from bytes, inspect for embedded MarkIts annotations and UI elements, and return
+/// Load an image from bytes, inspect for embedded MarkIts annotations, UI elements, and crop info, and return
 /// the dimensions, Base64 data URL, and any restored metadata.
 pub fn load_image_with_metadata(bytes: &[u8]) -> Result<LoadedImageResult, MetadataError> {
     let img = image::load_from_memory(bytes)?;
     let width = img.width();
     let height = img.height();
 
-    // Check if it's a PNG and has embedded annotations or UI elements
-    let (annotations_json, ui_elements) = if bytes.len() >= 8 && &bytes[0..8] == PNG_SIGNATURE {
+    // Check if it's a PNG and has embedded annotations, UI elements, or crop info
+    let (annotations_json, ui_elements, crop_info) = if bytes.len() >= 8 && &bytes[0..8] == PNG_SIGNATURE {
         let ann = extract_annotations(bytes).unwrap_or(None);
         let uis = extract_ui_elements(bytes).unwrap_or(None);
-        (ann, uis)
+        let crop = extract_crop_info(bytes).unwrap_or(None);
+        (ann, uis, crop)
     } else {
-        (None, None)
+        (None, None, None)
     };
 
     let b64 = base64::engine::general_purpose::STANDARD.encode(bytes);
@@ -268,6 +363,11 @@ pub fn load_image_with_metadata(bytes: &[u8]) -> Result<LoadedImageResult, Metad
         annotations_json,
         history_id: None,
         ui_elements,
+        base_image_data_url: None,
+        base_width: None,
+        base_height: None,
+        base_ui_elements: None,
+        crop_info,
     })
 }
 
@@ -382,10 +482,41 @@ mod tests {
         assert_eq!(extracted[0].x, 10.0);
 
         // Also test combined embedding and load_image_with_metadata
-        let combined = embed_metadata(&plain_png, Some(r#"{"test":true}"#), Some(&elements)).unwrap();
+        let combined = embed_metadata(&plain_png, Some(r#"{"test":true}"#), Some(&elements), None).unwrap();
         let loaded = load_image_with_metadata(&combined).unwrap();
         assert_eq!(loaded.annotations_json.as_deref(), Some(r#"{"test":true}"#));
         assert!(loaded.ui_elements.is_some());
         assert_eq!(loaded.ui_elements.unwrap().len(), 1);
+        assert!(loaded.crop_info.is_none());
+    }
+
+    #[test]
+    fn test_embed_and_extract_crop_info() {
+        let plain_png = create_test_png();
+        let crop = CropInfo {
+            is_auto_cropped: true,
+            offset_x: 15.0,
+            offset_y: 25.0,
+            base_width: 800,
+            base_height: 600,
+        };
+
+        let embedded = embed_crop_info(&plain_png, &crop).unwrap();
+        let extracted = extract_crop_info(&embedded).unwrap().expect("should find crop info");
+        assert_eq!(extracted, crop);
+
+        // Test inspect_png_header
+        let info = inspect_png_header(&embedded).unwrap();
+        assert_eq!(info.crop_info, Some(crop.clone()));
+
+        // Test combined embed_metadata with crop_info
+        let combined = embed_metadata(&plain_png, None, None, Some(&crop)).unwrap();
+        let loaded = load_image_with_metadata(&combined).unwrap();
+        assert_eq!(loaded.crop_info, Some(crop.clone()));
+
+        // Test removal via embed_metadata with None
+        let removed = embed_metadata(&combined, None, None, None).unwrap();
+        let loaded_removed = load_image_with_metadata(&removed).unwrap();
+        assert!(loaded_removed.crop_info.is_none());
     }
 }

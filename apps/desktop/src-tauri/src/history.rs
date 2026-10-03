@@ -29,6 +29,8 @@ pub struct HistoryItem {
     pub file_path: String,
     pub thumbnail_data_url: String,
     pub has_annotations: bool,
+    #[serde(default)]
+    pub is_cropped: bool,
 }
 
 pub fn get_history_dir() -> PathBuf {
@@ -61,7 +63,7 @@ pub fn save_capture_to_history(
     annotations_json: Option<&str>,
     ui_elements: Option<&[crate::ui_elements::DetectedUiElement]>,
 ) -> Result<HistoryItem, HistoryError> {
-    save_or_update_history_item(None, png_bytes, annotations_json, ui_elements)
+    save_or_update_history_item(None, png_bytes, annotations_json, ui_elements, None, None)
 }
 
 pub fn save_or_update_history_item(
@@ -69,6 +71,8 @@ pub fn save_or_update_history_item(
     png_bytes: &[u8],
     annotations_json: Option<&str>,
     ui_elements: Option<&[crate::ui_elements::DetectedUiElement]>,
+    base_png_bytes: Option<&[u8]>,
+    crop_info: Option<&metadata::CropInfo>,
 ) -> Result<HistoryItem, HistoryError> {
     let history_dir = get_history_dir();
     let now = SystemTime::now()
@@ -86,11 +90,25 @@ pub fn save_or_update_history_item(
         .unwrap_or_else(|| format!("capture_{}_{}_{}", now_millis, std::process::id(), counter));
     let file_path = history_dir.join(format!("{}.png", id));
     let thumb_path = history_dir.join(format!("{}.thumb.png", id));
+    let base_path = history_dir.join(format!("{}.base.png", id));
 
-    // Embed annotations and UI elements if present
-    let final_bytes = metadata::embed_metadata(png_bytes, annotations_json, ui_elements)?;
+    // Embed annotations, UI elements, and crop_info if present
+    let final_bytes = metadata::embed_metadata(png_bytes, annotations_json, ui_elements, crop_info)?;
 
     fs::write(&file_path, &final_bytes)?;
+
+    // Handle base uncropped image persistence
+    let is_cropped = if let Some(base_bytes) = base_png_bytes {
+        fs::write(&base_path, base_bytes)?;
+        true
+    } else if crop_info.is_some() {
+        base_path.exists()
+    } else {
+        if base_path.exists() {
+            let _ = fs::remove_file(&base_path);
+        }
+        false
+    };
 
     let header_info = metadata::inspect_png_header(png_bytes)?;
     let width = header_info.width;
@@ -119,6 +137,7 @@ pub fn save_or_update_history_item(
         file_path: file_path.to_string_lossy().to_string(),
         thumbnail_data_url,
         has_annotations: annotations_json.is_some(),
+        is_cropped,
     })
 }
 
@@ -138,8 +157,8 @@ pub fn list_history() -> Result<Vec<HistoryItem>, HistoryError> {
             None => continue,
         };
 
-        // Skip non-PNG files and thumbnail files
-        if !file_name.ends_with(".png") || file_name.ends_with(".thumb.png") {
+        // Skip non-PNG files, thumbnail files, and base image files
+        if !file_name.ends_with(".png") || file_name.ends_with(".thumb.png") || file_name.ends_with(".base.png") {
             continue;
         }
 
@@ -203,6 +222,8 @@ pub fn list_history() -> Result<Vec<HistoryItem>, HistoryError> {
             String::new()
         };
 
+        let is_cropped = header_info.crop_info.is_some() || history_dir.join(format!("{}.base.png", file_stem)).exists();
+
         items.push(HistoryItem {
             id: file_stem.to_string(),
             timestamp: modified,
@@ -212,6 +233,7 @@ pub fn list_history() -> Result<Vec<HistoryItem>, HistoryError> {
             file_path: path.to_string_lossy().to_string(),
             thumbnail_data_url,
             has_annotations: header_info.has_annotations,
+            is_cropped,
         });
     }
 
@@ -229,6 +251,19 @@ pub fn load_history_item(id: &str) -> Result<LoadedImageResult, HistoryError> {
     let bytes = fs::read(file_path)?;
     let mut res = metadata::load_image_with_metadata(&bytes)?;
     res.history_id = Some(id.to_string());
+
+    // If base image exists, load it too so editor can revert crop
+    let base_path = history_dir.join(format!("{}.base.png", id));
+    if base_path.exists() {
+        if let Ok(base_bytes) = fs::read(&base_path) {
+            if let Ok(base_loaded) = metadata::load_image_with_metadata(&base_bytes) {
+                res.base_image_data_url = Some(base_loaded.image_data_url);
+                res.base_width = Some(base_loaded.width);
+                res.base_height = Some(base_loaded.height);
+                res.base_ui_elements = base_loaded.ui_elements;
+            }
+        }
+    }
     Ok(res)
 }
 
@@ -236,11 +271,15 @@ pub fn delete_history_item(id: &str) -> Result<(), HistoryError> {
     let history_dir = get_history_dir();
     let file_path = history_dir.join(format!("{}.png", id));
     let thumb_path = history_dir.join(format!("{}.thumb.png", id));
+    let base_path = history_dir.join(format!("{}.base.png", id));
     if file_path.exists() {
         fs::remove_file(file_path)?;
     }
     if thumb_path.exists() {
         let _ = fs::remove_file(thumb_path);
+    }
+    if base_path.exists() {
+        let _ = fs::remove_file(base_path);
     }
     Ok(())
 }
@@ -308,5 +347,75 @@ mod tests {
 
         delete_history_item(&item.id).unwrap();
         assert!(load_history_item(&item.id).is_err());
+    }
+
+    #[test]
+    fn test_save_load_crop_history() {
+        let base_dummy = create_dummy_png(); // 16x16
+        let img_cropped: ImageBuffer<Rgba<u8>, Vec<u8>> =
+            ImageBuffer::from_pixel(8, 8, Rgba([255, 100, 0, 255]));
+        let mut buffer = Cursor::new(Vec::new());
+        img_cropped.write_to(&mut buffer, image::ImageFormat::Png).unwrap();
+        let cropped_dummy = buffer.into_inner();
+
+        let crop = metadata::CropInfo {
+            is_auto_cropped: true,
+            offset_x: 4.0,
+            offset_y: 4.0,
+            base_width: 16,
+            base_height: 16,
+        };
+
+        let item = save_or_update_history_item(
+            None,
+            &cropped_dummy,
+            None,
+            None,
+            Some(&base_dummy),
+            Some(&crop),
+        )
+        .unwrap();
+
+        assert_eq!(item.width, 8);
+        assert_eq!(item.height, 8);
+        assert!(item.is_cropped);
+
+        let loaded = load_history_item(&item.id).unwrap();
+        assert_eq!(loaded.width, 8);
+        assert_eq!(loaded.height, 8);
+        assert_eq!(loaded.crop_info, Some(crop));
+        assert!(loaded.base_image_data_url.is_some());
+        assert_eq!(loaded.base_width, Some(16));
+        assert_eq!(loaded.base_height, Some(16));
+
+        let list = list_history().unwrap();
+        let found = list.iter().find(|h| h.id == item.id).expect("should find item in list");
+        assert!(found.is_cropped);
+        assert_eq!(found.width, 8);
+        assert_eq!(found.height, 8);
+
+        // Verify that .base.png is not listed as a separate history item
+        assert!(!list.iter().any(|h| h.id.ends_with(".base")));
+
+        // Test uncrop update: saving without base image removes crop
+        let uncropped_item = save_or_update_history_item(
+            Some(&item.id),
+            &base_dummy,
+            None,
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+        assert_eq!(uncropped_item.width, 16);
+        assert_eq!(uncropped_item.height, 16);
+        assert!(!uncropped_item.is_cropped);
+
+        let loaded_uncropped = load_history_item(&item.id).unwrap();
+        assert_eq!(loaded_uncropped.width, 16);
+        assert!(loaded_uncropped.crop_info.is_none());
+        assert!(loaded_uncropped.base_image_data_url.is_none());
+
+        delete_history_item(&item.id).unwrap();
     }
 }

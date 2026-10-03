@@ -178,6 +178,14 @@ export interface CapturedImage {
   ui_elements?: DetectedUiElement[];
 }
 
+export interface CropInfo {
+  is_auto_cropped: boolean;
+  offset_x: number;
+  offset_y: number;
+  base_width: number;
+  base_height: number;
+}
+
 export interface LoadedImageResult {
   width: number;
   height: number;
@@ -185,4 +193,9 @@ export interface LoadedImageResult {
   annotations_json: string | null;
   history_id?: string | null;
   ui_elements?: DetectedUiElement[] | null;
+  base_image_data_url?: string | null;
+  base_width?: number | null;
+  base_height?: number | null;
+  base_ui_elements?: DetectedUiElement[] | null;
+  crop_info?: CropInfo | null;
 }

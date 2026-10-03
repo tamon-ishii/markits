@@ -78,6 +78,8 @@ export class AnnotationEditor {
   private undoStack: string[] = [];
   private redoStack: string[] = [];
   private initialSceneJson: string = '';
+  private initialBgDataUrl: string = '';
+  private initialIsAutoCropped: boolean = false;
 
   // Dragging state
   private isDraggingHandle: boolean = false;
@@ -235,7 +237,11 @@ export class AnnotationEditor {
     }
     this.selectedIndex = null;
     this.pushState();
-    this.initialSceneJson = this.getSceneJson();
+    if (!isInternalCrop) {
+      this.initialSceneJson = this.getSceneJson();
+      this.initialBgDataUrl = this.bgImgEl.src;
+      this.initialIsAutoCropped = this.isAutoCropped;
+    }
     this.render();
     this.updateInspector();
     this.renderAllSnapTargets();
@@ -308,11 +314,61 @@ export class AnnotationEditor {
   }
 
   public isDirty(): boolean {
-    return this.getSceneJson() !== this.initialSceneJson;
+    return (
+      this.getSceneJson() !== this.initialSceneJson ||
+      this.bgImgEl.src !== this.initialBgDataUrl ||
+      this.isAutoCropped !== this.initialIsAutoCropped
+    );
   }
 
   public markClean(): void {
     this.initialSceneJson = this.getSceneJson();
+    this.initialBgDataUrl = this.bgImgEl.src;
+    this.initialIsAutoCropped = this.isAutoCropped;
+  }
+
+  public getCropState(): {
+    isAutoCropped: boolean;
+    autoCropOffset: { x: number; y: number };
+    baseImageState: BaseImageState | null;
+    hasCropHistory: boolean;
+  } {
+    return {
+      isAutoCropped: this.isAutoCropped,
+      autoCropOffset: { ...this.autoCropOffset },
+      baseImageState: this.baseImageState
+        ? {
+            dataUrl: this.baseImageState.dataUrl,
+            width: this.baseImageState.width,
+            height: this.baseImageState.height,
+            uiElements: this.baseImageState.uiElements.map((el) => ({ ...el })),
+          }
+        : null,
+      hasCropHistory: this.cropHistoryStack.length > 0,
+    };
+  }
+
+  public restoreCropState(
+    baseImageState: BaseImageState | null,
+    cropInfo: { is_auto_cropped: boolean; offset_x: number; offset_y: number; base_width?: number; base_height?: number } | null
+  ): void {
+    if (baseImageState) {
+      this.baseImageState = {
+        dataUrl: baseImageState.dataUrl,
+        width: baseImageState.width,
+        height: baseImageState.height,
+        uiElements: (baseImageState.uiElements ?? []).map((el) => ({ ...el })),
+      };
+    }
+    if (cropInfo) {
+      this.isAutoCropped = cropInfo.is_auto_cropped;
+      this.autoCropOffset = { x: cropInfo.offset_x, y: cropInfo.offset_y };
+      const btnAutoCrop = document.getElementById('btn-autocrop');
+      if (btnAutoCrop) {
+        btnAutoCrop.classList.toggle('active', this.isAutoCropped);
+      }
+    }
+    this.updateRevertCropButton();
   }
 
   public getScene(): Scene {
@@ -2128,6 +2184,7 @@ export class AnnotationEditor {
       true
     );
     this.updateRevertCropButton();
+    window.dispatchEvent(new CustomEvent('markits-crop-changed'));
   }
 
   public toggleAutoCrop(margin: number = 32): boolean {
@@ -2170,6 +2227,7 @@ export class AnnotationEditor {
         true
       );
       this.updateRevertCropButton();
+      window.dispatchEvent(new CustomEvent('markits-crop-changed'));
       return false;
     } else {
       const bounds = this.getAnnotationBounds();
@@ -2236,6 +2294,7 @@ export class AnnotationEditor {
         true
       );
       this.updateRevertCropButton();
+      window.dispatchEvent(new CustomEvent('markits-crop-changed'));
       return true;
     }
   }
@@ -2291,6 +2350,7 @@ export class AnnotationEditor {
         true
       );
       this.updateRevertCropButton();
+      window.dispatchEvent(new CustomEvent('markits-crop-changed'));
     }
   }
 

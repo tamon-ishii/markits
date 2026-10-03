@@ -11,6 +11,7 @@ interface HistoryItem {
   file_path: string;
   thumbnail_data_url: string;
   has_annotations: boolean;
+  is_cropped?: boolean;
 }
 
 // Detect whether running inside Tauri desktop shell
@@ -117,11 +118,29 @@ document.addEventListener('DOMContentLoaded', async () => {
       const bgDataUrl = editor.getBackgroundImageDataUrl();
       const sceneJson = editor.getSceneJson();
       const uiElements = editor.getUiElements();
+      const cropState = editor.getCropState();
+
+      const baseBackgroundDataUrl = (cropState.isAutoCropped || cropState.hasCropHistory) && cropState.baseImageState
+        ? cropState.baseImageState.dataUrl
+        : null;
+
+      const cropInfo = (cropState.isAutoCropped || cropState.hasCropHistory) && cropState.baseImageState
+        ? {
+            is_auto_cropped: cropState.isAutoCropped,
+            offset_x: cropState.autoCropOffset.x,
+            offset_y: cropState.autoCropOffset.y,
+            base_width: cropState.baseImageState.width,
+            base_height: cropState.baseImageState.height,
+          }
+        : null;
+
       const item = await invokeTauri<HistoryItem>('cmd_save_to_history', {
         backgroundDataUrl: bgDataUrl,
         sceneJson,
         existingId: currentHistoryId,
         uiElements,
+        baseBackgroundDataUrl,
+        cropInfo,
       });
       currentHistoryId = item.id;
       editor.markClean();
@@ -265,6 +284,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         card.innerHTML = `
           <div class="history-thumb-wrap">
             <img class="history-thumb" src="${item.thumbnail_data_url}" alt="Capture ${item.id}" />
+            ${item.is_cropped ? '<span class="history-crop-badge" style="position: absolute; top: 6px; left: 6px; background: rgba(16, 185, 129, 0.9); color: white; font-size: 11px; font-weight: 600; padding: 2px 6px; border-radius: 4px; pointer-events: none; backdrop-filter: blur(4px); box-shadow: 0 1px 3px rgba(0,0,0,0.3);">✂️ クロップ</span>' : ''}
             <div class="history-reedit-overlay">
               <span class="reedit-tag">✏️ 再編集する</span>
             </div>
@@ -272,7 +292,7 @@ document.addEventListener('DOMContentLoaded', async () => {
           <div class="history-info">
             <div class="history-meta">
               <span class="history-date">${item.date_formatted}</span>
-              <span class="history-dims">${item.width} × ${item.height}${item.has_annotations ? ' · 注釈あり' : ''}</span>
+              <span class="history-dims">${item.width} × ${item.height}${item.has_annotations ? ' · 注釈あり' : ''}${item.is_cropped ? ' · クロップ' : ''}</span>
             </div>
             <button class="btn-delete-history" title="履歴から削除">🗑️</button>
           </div>
@@ -290,7 +310,24 @@ document.addEventListener('DOMContentLoaded', async () => {
               loaded.annotations_json,
               loaded.ui_elements
             );
+
+            // Restore crop state and base uncropped image if present
+            if (loaded.base_image_data_url && loaded.base_width && loaded.base_height) {
+              editor.restoreCropState(
+                {
+                  dataUrl: loaded.base_image_data_url,
+                  width: loaded.base_width,
+                  height: loaded.base_height,
+                  uiElements: loaded.base_ui_elements ?? [],
+                },
+                loaded.crop_info ?? null
+              );
+            } else if (loaded.crop_info) {
+              editor.restoreCropState(null, loaded.crop_info);
+            }
+
             currentHistoryId = item.id;
+            editor.markClean();
             await switchView('editor');
           } catch (e: any) {
             alert(`キャプチャの読み込みに失敗しました: ${e?.message ?? e}`);
@@ -479,6 +516,10 @@ document.addEventListener('DOMContentLoaded', async () => {
   });
   document.getElementById('btn-revert-crop')?.addEventListener('click', () => {
     editor.revertCrop();
+  });
+
+  window.addEventListener('markits-crop-changed', async () => {
+    await autoSaveToHistory();
   });
 
   // --- Export Resolution Modal Flow ---

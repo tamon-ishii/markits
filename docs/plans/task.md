@@ -1,6 +1,6 @@
 | Step | Task | Status |
 | --- | --- | --- |
-| 1 | Store BaseImageState and preserve crop history in editor.ts | Completed |
-| 2 | Implement toggleable auto-crop (toggleAutoCrop) | Completed |
-| 3 | Implement revert crop and undo support for manual crops | Completed |
-| 4 | Full workspace verification and desktop build | Completed |
+| 1 | Extend Rust history & metadata for crop_info, base image storage, and is_cropped flag | Completed |
+| 2 | Update editor.ts for crop state persistence, restoreCropState, and dirty tracking | Completed |
+| 3 | Update main.ts for auto-saving crop info, restoring on re-edit, and thumbnail badge | Completed |
+| 4 | Verification with unit tests and desktop build | Completed |
