@@ -66,7 +66,10 @@ fn validate_rect(rect: &TargetRect, value: &Value, path: &str) -> Result<()> {
     Ok(())
 }
 
-fn find_target_rect<'a>(name: &str, targets: &'a HashMap<String, TargetRect>) -> Option<&'a TargetRect> {
+fn find_target_rect<'a>(
+    name: &str,
+    targets: &'a HashMap<String, TargetRect>,
+) -> Option<&'a TargetRect> {
     // 1. Exact match
     if let Some(rect) = targets.get(name) {
         return Some(rect);
@@ -99,7 +102,10 @@ fn find_target_rect<'a>(name: &str, targets: &'a HashMap<String, TargetRect>) ->
 
     // 4. Substring / contains match (without role prefix)
     for (k, rect) in targets {
-        if !k.contains(':') && !k.starts_with("ui-") && (k.contains(name) || name.contains(k.as_str())) {
+        if !k.contains(':')
+            && !k.starts_with("ui-")
+            && (k.contains(name) || name.contains(k.as_str()))
+        {
             return Some(rect);
         }
     }
@@ -107,7 +113,11 @@ fn find_target_rect<'a>(name: &str, targets: &'a HashMap<String, TargetRect>) ->
     // 5. Role-prefixed match (e.g. "button:保存")
     for (k, rect) in targets {
         if let Some((_role, el_name)) = k.split_once(':') {
-            if el_name == name || el_name == stripped || el_name.contains(name) || name.contains(el_name) {
+            if el_name == name
+                || el_name == stripped
+                || el_name.contains(name)
+                || name.contains(el_name)
+            {
                 return Some(rect);
             }
         }
@@ -235,9 +245,15 @@ fn instruction_parts(
         )));
     }
     let mut callout = json!({"type":"callout","target":callout_target,"text":text,"style":style,"position":position});
-    if let Some(width) = object.get("max_width") { callout["max_width"] = width.clone(); }
-    if let Some(outline) = object.get("outline") { callout["outline"] = outline.clone(); }
-    if let Some(shadow) = object.get("shadow") { callout["shadow"] = shadow.clone(); }
+    if let Some(width) = object.get("max_width") {
+        callout["max_width"] = width.clone();
+    }
+    if let Some(outline) = object.get("outline") {
+        callout["outline"] = outline.clone();
+    }
+    if let Some(shadow) = object.get("shadow") {
+        callout["shadow"] = shadow.clone();
+    }
     parts.push(callout);
     Ok(parts)
 }
@@ -249,7 +265,18 @@ pub fn prepare(json_str: &str) -> Result<PreparedInput> {
         .as_object_mut()
         .ok_or_else(|| invalid("scene: expected a JSON object"))?;
     for key in object.keys() {
-        if !["canvas", "shadow", "annotations", "hidden_annotations", "targets", "uimap", "ui_map", "ui_elements"].contains(&key.as_str()) {
+        if ![
+            "canvas",
+            "shadow",
+            "annotations",
+            "hidden_annotations",
+            "targets",
+            "uimap",
+            "ui_map",
+            "ui_elements",
+        ]
+        .contains(&key.as_str())
+        {
             return Err(invalid(format!("scene: unknown field '{key}'")));
         }
     }
@@ -281,16 +308,26 @@ pub fn prepare(json_str: &str) -> Result<PreparedInput> {
             let trimmed = el.name.trim();
             if !trimmed.is_empty() {
                 targets.entry(trimmed.to_string()).or_insert(rect);
-                targets.entry(format!("{}:{}", el.role, trimmed)).or_insert(rect);
+                targets
+                    .entry(format!("{}:{}", el.role, trimmed))
+                    .or_insert(rect);
             }
-            targets.entry(format!("{}:{}", el.role, idx + 1)).or_insert(rect);
+            // UIMap listings are one-based so an AI can refer to the visible
+            // number directly: `--target 1` means the first detected element.
+            targets.entry((idx + 1).to_string()).or_insert(rect);
+            targets
+                .entry(format!("{}:{}", el.role, idx + 1))
+                .or_insert(rect);
             targets.entry(format!("ui-{}", idx + 1)).or_insert(rect);
         }
         parsed_uimap = Some(elements);
     }
     if let Some(ref elements) = parsed_uimap {
         if !elements.is_empty() {
-            object.insert("uimap".to_owned(), serde_json::to_value(elements).unwrap_or(Value::Null));
+            object.insert(
+                "uimap".to_owned(),
+                serde_json::to_value(elements).unwrap_or(Value::Null),
+            );
         }
     }
     let raw_annotations = match object.get("annotations") {

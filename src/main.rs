@@ -66,6 +66,9 @@ enum Commands {
         /// Output as raw JSON (recommended for AI / automated pipelines)
         #[arg(long)]
         json: bool,
+        /// Write the JSON UIMap to a file instead of standard output
+        #[arg(long, value_name = "PATH")]
+        output: Option<std::path::PathBuf>,
         /// Filter by UI element role (e.g. button, textbox, menu)
         #[arg(long)]
         filter: Option<String>,
@@ -83,6 +86,9 @@ enum Commands {
         /// Label or description text for the mark
         #[arg(long)]
         text: Option<String>,
+        /// Numeric step shown by badge/step-arrow marks
+        #[arg(long)]
+        step: Option<u32>,
         /// Semantic style: primary, secondary, warning, danger, info, step, pink
         #[arg(long, default_value = "primary")]
         style: String,
@@ -146,7 +152,8 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             if let Some(uimap_path) = uimap {
                 let uimap_str = fs::read_to_string(uimap_path)?;
                 let elements: Vec<markits::UiElement> = serde_json::from_str(&uimap_str)?;
-                json_content = raster::with_image_canvas_and_uimap(&json_content, 0, 0, Some(&elements))?;
+                json_content =
+                    raster::with_image_canvas_and_uimap(&json_content, 0, 0, Some(&elements))?;
             }
             if let (Some(image), Some(output)) = (image, output) {
                 if layout_json || debug {
@@ -165,7 +172,11 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 print!("{}", render_from_json(&json_content)?);
             }
         }
-        Commands::Validate { input, image, uimap } => {
+        Commands::Validate {
+            input,
+            image,
+            uimap,
+        } => {
             let json = read_input(&input)?;
             let mut external_uimap = None;
             if let Some(uimap_path) = uimap {
@@ -176,7 +187,12 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             if let Some(path) = image {
                 let info = raster::inspect_image(&path)?;
                 let effective_uimap = external_uimap.as_deref().or(info.uimap.as_deref());
-                let resolved = raster::with_image_canvas_and_uimap(&json, info.width, info.height, effective_uimap)?;
+                let resolved = raster::with_image_canvas_and_uimap(
+                    &json,
+                    info.width,
+                    info.height,
+                    effective_uimap,
+                )?;
                 let scene = Scene::from_json(&resolved)?;
                 raster::ensure_canvas_matches(&scene, &info)?;
             } else {
@@ -203,28 +219,54 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             }
             println!("{}", serde_json::to_string_pretty(&obj)?);
         }
-        Commands::Uimap { image, json, filter } => {
+        Commands::Uimap {
+            image,
+            json,
+            output,
+            filter,
+        } => {
             let info = raster::inspect_image(&image)?;
             let elements = info.uimap.unwrap_or_default();
             let filtered: Vec<_> = elements
-                .into_iter()
-                .filter(|el| {
+                .iter()
+                .enumerate()
+                .filter(|(_, el)| {
                     if let Some(ref f) = filter {
                         el.role.eq_ignore_ascii_case(f)
                     } else {
                         true
                     }
                 })
+                .map(|(_, el)| el.clone())
                 .collect();
 
-            if json {
+            if let Some(path) = output {
+                fs::write(&path, serde_json::to_string_pretty(&filtered)?)?;
+                println!(
+                    "UIMap written to {} ({} elements)",
+                    path.display(),
+                    filtered.len()
+                );
+            } else if json {
                 println!("{}", serde_json::to_string_pretty(&filtered)?);
             } else if filtered.is_empty() {
                 println!("No UI elements detected in {}", image.display());
             } else {
-                println!("UI Map in {} ({} elements detected):", image.display(), filtered.len());
-                for (i, el) in filtered.iter().enumerate() {
-                    let name_str = if el.name.is_empty() { "(unnamed)" } else { &el.name };
+                println!(
+                    "UI Map in {} ({} elements detected):",
+                    image.display(),
+                    filtered.len()
+                );
+                for (i, el) in elements.iter().enumerate().filter(|(_, el)| {
+                    filter
+                        .as_ref()
+                        .is_none_or(|f| el.role.eq_ignore_ascii_case(f))
+                }) {
+                    let name_str = if el.name.is_empty() {
+                        "(unnamed)"
+                    } else {
+                        &el.name
+                    };
                     println!(
                         "  #{:<2} [{:<8}] \"{}\" at [x: {}, y: {}, w: {}, h: {}]",
                         i + 1,
@@ -243,6 +285,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             target,
             mark,
             text,
+            step,
             style,
             position,
             uimap,
@@ -258,7 +301,8 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             let effective_uimap = external_uimap.as_deref().or(info.uimap.as_deref());
 
             let target_val: serde_json::Value = if target.starts_with('[') {
-                serde_json::from_str(&target).map_err(|e| format!("Invalid target coordinate array: {e}"))?
+                serde_json::from_str(&target)
+                    .map_err(|e| format!("Invalid target coordinate array: {e}"))?
             } else {
                 serde_json::Value::String(target)
             };
@@ -271,9 +315,15 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             if let Some(t) = text {
                 anno_obj.insert("text".to_string(), serde_json::Value::String(t));
             }
+            if let Some(value) = step {
+                anno_obj.insert("step".to_string(), serde_json::json!(value));
+            }
 
             let mut scene_obj = serde_json::Map::new();
-            scene_obj.insert("canvas".to_string(), serde_json::json!({"width": info.width, "height": info.height}));
+            scene_obj.insert(
+                "canvas".to_string(),
+                serde_json::json!({"width": info.width, "height": info.height}),
+            );
             if let Some(elements) = effective_uimap {
                 scene_obj.insert("uimap".to_string(), serde_json::to_value(elements)?);
             }

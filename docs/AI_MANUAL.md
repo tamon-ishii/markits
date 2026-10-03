@@ -5,6 +5,7 @@ For agents that can view images and run local commands. MarkIts draws annotation
 ## Image-to-image workflow
 
 1. View the source image or inspect UI elements using `markits uimap screenshot.png`.
+   Export the map for later commands with `markits uimap screenshot.png --json --output uimap.json`.
 2. Run `markits inspect screenshot.png` for dimensions and embedded UIMap status. Output: `{"width":800,"height":480,"format":"png","has_uimap":true,"uimap_elements_count":5}`.
 3. If annotating by UI element name, you can use:
    - **Quick Command (No JSON file needed)**:
@@ -38,6 +39,7 @@ In `target` fields (or `--target` argument):
 - **Fuzzy / Suffix Match**: `"target": "保存ボタン"` automatically strips common Japanese suffixes like "ボタン" to match element `"保存"`.
 - **Role Prefix**: `"target": "button:保存"` disambiguates buttons from text labels.
 - **Index Reference**: `"target": "ui-1"` or `"target": "button:1"` targets the first UI element or first button.
+- **Numeric Index**: `"target": "1"` targets the first UIMap element. Indices are one-based and match the numbered human-readable UIMap output.
 - **Explicit Rect**: `[x, y, width, height]` is always supported as fallback.
 
 ## Quick Annotate Command (`markits annotate`)
@@ -56,10 +58,21 @@ markits annotate screenshot.png \
 Arguments:
 - `--target <TARGET>`: UI element name (`"保存"`), role prefix (`"button:保存"`), or `x,y,w,h` (`100,50,80,32`).
 - `--mark <TYPE>`: `pin` (default), `rect`, `rounded-rect`, `callout`, `arrow`, `step-arrow`, `badge`, `spotlight`, `bullseye`.
+- `--step <NUMBER>`: Number shown by `badge` or `step-arrow` (for example, `--step 1`).
 - `--text <STRING>`: Optional label text.
 - `--style <STYLE>`: `primary` (default), `secondary`, `warning`, `danger`, `info`, `step`, `pink`.
 - `--position <POS>`: Placement hint: `auto`, `top`, `bottom`, `left`, `right`.
 - `--uimap <PATH>`: Optional external UIMap JSON file (if image doesn't have embedded metadata).
+
+### Natural-language UIMap example
+
+For a request such as “put a 1 mark on the Save button”, inspect the UIMap first, then use the matching numbered element:
+
+```bash
+markits uimap screenshot.png --json --output uimap.json
+markits annotate screenshot.png --uimap uimap.json \
+  --target 1 --mark badge --step 1 --style step --output annotated.png
+```
 
 ## Crop a screenshot
 

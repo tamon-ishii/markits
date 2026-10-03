@@ -18,7 +18,29 @@ AI（LLM）がドキュメント作成時にスクリーンショットを装飾
 
 ## LLM にそのまま頼む
 
-画像を見て CLI を実行できる LLM エージェントなら、MarkIts の JSON を手で書かずに自然文で依頼できます。インストール済みの `markits -h` から `markits manual` を見つけられます。MarkIts 自体は画像からボタンを検出しないため、エージェントが画像上の位置を読み取ります。
+画像を見て CLI を実行できる LLM エージェントなら、MarkIts の JSON を手で書かずに自然文で依頼できます。インストール済みの `markits -h` から `markits manual` を見つけられます。キャプチャ画像に UIMap が埋め込まれている場合は、`markits` 単体で要素一覧を出力し、番号で対象を指定できます。
+
+### UIMapを使って番号を付ける
+
+まずキャプチャ画像から UIMap を JSON として取り出します。
+
+```sh
+markits uimap screenshot.png --json --output uimap.json
+```
+
+AI は `uimap.json` の要素名と座標を確認して、たとえば「保存ボタンを 1 という印をつけて」と判断したら、次のコマンドを実行できます。
+
+```sh
+markits annotate screenshot.png \
+  --uimap uimap.json \
+  --target 1 \
+  --mark badge \
+  --step 1 \
+  --style step \
+  --output annotated.png
+```
+
+`--target 1` は UIMap の1番目の要素を指します。名前で指定する場合は `--target "保存"`、役割を限定する場合は `--target "button:保存"`、座標を直接指定する場合は `--target "[x,y,width,height]"` を使えます。`--target` の番号は1始まりです。
 
 以下の例は同じ[デモ用スクリーンショット](docs/images/llm_demo_input.png)から、実際に MarkIts で生成した PNG です。
 

@@ -207,6 +207,8 @@ fn cli_uimap_and_quick_annotate_flow() {
     let source = dir.join("source.png");
     let uimap_file = dir.join("uimap.json");
     let output = dir.join("annotated.png");
+    let numbered_output = dir.join("numbered.png");
+    let exported_uimap = dir.join("exported-uimap.json");
 
     RgbaImage::from_pixel(400, 300, Rgba([255, 255, 255, 255]))
         .save_with_format(&source, ImageFormat::Png)
@@ -245,6 +247,53 @@ fn cli_uimap_and_quick_annotate_flow() {
     assert!(output.exists());
     let rendered = image::open(&output).unwrap().to_rgba8();
     assert_eq!(rendered.dimensions(), (400, 300));
+
+    // 1b. AI-style numeric targeting and numbered badge output
+    let numbered = Command::new(env!("CARGO_BIN_EXE_markits"))
+        .args([
+            "annotate",
+            source.to_str().unwrap(),
+            "--target",
+            "1",
+            "--mark",
+            "badge",
+            "--step",
+            "1",
+            "--style",
+            "step",
+            "--uimap",
+            uimap_file.to_str().unwrap(),
+            "--output",
+            numbered_output.to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        numbered.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&numbered.stderr)
+    );
+    assert!(numbered_output.exists());
+
+    // 1c. Export the UIMap as a standalone JSON file
+    let exported = Command::new(env!("CARGO_BIN_EXE_markits"))
+        .args([
+            "uimap",
+            output.to_str().unwrap(),
+            "--json",
+            "--output",
+            exported_uimap.to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        exported.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&exported.stderr)
+    );
+    let exported_elements: Vec<serde_json::Value> =
+        serde_json::from_str(&fs::read_to_string(&exported_uimap).unwrap()).unwrap();
+    assert_eq!(exported_elements.len(), 2);
 
     // 2. Validate with --uimap
     let anno_json = dir.join("anno.json");
