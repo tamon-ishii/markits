@@ -26,6 +26,12 @@ pub struct CapturedImage {
     pub raw_png: Vec<u8>,
     #[serde(default)]
     pub ui_elements: Vec<crate::ui_elements::DetectedUiElement>,
+    #[serde(default = "default_scale_factor")]
+    pub scale_factor: f64,
+}
+
+fn default_scale_factor() -> f64 {
+    1.0
 }
 
 impl CapturedImage {
@@ -34,8 +40,13 @@ impl CapturedImage {
     }
 }
 
-/// Convert an RgbaImage to PNG bytes and Base64 data URL.
+/// Convert an RgbaImage to PNG bytes and Base64 data URL with default 1.0 scale factor.
 pub fn rgba_to_captured_image(img: &RgbaImage) -> Result<CapturedImage, CaptureError> {
+    rgba_to_captured_image_with_scale(img, 1.0)
+}
+
+/// Convert an RgbaImage to PNG bytes and Base64 data URL with a specific DPI scale factor.
+pub fn rgba_to_captured_image_with_scale(img: &RgbaImage, scale_factor: f64) -> Result<CapturedImage, CaptureError> {
     let mut cursor = Cursor::new(Vec::new());
     img.write_to(&mut cursor, image::ImageFormat::Png)?;
     let raw_png = cursor.into_inner();
@@ -49,6 +60,7 @@ pub fn rgba_to_captured_image(img: &RgbaImage) -> Result<CapturedImage, CaptureE
         data_url,
         raw_png,
         ui_elements: Vec::new(),
+        scale_factor,
     })
 }
 
@@ -123,7 +135,8 @@ pub fn capture_screen(screen_index: usize) -> Result<CapturedImage, CaptureError
     let image = RgbaImage::from_raw(width, height, raw_bytes)
         .ok_or_else(|| CaptureError::CaptureFailed("Failed to construct image from screen buffer".to_string()))?;
 
-    rgba_to_captured_image(&image)
+    let scale_factor = screen.display_info.scale_factor as f64;
+    rgba_to_captured_image_with_scale(&image, scale_factor)
 }
 
 /// Capture the primary screen (or first detected screen).
@@ -250,7 +263,8 @@ pub fn capture_window_by_query(query: &WindowQuery) -> Result<CapturedImage, Cap
     let crop_h = (matched_window.height as f64 * scale_y).round() as u32;
 
     let cropped = crop_rgba_image(&full_image, crop_x, crop_y, crop_w, crop_h)?;
-    rgba_to_captured_image(&cropped)
+    let scale_factor = screen.display_info.scale_factor as f64;
+    rgba_to_captured_image_with_scale(&cropped, scale_factor)
 }
 
 #[cfg(test)]

@@ -36,6 +36,24 @@ impl From<DetectedUiElement> for crate::UiElement {
     }
 }
 
+/// Scale detected UI elements by a display scale factor and adjust by screen origin.
+pub fn scale_ui_elements(
+    elements: &mut [DetectedUiElement],
+    scale_factor: f64,
+    origin_x: i32,
+    origin_y: i32,
+) {
+    if (scale_factor - 1.0).abs() < 1e-4 && origin_x == 0 && origin_y == 0 {
+        return;
+    }
+    for el in elements.iter_mut() {
+        el.x = ((el.x - origin_x as f64) * scale_factor).round();
+        el.y = ((el.y - origin_y as f64) * scale_factor).round();
+        el.width = (el.width * scale_factor).round();
+        el.height = (el.height * scale_factor).round();
+    }
+}
+
 /// Collect top-level windows across the desktop (super fast, ~5ms).
 pub fn capture_desktop_windows(screen_origin_x: i32, screen_origin_y: i32) -> Vec<DetectedUiElement> {
     let mut elements = Vec::new();
@@ -1167,5 +1185,49 @@ mod tests {
         }];
         let cropped = filter_elements_for_crop(&full_canvas_window, 0.0, 0.0, 1920.0, 1080.0);
         assert!(cropped.is_empty(), "Exact full canvas root window must be excluded");
+    }
+
+    #[test]
+    fn test_scale_ui_elements_for_dpi() {
+        let mut elements = vec![
+            DetectedUiElement {
+                role: "button".into(),
+                name: Some("Submit".into()),
+                window_id: None,
+                pid: None,
+                x: 100.0,
+                y: 50.0,
+                width: 80.0,
+                height: 30.0,
+            }
+        ];
+
+        scale_ui_elements(&mut elements, 2.0, 0, 0);
+        assert_eq!(elements[0].x, 200.0);
+        assert_eq!(elements[0].y, 100.0);
+        assert_eq!(elements[0].width, 160.0);
+        assert_eq!(elements[0].height, 60.0);
+    }
+
+    #[test]
+    fn test_scale_ui_elements_with_origin() {
+        let mut elements = vec![
+            DetectedUiElement {
+                role: "button".into(),
+                name: Some("Submit".into()),
+                window_id: None,
+                pid: None,
+                x: 250.0,
+                y: 150.0,
+                width: 80.0,
+                height: 30.0,
+            }
+        ];
+
+        scale_ui_elements(&mut elements, 1.5, 100, 50);
+        assert_eq!(elements[0].x, 225.0);
+        assert_eq!(elements[0].y, 150.0);
+        assert_eq!(elements[0].width, 120.0);
+        assert_eq!(elements[0].height, 45.0);
     }
 }
