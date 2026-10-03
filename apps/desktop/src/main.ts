@@ -474,6 +474,9 @@ document.addEventListener('DOMContentLoaded', async () => {
   document.getElementById('btn-crop')?.addEventListener('click', () => {
     editor.toggleCropMode();
   });
+  document.getElementById('btn-autocrop')?.addEventListener('click', () => {
+    editor.cropToAnnotations(32);
+  });
 
   // --- Export Resolution Modal Flow ---
   const modalExport = document.getElementById('modal-export') as HTMLElement | null;

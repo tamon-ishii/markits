@@ -601,6 +601,7 @@ export class AnnotationEditor {
       this.editorCropOverlayEl.addEventListener('mousedown', (e) => this.handleCropMouseDown(e));
     }
     document.getElementById('btn-apply-crop')?.addEventListener('click', () => this.applyCrop());
+    document.getElementById('btn-crop-fit-marks')?.addEventListener('click', () => this.fitCropToAnnotations(32));
     document.getElementById('btn-cancel-crop')?.addEventListener('click', () => this.cancelCropMode());
     document.getElementById('btn-reset-crop')?.addEventListener('click', () => this.resetCrop());
 
@@ -2050,6 +2051,76 @@ export class AnnotationEditor {
       JSON.stringify({ canvas: { width: rw, height: rh }, shadow: this.scene.shadow, annotations: shiftedAnnotations }),
       shiftedUiElements
     );
+  }
+
+  public getAnnotationBounds(): { minX: number; minY: number; maxX: number; maxY: number } | null {
+    if (this.scene.annotations.length === 0) return null;
+    let minX = Infinity;
+    let minY = Infinity;
+    let maxX = -Infinity;
+    let maxY = -Infinity;
+
+    for (const anno of this.scene.annotations) {
+      if (anno.type === 'arrow') {
+        if (anno.start) {
+          minX = Math.min(minX, anno.start[0]);
+          minY = Math.min(minY, anno.start[1]);
+          maxX = Math.max(maxX, anno.start[0]);
+          maxY = Math.max(maxY, anno.start[1]);
+        }
+        if (anno.end) {
+          minX = Math.min(minX, anno.end[0]);
+          minY = Math.min(minY, anno.end[1]);
+          maxX = Math.max(maxX, anno.end[0]);
+          maxY = Math.max(maxY, anno.end[1]);
+        }
+      } else if (anno.type === 'bezier-arrow') {
+        for (const pt of [anno.start, anno.control, anno.end]) {
+          if (pt) {
+            minX = Math.min(minX, pt[0]);
+            minY = Math.min(minY, pt[1]);
+            maxX = Math.max(maxX, pt[0]);
+            maxY = Math.max(maxY, pt[1]);
+          }
+        }
+      } else if ('target' in anno && Array.isArray(anno.target)) {
+        const [x, y, w, h] = anno.target;
+        minX = Math.min(minX, x);
+        minY = Math.min(minY, y);
+        maxX = Math.max(maxX, x + w);
+        maxY = Math.max(maxY, y + h);
+      }
+    }
+
+    if (!isFinite(minX) || !isFinite(minY) || !isFinite(maxX) || !isFinite(maxY)) {
+      return null;
+    }
+    return { minX, minY, maxX, maxY };
+  }
+
+  public fitCropToAnnotations(margin: number = 32): boolean {
+    const bounds = this.getAnnotationBounds();
+    if (!bounds) return false;
+
+    const cw = this.scene.canvas.width;
+    const ch = this.scene.canvas.height;
+    const rx = Math.max(0, Math.floor(bounds.minX - margin));
+    const ry = Math.max(0, Math.floor(bounds.minY - margin));
+    const rw = Math.min(cw - rx, Math.ceil(bounds.maxX + margin) - rx);
+    const rh = Math.min(ch - ry, Math.ceil(bounds.maxY + margin) - ry);
+
+    if (rw <= 0 || rh <= 0) return false;
+
+    this.cropRect = { x: rx, y: ry, width: rw, height: rh };
+    this.updateCropOverlayUi();
+    return true;
+  }
+
+  public cropToAnnotations(margin: number = 32): void {
+    if (!this.hasImage()) return;
+    if (this.fitCropToAnnotations(margin)) {
+      this.applyCrop();
+    }
   }
 
   private handleCropMouseDown(e: MouseEvent): void {
