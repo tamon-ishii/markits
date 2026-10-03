@@ -1,4 +1,8 @@
 | Step | Task | Status |
 | --- | --- | --- |
-| 1 | Increase window hide animation delay before screen capture in commands.rs | Completed |
-| 2 | Verify desktop tests and build | Completed |
+| 1 | Explore project context and evaluate proposed improvements | Completed |
+| 2 | Ask clarifying questions and confirm prioritization with user | Completed |
+| 3 | Propose architecture and approaches for chosen capabilities | Completed |
+| 4 | Present design sections and get user approval | Completed |
+| 5 | Write design doc and commit | In Progress |
+| 6 | Transition to implementation plan | Pending |
