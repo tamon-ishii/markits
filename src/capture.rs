@@ -74,10 +74,46 @@ pub fn crop_rgba_image(img: &RgbaImage, x: u32, y: u32, width: u32, height: u32)
     Ok(cropped)
 }
 
-/// Capture the primary screen (or first detected screen).
-pub fn capture_primary_screen() -> Result<CapturedImage, CaptureError> {
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ScreenInfo {
+    pub index: usize,
+    pub name: String,
+    pub x: i32,
+    pub y: i32,
+    pub width: u32,
+    pub height: u32,
+    pub scale_factor: f64,
+    pub is_primary: bool,
+}
+
+/// Enumerate all connected screens.
+pub fn list_screens() -> Result<Vec<ScreenInfo>, CaptureError> {
     let screens = Screen::all().map_err(|e| CaptureError::CaptureFailed(e.to_string()))?;
-    let screen = screens.first().ok_or(CaptureError::NoScreensFound)?;
+    if screens.is_empty() {
+        return Err(CaptureError::NoScreensFound);
+    }
+    let mut list = Vec::new();
+    for (i, s) in screens.iter().enumerate() {
+        list.push(ScreenInfo {
+            index: i,
+            name: format!("Screen {}", i),
+            x: s.display_info.x,
+            y: s.display_info.y,
+            width: s.display_info.width,
+            height: s.display_info.height,
+            scale_factor: s.display_info.scale_factor as f64,
+            is_primary: s.display_info.is_primary,
+        });
+    }
+    Ok(list)
+}
+
+/// Capture a specific screen by index.
+pub fn capture_screen(screen_index: usize) -> Result<CapturedImage, CaptureError> {
+    let screens = Screen::all().map_err(|e| CaptureError::CaptureFailed(e.to_string()))?;
+    let screen = screens.get(screen_index).ok_or_else(|| {
+        CaptureError::CaptureFailed(format!("Screen index {} not found (total screens: {})", screen_index, screens.len()))
+    })?;
 
     let raw_sc = screen.capture().map_err(|e| CaptureError::CaptureFailed(e.to_string()))?;
     let width = raw_sc.width();
@@ -88,6 +124,16 @@ pub fn capture_primary_screen() -> Result<CapturedImage, CaptureError> {
         .ok_or_else(|| CaptureError::CaptureFailed("Failed to construct image from screen buffer".to_string()))?;
 
     rgba_to_captured_image(&image)
+}
+
+/// Capture the primary screen (or first detected screen).
+pub fn capture_primary_screen() -> Result<CapturedImage, CaptureError> {
+    let screens = Screen::all().map_err(|e| CaptureError::CaptureFailed(e.to_string()))?;
+    let primary_idx = screens
+        .iter()
+        .position(|s| s.display_info.is_primary)
+        .unwrap_or(0);
+    capture_screen(primary_idx)
 }
 
 /// Capture a specific rectangular region of the primary screen.
@@ -146,5 +192,21 @@ mod tests {
         assert_eq!(captured.height, 4);
         assert!(captured.data_url.starts_with("data:image/png;base64,"));
         assert!(!captured.raw_png.is_empty());
+    }
+
+    #[test]
+    fn test_list_screens_returns_valid_info() {
+        let screens = list_screens().expect("list_screens should succeed");
+        assert!(!screens.is_empty(), "should detect at least one screen");
+        let primary = screens.iter().find(|s| s.is_primary).or(screens.first()).unwrap();
+        assert!(primary.width > 0);
+        assert!(primary.height > 0);
+        assert!(primary.scale_factor > 0.0);
+    }
+
+    #[test]
+    fn test_capture_screen_out_of_bounds_fails() {
+        let result = capture_screen(9999);
+        assert!(result.is_err());
     }
 }
