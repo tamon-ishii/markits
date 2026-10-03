@@ -31,7 +31,8 @@ pub async fn cmd_capture_screen(app: tauri::AppHandle) -> Result<capture::Captur
     }
 
     let res = tauri::async_runtime::spawn_blocking(|| -> Result<capture::CapturedImage, capture::CaptureError> {
-        std::thread::sleep(std::time::Duration::from_millis(150));
+        // Wait for OS window manager fade-out/unmap animation to completely finish (e.g. GNOME Mutter ~250ms)
+        std::thread::sleep(std::time::Duration::from_millis(350));
         let mut captured = capture::capture_primary_screen()?;
         let elements = crate::ui_elements::capture_desktop_windows(0, 0);
         captured.ui_elements = elements;
@@ -56,7 +57,8 @@ pub async fn cmd_start_capture(app: tauri::AppHandle) -> Result<(), String> {
     }
 
     let res = tauri::async_runtime::spawn_blocking(|| -> Result<capture::CapturedImage, capture::CaptureError> {
-        std::thread::sleep(std::time::Duration::from_millis(150));
+        // Wait for OS window manager fade-out/unmap animation to completely finish (e.g. GNOME Mutter ~250ms)
+        std::thread::sleep(std::time::Duration::from_millis(350));
         let mut cap = capture::capture_primary_screen()?;
         let elements = crate::ui_elements::capture_desktop_windows(0, 0);
         cap.ui_elements = elements;
