@@ -122,6 +122,50 @@ enum Commands {
         #[arg(long)]
         output: std::path::PathBuf,
     },
+    /// Capture screenshot of the primary screen or region with optional UI detection and annotation
+    Capture {
+        /// Destination PNG file
+        output: Option<std::path::PathBuf>,
+        /// Destination PNG file (alternative to positional argument)
+        #[arg(short, long = "output")]
+        output_flag: Option<std::path::PathBuf>,
+        /// Detect desktop UI elements and embed UIMap metadata in the output PNG
+        #[arg(long)]
+        detect_ui: bool,
+        /// Reuse UIMap from an existing PNG image (extracted from metadata) or a JSON file
+        #[arg(long)]
+        uimap: Option<std::path::PathBuf>,
+        /// Subregion left coordinate (pixels)
+        #[arg(long)]
+        x: Option<u32>,
+        /// Subregion top coordinate (pixels)
+        #[arg(long)]
+        y: Option<u32>,
+        /// Subregion width (pixels)
+        #[arg(long)]
+        width: Option<u32>,
+        /// Subregion height (pixels)
+        #[arg(long)]
+        height: Option<u32>,
+        /// Target UI element name (e.g. "保存", "保存ボタン") or rectangle [x, y, w, h] to annotate immediately
+        #[arg(long)]
+        target: Option<String>,
+        /// Annotation mark type: rect, rounded-rect, pin, circle, callout, spotlight, bullseye, arrow
+        #[arg(long, default_value = "rect")]
+        mark: String,
+        /// Label or description text for the mark
+        #[arg(long)]
+        text: Option<String>,
+        /// Numeric step shown by badge/step-arrow marks
+        #[arg(long)]
+        step: Option<u32>,
+        /// Semantic style: primary, secondary, warning, danger, info, step, pink
+        #[arg(long, default_value = "primary")]
+        style: String,
+        /// Position hint: auto, top, bottom, left, right
+        #[arg(long, default_value = "auto")]
+        position: String,
+    },
     /// Print the bundled Markdown manual for AI/LLM use
     Manual,
 }
@@ -150,8 +194,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         } => {
             let mut json_content = read_input(&input)?;
             if let Some(uimap_path) = uimap {
-                let uimap_str = fs::read_to_string(uimap_path)?;
-                let elements: Vec<markits::UiElement> = serde_json::from_str(&uimap_str)?;
+                let elements = raster::load_uimap_from_path(&uimap_path)?;
                 json_content =
                     raster::with_image_canvas_and_uimap(&json_content, 0, 0, Some(&elements))?;
             }
@@ -180,8 +223,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             let json = read_input(&input)?;
             let mut external_uimap = None;
             if let Some(uimap_path) = uimap {
-                let uimap_str = fs::read_to_string(uimap_path)?;
-                let elements: Vec<markits::UiElement> = serde_json::from_str(&uimap_str)?;
+                let elements = raster::load_uimap_from_path(&uimap_path)?;
                 external_uimap = Some(elements);
             }
             if let Some(path) = image {
@@ -294,8 +336,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             let info = raster::inspect_image(&image)?;
             let mut external_uimap = None;
             if let Some(uimap_path) = uimap {
-                let uimap_content = fs::read_to_string(&uimap_path)?;
-                let parsed: Vec<markits::UiElement> = serde_json::from_str(&uimap_content)?;
+                let parsed = raster::load_uimap_from_path(&uimap_path)?;
                 external_uimap = Some(parsed);
             }
             let effective_uimap = external_uimap.as_deref().or(info.uimap.as_deref());
@@ -335,6 +376,110 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             let scene_json = serde_json::to_string(&serde_json::Value::Object(scene_obj))?;
             raster::render_png(&scene_json, &image, &output)?;
             println!("Successfully annotated and saved to {}", output.display());
+        }
+        Commands::Capture {
+            output,
+            output_flag,
+            detect_ui,
+            uimap,
+            x,
+            y,
+            width,
+            height,
+            target,
+            mark,
+            text,
+            step,
+            style,
+            position,
+        } => {
+            let output_path = output
+                .or(output_flag)
+                .ok_or("Output destination path (.png) is required")?;
+
+            let captured = if let (Some(x), Some(y), Some(w), Some(h)) = (x, y, width, height) {
+                markits::capture::capture_region(x, y, w, h)?
+            } else {
+                markits::capture::capture_primary_screen()?
+            };
+
+            let mut effective_uimap = None;
+            if let Some(uimap_path) = uimap {
+                effective_uimap = Some(raster::load_uimap_from_path(&uimap_path)?);
+            } else if detect_ui {
+                let bounds = if let (Some(x), Some(y), Some(w), Some(h)) = (x, y, width, height) {
+                    Some((x as f64, y as f64, w as f64, h as f64))
+                } else {
+                    None
+                };
+                let detected = markits::ui_elements::capture_desktop_detailed_elements(0, 0, bounds);
+                let elements: Vec<markits::UiElement> = if let (Some(x), Some(y), Some(w), Some(h)) = (x, y, width, height) {
+                    markits::ui_elements::filter_elements_for_crop(&detected, x as f64, y as f64, w as f64, h as f64)
+                        .into_iter()
+                        .map(Into::into)
+                        .collect()
+                } else {
+                    detected.into_iter().map(Into::into).collect()
+                };
+                effective_uimap = Some(elements);
+            }
+
+            // Embed UIMap in PNG bytes if we have one
+            let png_bytes = if let Some(ref elements) = effective_uimap {
+                raster::embed_png_uimap(&captured.raw_png, elements)?
+            } else {
+                captured.raw_png
+            };
+
+            if let Some(target_str) = target {
+                let target_val: serde_json::Value = if target_str.starts_with('[') {
+                    serde_json::from_str(&target_str)
+                        .map_err(|e| format!("Invalid target coordinate array: {e}"))?
+                } else {
+                    serde_json::Value::String(target_str)
+                };
+
+                let mut anno_obj = serde_json::Map::new();
+                anno_obj.insert("type".to_string(), serde_json::Value::String(mark));
+                anno_obj.insert("target".to_string(), target_val);
+                anno_obj.insert("style".to_string(), serde_json::Value::String(style));
+                anno_obj.insert("position".to_string(), serde_json::Value::String(position));
+                if let Some(t) = text {
+                    anno_obj.insert("text".to_string(), serde_json::Value::String(t));
+                }
+                if let Some(value) = step {
+                    anno_obj.insert("step".to_string(), serde_json::json!(value));
+                }
+
+                let mut scene_obj = serde_json::Map::new();
+                scene_obj.insert(
+                    "canvas".to_string(),
+                    serde_json::json!({"width": captured.width, "height": captured.height}),
+                );
+                if let Some(elements) = effective_uimap {
+                    scene_obj.insert("uimap".to_string(), serde_json::to_value(elements)?);
+                }
+                scene_obj.insert(
+                    "annotations".to_string(),
+                    serde_json::Value::Array(vec![serde_json::Value::Object(anno_obj)]),
+                );
+
+                let scene_json = serde_json::to_string(&serde_json::Value::Object(scene_obj))?;
+                let rendered_bytes = raster::render_composed_png_bytes(&scene_json, &png_bytes)?;
+                fs::write(&output_path, rendered_bytes)?;
+                println!("Screenshot captured, annotated, and saved to {}", output_path.display());
+            } else {
+                fs::write(&output_path, png_bytes)?;
+                if let Some(ref elements) = effective_uimap {
+                    println!(
+                        "Screenshot captured with {} UI elements to {}",
+                        elements.len(),
+                        output_path.display()
+                    );
+                } else {
+                    println!("Screenshot captured and saved to {}", output_path.display());
+                }
+            }
         }
         Commands::Crop {
             image,
