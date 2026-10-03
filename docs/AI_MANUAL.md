@@ -18,6 +18,9 @@ markits capture screenshot2.png --uimap screenshot.png
 
 # Capture and immediately box a button in one shot
 markits capture annotated.png --uimap screenshot.png --target "保存ボタン" --mark rect
+
+# Capture, mark target, and auto-crop tightly around it in one shot
+markits capture button_crop.png --target "保存ボタン" --mark rect --crop --crop-margin 16
 ```
 
 ### 2. Inspecting and Reusing UIMap
@@ -79,6 +82,8 @@ Arguments:
 - `--text <STRING>`: Optional label text.
 - `--style <STYLE>`: `primary` (default), `secondary`, `warning`, `danger`, `info`, `step`, `pink`.
 - `--uimap <PATH>`: Optional external UIMap file: accepts either a `.json` file or an existing `.png` image with embedded metadata.
+- `--crop`: Auto-crop output image to the bounding box enclosing all annotations.
+- `--crop-margin <PIXELS>`: Margin around annotation bounding box when cropping (default: `32`).
 
 ### Natural-language UIMap example
 
@@ -90,7 +95,13 @@ markits annotate screenshot.png --uimap uimap.json \
   --target 1 --mark badge --step 1 --style step --output annotated.png
 ```
 
-## Crop a screenshot
+## Auto-Crop to Annotations (`--crop`)
+
+Add `--crop` and `--crop-margin <PX>` (default `32`) to `markits annotate`, `markits render`, or `markits capture`.
+- MarkIts calculates the union bounding box of all annotations and expands it by `crop-margin` pixels (clamped to the image canvas).
+- Embedded UIMap metadata is preserved: elements inside the crop are shifted relative to `(0, 0)` of the cropped image.
+
+## Manual Crop
 
 Run `markits crop screenshot.png --x 120 --y 80 --width 640 --height 400 --output cropped.png` to keep exactly that rectangle. The output is a 640 × 400 PNG; pixels outside the rectangle are removed rather than covered. Coordinates are measured from the source image's top-left corner. The rectangle must be nonempty and entirely inside the source image.
 
