@@ -2818,9 +2818,13 @@ dependencies = [
  "clap",
  "image 0.25.10",
  "resvg",
+ "screenshots",
  "serde",
  "serde_json",
  "thiserror 2.0.21",
+ "x11-dl",
+ "xa11y",
+ "zbus",
 ]
 
 [[package]]

@@ -3,6 +3,7 @@
 //! A lightweight Rust library that generates high-quality SVG annotation overlays
 //! from semantic JSON instructions.
 
+pub mod capture;
 pub mod error;
 pub mod layout;
 pub mod model;
@@ -10,6 +11,7 @@ pub mod raster;
 pub mod renderer;
 pub mod semantic;
 pub mod theme;
+pub mod ui_elements;
 
 pub use error::{MarkitsError, Result};
 pub use layout::{LayoutEngine, ResolvedAnnotation, ResolvedScene};
