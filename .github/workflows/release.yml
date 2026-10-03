@@ -6,7 +6,10 @@ permissions:
 on:
   push:
     tags:
-      - 'v[0-9]+.*'
+      # GitHub Actions uses glob patterns here, not regular expressions.
+      # Keep the prefix broad so semantic-version tags such as v0.6.0 trigger
+      # the release build.
+      - 'v*'
   workflow_dispatch:
     inputs:
       tag:
