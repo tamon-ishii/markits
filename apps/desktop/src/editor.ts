@@ -708,6 +708,164 @@ export class AnnotationEditor {
     return { x, y, snapped: false };
   }
 
+  /**
+   * Find a UI element that matches the dragged rectangle [x1, y1] to [x2, y2].
+   * If a UI element has strong overlap or the drag covers it, snaps to that UI element.
+   */
+  private findSnapElementForRect(
+    x1: number,
+    y1: number,
+    x2: number,
+    y2: number,
+    threshold: number = 24
+  ): {
+    snapped: boolean;
+    element?: DetectedUiElement;
+    rect?: [number, number, number, number];
+  } {
+    if (!this.isSnapEnabled || this.uiElements.length === 0 || this.isCropMode) {
+      return { snapped: false };
+    }
+
+    const minX = Math.min(x1, x2);
+    const minY = Math.min(y1, y2);
+    const maxX = Math.max(x1, x2);
+    const maxY = Math.max(y1, y2);
+    const w = maxX - minX;
+    const h = maxY - minY;
+
+    const cw = this.scene.canvas.width;
+    const ch = this.scene.canvas.height;
+
+    let bestElement: DetectedUiElement | null = null;
+    let bestScore = Infinity;
+
+    for (const el of this.uiElements) {
+      // Exclude giant full-screen / background containers if canvas is reasonably sized
+      const isGiant =
+        el.width > 800 ||
+        el.height > 600 ||
+        (cw > 200 && ch > 200 && el.width * el.height > cw * ch * 0.45);
+      if (isGiant) continue;
+
+      // 1. Proximity of corners:
+      // Does (x1, y1) start near top-left of el AND (x2, y2) near bottom-right?
+      const d1 = Math.hypot(minX - el.x, minY - el.y);
+      const d2 = Math.hypot(maxX - (el.x + el.width), maxY - (el.y + el.height));
+      if (d1 < threshold * 1.5 && d2 < threshold * 1.5) {
+        const score = (d1 + d2) / 2;
+        if (score < bestScore) {
+          bestScore = score;
+          bestElement = el;
+          continue;
+        }
+      }
+
+      // 2. Overlap / Bounding box coverage:
+      const interLeft = Math.max(minX, el.x);
+      const interTop = Math.max(minY, el.y);
+      const interRight = Math.min(maxX, el.x + el.width);
+      const interBottom = Math.min(maxY, el.y + el.height);
+
+      if (interRight > interLeft && interBottom > interTop) {
+        const interArea = (interRight - interLeft) * (interBottom - interTop);
+        const elArea = el.width * el.height;
+        const dragArea = Math.max(1, w * h);
+
+        const overlapRatio = interArea / elArea;
+        const coverageRatio = interArea / dragArea;
+
+        // If drag rectangle mostly covers the element (e.g. dragged over a button)
+        if (overlapRatio > 0.45 && coverageRatio > 0.35) {
+          const score = (1 - overlapRatio) * 100 + Math.sqrt(elArea) * 0.1;
+          if (score < bestScore) {
+            bestScore = score;
+            bestElement = el;
+          }
+        }
+      }
+    }
+
+    if (bestElement) {
+      return {
+        snapped: true,
+        element: bestElement,
+        rect: [
+          Math.round(bestElement.x),
+          Math.round(bestElement.y),
+          Math.round(bestElement.width),
+          Math.round(bestElement.height),
+        ],
+      };
+    }
+
+    return { snapped: false };
+  }
+
+  /**
+   * Find a UI element to snap to when moving an existing rectangular annotation.
+   */
+  private findSnapElementForMove(
+    x: number,
+    y: number,
+    w: number,
+    h: number,
+    threshold: number = 24
+  ): {
+    snapped: boolean;
+    element?: DetectedUiElement;
+    rect?: [number, number, number, number];
+  } {
+    if (!this.isSnapEnabled || this.uiElements.length === 0 || this.isCropMode) {
+      return { snapped: false };
+    }
+
+    const centerX = x + w / 2;
+    const centerY = y + h / 2;
+    const cw = this.scene.canvas.width;
+    const ch = this.scene.canvas.height;
+
+    let bestElement: DetectedUiElement | null = null;
+    let bestDist = threshold;
+
+    for (const el of this.uiElements) {
+      const isGiant =
+        el.width > 800 ||
+        el.height > 600 ||
+        (cw > 200 && ch > 200 && el.width * el.height > cw * ch * 0.45);
+      if (isGiant) continue;
+
+      const elCenterX = el.x + el.width / 2;
+      const elCenterY = el.y + el.height / 2;
+
+      // Check top-left alignment
+      const distTopLeft = Math.hypot(x - el.x, y - el.y);
+      // Check center alignment
+      const distCenter = Math.hypot(centerX - elCenterX, centerY - elCenterY);
+
+      const minDist = Math.min(distTopLeft, distCenter);
+      if (minDist < bestDist) {
+        bestDist = minDist;
+        bestElement = el;
+      }
+    }
+
+    if (bestElement) {
+      return {
+        snapped: true,
+        element: bestElement,
+        rect: [
+          Math.round(bestElement.x),
+          Math.round(bestElement.y),
+          Math.round(bestElement.width),
+          Math.round(bestElement.height),
+        ],
+      };
+    }
+
+    return { snapped: false };
+  }
+
   public clearSnapGuide(): void {
     this.renderAllSnapTargets();
   }
@@ -949,10 +1107,22 @@ export class AnnotationEditor {
           target[0] = Math.max(0, Math.round(initTarget[0] + dx));
           target[1] = Math.max(0, Math.round(initTarget[1] + dy));
         } else if (this.activeHandle.type === 'se') {
-          const newW = snap.snapped ? Math.max(20, curX - initTarget[0]) : Math.max(20, Math.round(initTarget[2] + dx));
-          const newH = snap.snapped ? Math.max(20, curY - initTarget[1]) : Math.max(20, Math.round(initTarget[3] + dy));
-          target[2] = Math.round(newW);
-          target[3] = Math.round(newH);
+          let rectSnapped = false;
+          if (!e.altKey && this.isSnapEnabled) {
+            const rectSnap = this.findSnapElementForRect(initTarget[0], initTarget[1], coords.x, coords.y);
+            if (rectSnap.snapped && rectSnap.element && rectSnap.rect) {
+              target[2] = Math.max(20, rectSnap.rect[0] + rectSnap.rect[2] - initTarget[0]);
+              target[3] = Math.max(20, rectSnap.rect[1] + rectSnap.rect[3] - initTarget[1]);
+              this.renderAllSnapTargets({ x: rectSnap.rect[0], y: rectSnap.rect[1], snapped: true, element: rectSnap.element });
+              rectSnapped = true;
+            }
+          }
+          if (!rectSnapped) {
+            const newW = snap.snapped ? Math.max(20, curX - initTarget[0]) : Math.max(20, Math.round(initTarget[2] + dx));
+            const newH = snap.snapped ? Math.max(20, curY - initTarget[1]) : Math.max(20, Math.round(initTarget[3] + dy));
+            target[2] = Math.round(newW);
+            target[3] = Math.round(newH);
+          }
         }
       }
 
@@ -962,19 +1132,20 @@ export class AnnotationEditor {
 
     // Dragging to move the entire annotation
     if (this.isDraggingAnnotation && this.selectedIndex !== null && this.initialAnnotationState) {
-      this.renderAllSnapTargets();
       const anno = this.scene.annotations[this.selectedIndex];
       const initial = this.initialAnnotationState;
       const dx = coords.x - this.dragStartX;
       const dy = coords.y - this.dragStartY;
 
       if (anno.type === 'arrow') {
+        this.renderAllSnapTargets();
         const arrow = anno as ArrowAnnotation;
         if (initial.start && initial.end) {
           arrow.start = [Math.round(initial.start[0] + dx), Math.round(initial.start[1] + dy)];
           arrow.end = [Math.round(initial.end[0] + dx), Math.round(initial.end[1] + dy)];
         }
       } else if (anno.type === 'bezier-arrow') {
+        this.renderAllSnapTargets();
         const b = anno as BezierArrowAnnotation;
         b.start = [Math.round(initial.start[0] + dx), Math.round(initial.start[1] + dy)];
         b.control = [Math.round(initial.control[0] + dx), Math.round(initial.control[1] + dy)];
@@ -982,8 +1153,29 @@ export class AnnotationEditor {
       } else if ('target' in anno && Array.isArray((anno as any).target)) {
         const target = (anno as any).target;
         const initTarget = initial.target;
-        target[0] = Math.max(0, Math.round(initTarget[0] + dx));
-        target[1] = Math.max(0, Math.round(initTarget[1] + dy));
+        const rawX = Math.max(0, Math.round(initTarget[0] + dx));
+        const rawY = Math.max(0, Math.round(initTarget[1] + dy));
+
+        if (!e.altKey && this.isSnapEnabled) {
+          const snap = this.findSnapElementForMove(rawX, rawY, initTarget[2], initTarget[3]);
+          if (snap.snapped && snap.element && snap.rect) {
+            target[0] = snap.rect[0];
+            target[1] = snap.rect[1];
+            if (anno.type === 'rect' || anno.type === 'rounded-rect' || anno.type === 'spotlight') {
+              target[2] = snap.rect[2];
+              target[3] = snap.rect[3];
+            }
+            this.renderAllSnapTargets({ x: snap.rect[0], y: snap.rect[1], snapped: true, element: snap.element });
+          } else {
+            target[0] = rawX;
+            target[1] = rawY;
+            this.renderAllSnapTargets();
+          }
+        } else {
+          target[0] = rawX;
+          target[1] = rawY;
+          this.renderAllSnapTargets();
+        }
       }
 
       this.scheduleRender();
@@ -993,7 +1185,6 @@ export class AnnotationEditor {
     // Dragging to create a new mark
     if (this.isCreating && this.selectedIndex !== null) {
       const snap = e.altKey ? { x: coords.x, y: coords.y, snapped: false } : this.findSnapPoint(coords.x, coords.y);
-      this.renderAllSnapTargets(snap);
 
       const endX = snap.x;
       const endY = snap.y;
@@ -1002,10 +1193,12 @@ export class AnnotationEditor {
       const height = endY - this.createStartY;
 
       if (anno.type === 'arrow') {
+        this.renderAllSnapTargets(snap);
         const arrow = anno as ArrowAnnotation;
         arrow.start = [Math.round(this.createStartX), Math.round(this.createStartY)];
         arrow.end = [Math.round(endX), Math.round(endY)];
       } else if (anno.type === 'bezier-arrow') {
+        this.renderAllSnapTargets(snap);
         const b = anno as BezierArrowAnnotation;
         b.start = [Math.round(this.createStartX), Math.round(this.createStartY)];
         b.end = [Math.round(endX), Math.round(endY)];
@@ -1014,11 +1207,24 @@ export class AnnotationEditor {
           Math.round((this.createStartY + endY) / 2 - 50),
         ];
       } else if ('target' in anno) {
-        const x = Math.min(this.createStartX, endX);
-        const y = Math.min(this.createStartY, endY);
-        const w = Math.max(20, Math.abs(width));
-        const h = Math.max(20, Math.abs(height));
-        (anno as any).target = [Math.round(x), Math.round(y), Math.round(w), Math.round(h)];
+        let rectSnapped = false;
+        if (!e.altKey && this.isSnapEnabled) {
+          const rectSnap = this.findSnapElementForRect(this.createStartX, this.createStartY, coords.x, coords.y);
+          if (rectSnap.snapped && rectSnap.element && rectSnap.rect) {
+            (anno as any).target = [rectSnap.rect[0], rectSnap.rect[1], rectSnap.rect[2], rectSnap.rect[3]];
+            this.renderAllSnapTargets({ x: rectSnap.rect[0], y: rectSnap.rect[1], snapped: true, element: rectSnap.element });
+            rectSnapped = true;
+          }
+        }
+
+        if (!rectSnapped) {
+          this.renderAllSnapTargets(snap);
+          const x = Math.min(this.createStartX, endX);
+          const y = Math.min(this.createStartY, endY);
+          const w = Math.max(20, Math.abs(width));
+          const h = Math.max(20, Math.abs(height));
+          (anno as any).target = [Math.round(x), Math.round(y), Math.round(w), Math.round(h)];
+        }
       }
 
       this.scheduleRender();
