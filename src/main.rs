@@ -349,15 +349,24 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             };
 
             let mut anno_obj = serde_json::Map::new();
-            anno_obj.insert("type".to_string(), serde_json::Value::String(mark));
+            anno_obj.insert("type".to_string(), serde_json::Value::String(mark.clone()));
             anno_obj.insert("target".to_string(), target_val);
             anno_obj.insert("style".to_string(), serde_json::Value::String(style));
-            anno_obj.insert("position".to_string(), serde_json::Value::String(position));
+            if matches!(
+                mark.as_str(),
+                "arrow" | "label" | "callout" | "badge" | "pin" | "step-arrow" | "bezier-arrow"
+            ) {
+                anno_obj.insert("position".to_string(), serde_json::Value::String(position));
+            }
             if let Some(t) = text {
-                anno_obj.insert("text".to_string(), serde_json::Value::String(t));
+                if !matches!(mark.as_str(), "rect" | "rounded-rect" | "spotlight" | "circle") {
+                    anno_obj.insert("text".to_string(), serde_json::Value::String(t));
+                }
             }
             if let Some(value) = step {
-                anno_obj.insert("step".to_string(), serde_json::json!(value));
+                if matches!(mark.as_str(), "badge" | "step-arrow") {
+                    anno_obj.insert("step".to_string(), serde_json::json!(value));
+                }
             }
 
             let mut scene_obj = serde_json::Map::new();
@@ -440,15 +449,24 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 };
 
                 let mut anno_obj = serde_json::Map::new();
-                anno_obj.insert("type".to_string(), serde_json::Value::String(mark));
+                anno_obj.insert("type".to_string(), serde_json::Value::String(mark.clone()));
                 anno_obj.insert("target".to_string(), target_val);
                 anno_obj.insert("style".to_string(), serde_json::Value::String(style));
-                anno_obj.insert("position".to_string(), serde_json::Value::String(position));
+                if matches!(
+                    mark.as_str(),
+                    "arrow" | "label" | "callout" | "badge" | "pin" | "step-arrow" | "bezier-arrow"
+                ) {
+                    anno_obj.insert("position".to_string(), serde_json::Value::String(position));
+                }
                 if let Some(t) = text {
-                    anno_obj.insert("text".to_string(), serde_json::Value::String(t));
+                    if !matches!(mark.as_str(), "rect" | "rounded-rect" | "spotlight" | "circle") {
+                        anno_obj.insert("text".to_string(), serde_json::Value::String(t));
+                    }
                 }
                 if let Some(value) = step {
-                    anno_obj.insert("step".to_string(), serde_json::json!(value));
+                    if matches!(mark.as_str(), "badge" | "step-arrow") {
+                        anno_obj.insert("step".to_string(), serde_json::json!(value));
+                    }
                 }
 
                 let mut scene_obj = serde_json::Map::new();
