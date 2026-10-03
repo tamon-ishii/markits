@@ -48,7 +48,7 @@ pub fn capture_desktop_windows(screen_origin_x: i32, screen_origin_y: i32) -> Ve
             elements.push(DetectedUiElement {
                 role: "window".to_string(),
                 name: Some(win.title),
-                window_id: None,
+                window_id: Some(win.id.to_string()),
                 pid: win.pid,
                 x: (win.x - screen_origin_x) as f64,
                 y: (win.y - screen_origin_y) as f64,
@@ -89,6 +89,63 @@ pub fn capture_desktop_windows(screen_origin_x: i32, screen_origin_y: i32) -> Ve
     }
 
     elements
+}
+
+/// List all system windows across platforms.
+#[cfg(target_os = "linux")]
+pub fn list_system_windows() -> Vec<crate::capture::WindowInfo> {
+    linux_x11::list_x11_windows(0)
+        .into_iter()
+        .map(|w| crate::capture::WindowInfo {
+            id: w.id,
+            pid: w.pid,
+            title: w.title,
+            app_name: w.app_name,
+            x: w.x,
+            y: w.y,
+            width: w.width,
+            height: w.height,
+            is_minimized: false,
+        })
+        .collect()
+}
+
+#[cfg(not(target_os = "linux"))]
+pub fn list_system_windows() -> Vec<crate::capture::WindowInfo> {
+    let mut list = Vec::new();
+    if let Ok(apps) = App::list() {
+        for app in apps {
+            let app_name = app.name.clone().unwrap_or_default();
+            let app_pid = app.pid;
+            if let Ok(windows) = app.windows() {
+                for (idx, w) in windows.into_iter().enumerate() {
+                    let title = w.name.clone().unwrap_or_default();
+                    let (x, y, width, height) = if let Some(b) = w.bounds {
+                        (b.x as i32, b.y as i32, b.width as u32, b.height as u32)
+                    } else {
+                        (0, 0, 0, 0)
+                    };
+                    let win_id = w
+                        .stable_id
+                        .as_deref()
+                        .and_then(|id| id.parse::<u32>().ok())
+                        .unwrap_or(idx as u32);
+                    list.push(crate::capture::WindowInfo {
+                        id: win_id,
+                        pid: w.pid.or(app_pid),
+                        title,
+                        app_name: app_name.clone(),
+                        x,
+                        y,
+                        width,
+                        height,
+                        is_minimized: false,
+                    });
+                }
+            }
+        }
+    }
+    list
 }
 
 /// Collect detailed controls (buttons, inputs, tabs, links, etc.) via AT-SPI / Accessibility.
@@ -532,7 +589,9 @@ mod linux_x11 {
     use x11_dl::xlib;
 
     pub struct WindowBounds {
+        pub id: u32,
         pub title: String,
+        pub app_name: String,
         pub pid: Option<u32>,
         pub x: i32,
         pub y: i32,
@@ -617,6 +676,7 @@ mod linux_x11 {
         let frame_extents_atom = atom("_NET_FRAME_EXTENTS");
         let gtk_frame_extents_atom = atom("_GTK_FRAME_EXTENTS");
         let motif_hints_atom = atom("_MOTIF_WM_HINTS");
+        let class_atom = atom("WM_CLASS");
 
         let mut windows = Vec::new();
         let list_data = get_property(root, stacking_atom).or_else(|| get_property(root, client_list_atom));
@@ -698,7 +758,7 @@ mod linux_x11 {
                         if ext_bytes.len() >= chunk_size * 4 {
                             let mut vals = [0u32; 4];
                             for (i, val) in vals.iter_mut().enumerate() {
-                                let mut buf = [0u8; std::mem::size_of::<c_ulong>()];
+                                 let mut buf = [0u8; std::mem::size_of::<c_ulong>()];
                                 buf.copy_from_slice(&ext_bytes[i * chunk_size..(i + 1) * chunk_size]);
                                 *val = c_ulong::from_ne_bytes(buf) as u32;
                             }
@@ -751,8 +811,22 @@ mod linux_x11 {
                     }
                 };
 
+                // Get app name from WM_CLASS
+                let app_name = if let Some((8, class_bytes)) = get_property(win, class_atom) {
+                    let parts: Vec<&[u8]> = class_bytes.split(|&b| b == 0).filter(|s| !s.is_empty()).collect();
+                    if let Some(last) = parts.last() {
+                        String::from_utf8_lossy(last).trim_end_matches('\0').to_string()
+                    } else {
+                        String::new()
+                    }
+                } else {
+                    String::new()
+                };
+
                 let display_title = if !title.is_empty() {
                     title
+                } else if !app_name.is_empty() {
+                    app_name.clone()
                 } else if attr.width >= 50 && attr.height >= 50 {
                     "Window".to_string()
                 } else {
@@ -761,7 +835,9 @@ mod linux_x11 {
 
                 if !display_title.is_empty() {
                     windows.push(WindowBounds {
+                        id: win as u32,
                         title: display_title,
+                        app_name,
                         pid: window_pid,
                         x: win_x,
                         y: win_y,

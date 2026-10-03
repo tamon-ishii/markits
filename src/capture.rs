@@ -157,6 +157,102 @@ pub fn capture_region(x: u32, y: u32, width: u32, height: u32) -> Result<Capture
     rgba_to_captured_image(&cropped)
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct WindowInfo {
+    pub id: u32,
+    pub pid: Option<u32>,
+    pub title: String,
+    pub app_name: String,
+    pub x: i32,
+    pub y: i32,
+    pub width: u32,
+    pub height: u32,
+    pub is_minimized: bool,
+}
+
+impl WindowInfo {
+    pub fn matches_query(&self, query: &WindowQuery) -> bool {
+        match query {
+            WindowQuery::TitleOrId(q) => {
+                if let Ok(id) = q.trim().parse::<u32>() {
+                    if self.id == id {
+                        return true;
+                    }
+                }
+                let q_lower = q.to_lowercase();
+                self.title.to_lowercase().contains(&q_lower) || self.app_name.to_lowercase().contains(&q_lower)
+            }
+            WindowQuery::Pid(target_pid) => self.pid == Some(*target_pid),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub enum WindowQuery {
+    TitleOrId(String),
+    Pid(u32),
+}
+
+/// Enumerate all capturable windows.
+pub fn list_windows() -> Result<Vec<WindowInfo>, CaptureError> {
+    Ok(crate::ui_elements::list_system_windows())
+}
+
+/// Capture a window by query (title substring, numeric window id, or PID).
+pub fn capture_window_by_query(query: &WindowQuery) -> Result<CapturedImage, CaptureError> {
+    let windows = list_windows()?;
+    let matched_window = windows
+        .into_iter()
+        .find(|w| w.matches_query(query))
+        .ok_or_else(|| CaptureError::CaptureFailed(format!("No window matching query: {:?}", query)))?;
+
+    let screens = Screen::all().map_err(|e| CaptureError::CaptureFailed(e.to_string()))?;
+    let screen = screens
+        .iter()
+        .find(|s| {
+            let sx = s.display_info.x;
+            let sy = s.display_info.y;
+            let sw = s.display_info.width as i32;
+            let sh = s.display_info.height as i32;
+            matched_window.x >= sx
+                && matched_window.x < sx + sw
+                && matched_window.y >= sy
+                && matched_window.y < sy + sh
+        })
+        .or_else(|| screens.first())
+        .ok_or(CaptureError::NoScreensFound)?;
+
+    let raw_sc = screen.capture().map_err(|e| CaptureError::CaptureFailed(e.to_string()))?;
+    let sc_w = raw_sc.width();
+    let sc_h = raw_sc.height();
+    let raw_bytes = raw_sc.into_raw();
+
+    let full_image = RgbaImage::from_raw(sc_w, sc_h, raw_bytes)
+        .ok_or_else(|| CaptureError::CaptureFailed("Failed to construct image from screen buffer".to_string()))?;
+
+    let rel_x = (matched_window.x - screen.display_info.x).max(0);
+    let rel_y = (matched_window.y - screen.display_info.y).max(0);
+
+    let scale_x = if screen.display_info.width > 0 {
+        full_image.width() as f64 / screen.display_info.width as f64
+    } else {
+        1.0
+    };
+    let scale_y = if screen.display_info.height > 0 {
+        full_image.height() as f64 / screen.display_info.height as f64
+    } else {
+        1.0
+    };
+
+    let crop_x = (rel_x as f64 * scale_x).round() as u32;
+    let crop_y = (rel_y as f64 * scale_y).round() as u32;
+    let crop_w = (matched_window.width as f64 * scale_x).round() as u32;
+    let crop_h = (matched_window.height as f64 * scale_y).round() as u32;
+
+    let cropped = crop_rgba_image(&full_image, crop_x, crop_y, crop_w, crop_h)?;
+    rgba_to_captured_image(&cropped)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -208,5 +304,32 @@ mod tests {
     fn test_capture_screen_out_of_bounds_fails() {
         let result = capture_screen(9999);
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_window_query_matching() {
+        let win = WindowInfo {
+            id: 101,
+            pid: Some(1234),
+            title: "Mozilla Firefox - MarkIts".to_string(),
+            app_name: "Firefox".to_string(),
+            x: 100,
+            y: 100,
+            width: 800,
+            height: 600,
+            is_minimized: false,
+        };
+
+        assert!(win.matches_query(&WindowQuery::TitleOrId("firefox".to_string())));
+        assert!(win.matches_query(&WindowQuery::TitleOrId("101".to_string())));
+        assert!(!win.matches_query(&WindowQuery::TitleOrId("Chrome".to_string())));
+        assert!(win.matches_query(&WindowQuery::Pid(1234)));
+        assert!(!win.matches_query(&WindowQuery::Pid(9999)));
+    }
+
+    #[test]
+    fn test_list_windows_returns_result() {
+        let res = list_windows();
+        assert!(res.is_ok());
     }
 }
