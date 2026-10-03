@@ -1,0 +1,97 @@
+name: Release markits-desktop
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag to build (for example, v0.6.0)
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Prepare GitHub Release
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.release-tag.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: release-tag
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          INPUT_TAG: ${{ inputs.tag }}
+        run: |
+          TAG="$INPUT_TAG"
+          if [ -z "$TAG" ]; then TAG="${GITHUB_REF#refs/tags/}"; fi
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          if ! gh release view "$TAG" >/dev/null 2>&1; then
+            gh release create "$TAG" --title "MarkIts $TAG" --generate-notes || true
+          fi
+
+  build:
+    name: markits-desktop (${{ matrix.platform }})
+    needs: release
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-22.04
+            platform: linux
+            args: ''
+            rust_targets: ''
+          - os: macos-latest
+            platform: macos-universal
+            args: --target universal-apple-darwin
+            rust_targets: aarch64-apple-darwin x86_64-apple-darwin
+          - os: windows-latest
+            platform: windows
+            args: ''
+            rust_targets: ''
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Linux system dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential curl wget file libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: apps/desktop/package-lock.json
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.rust_targets }}
+      - name: Install frontend dependencies
+        run: npm ci
+        working-directory: apps/desktop
+      - name: Build markits-desktop and upload to GitHub Release
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          projectPath: apps/desktop
+          tagName: ${{ needs.release.outputs.tag }}
+          releaseName: MarkIts ${{ needs.release.outputs.tag }}
+          releaseBody: MarkIts Desktop GUI Release ${{ needs.release.outputs.tag }}
+          releaseDraft: false
+          prerelease: false
+          args: ${{ matrix.args }}
+      - name: Upload desktop bundle to Actions
+        uses: actions/upload-artifact@v4
+        with:
+          name: markits-desktop-${{ matrix.platform }}
+          path: |
+            target/release/bundle/**
+            target/*/release/bundle/**
+            apps/desktop/src-tauri/target/**/bundle/**
+          if-no-files-found: ignore

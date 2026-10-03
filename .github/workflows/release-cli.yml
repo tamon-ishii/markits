@@ -1,0 +1,86 @@
+name: Release markits CLI
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag to build (for example, v0.6.0)
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Prepare GitHub Release
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.release-tag.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: release-tag
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          INPUT_TAG: ${{ inputs.tag }}
+        run: |
+          TAG="$INPUT_TAG"
+          if [ -z "$TAG" ]; then TAG="${GITHUB_REF#refs/tags/}"; fi
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          if ! gh release view "$TAG" >/dev/null 2>&1; then
+            gh release create "$TAG" --title "MarkIts $TAG" --generate-notes || true
+          fi
+
+  build:
+    name: markits (${{ matrix.target }})
+    needs: release
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-musl
+            use-cross: true
+          - os: ubuntu-latest
+            target: aarch64-unknown-linux-gnu
+            use-cross: true
+          - os: macos-latest
+            target: aarch64-apple-darwin
+          - os: macos-latest
+            target: x86_64-apple-darwin
+          - os: macos-latest
+            target: universal-apple-darwin
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install cross
+        if: matrix.use-cross
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cross
+      - name: Build markits and upload to GitHub Release
+        uses: taiki-e/upload-rust-binary-action@v1
+        with:
+          bin: markits
+          target: ${{ matrix.target }}
+          archive: $bin-$tag-$target
+          checksum: sha256
+          include: LICENSE,README.md
+          token: ${{ secrets.GITHUB_TOKEN }}
+          ref: refs/tags/${{ needs.release.outputs.tag }}
+      - name: Upload CLI archive to Actions
+        uses: actions/upload-artifact@v4
+        with:
+          name: markits-cli-${{ matrix.target }}
+          path: |
+            markits-*.tar.gz
+            markits-*.zip
+            target/${{ matrix.target }}/release/markits*
+          if-no-files-found: ignore
