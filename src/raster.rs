@@ -1,6 +1,6 @@
 use base64::Engine;
 use image::{DynamicImage, ImageFormat};
-use crate::{Scene, Theme, UiElement, renderer, render_from_json};
+use crate::{Scene, Theme, UiElement, renderer};
 use resvg::{tiny_skia, usvg};
 use std::error::Error;
 use std::fs;
@@ -353,7 +353,86 @@ static SYSTEM_FONT_DATA: std::sync::LazyLock<(std::sync::Arc<usvg::fontdb::Datab
         (std::sync::Arc::new(fonts), font_family)
     });
 
+pub fn compute_annotation_bounds(elements: &[renderer::LayoutElement]) -> Option<[f64; 4]> {
+    if elements.is_empty() {
+        return None;
+    }
+    let mut min_x = f64::INFINITY;
+    let mut min_y = f64::INFINITY;
+    let mut max_x = f64::NEG_INFINITY;
+    let mut max_y = f64::NEG_INFINITY;
+
+    for el in elements {
+        let [x, y, w, h] = el.bounds;
+        min_x = min_x.min(x);
+        min_y = min_y.min(y);
+        max_x = max_x.max(x + w);
+        max_y = max_y.max(y + h);
+
+        if let Some(ref path) = el.arrow_path {
+            for &[px, py] in path {
+                min_x = min_x.min(px);
+                min_y = min_y.min(py);
+                max_x = max_x.max(px);
+                max_y = max_y.max(py);
+            }
+        }
+    }
+
+    if min_x > max_x || min_y > max_y || !min_x.is_finite() || !min_y.is_finite() {
+        None
+    } else {
+        Some([min_x, min_y, max_x - min_x, max_y - min_y])
+    }
+}
+
+pub fn filter_ui_elements_for_crop(
+    elements: &[UiElement],
+    crop_x: f64,
+    crop_y: f64,
+    crop_w: f64,
+    crop_h: f64,
+) -> Vec<UiElement> {
+    elements
+        .iter()
+        .filter_map(|el| {
+            if el.x.abs() < 1.0 && el.y.abs() < 1.0 && (el.role == "menuitem" || el.name.is_empty()) {
+                return None;
+            }
+            let new_x = el.x - crop_x;
+            let new_y = el.y - crop_y;
+            if new_x < -4.0 || new_y < -4.0 || new_x >= crop_w || new_y >= crop_h {
+                return None;
+            }
+            let inter_w = (new_x + el.width).min(crop_w) - new_x.max(0.0);
+            let inter_h = (new_y + el.height).min(crop_h) - new_y.max(0.0);
+            if inter_w < 6.0 || inter_h < 6.0 {
+                return None;
+            }
+            if inter_w >= crop_w - 4.0 && inter_h >= crop_h - 4.0 {
+                return None;
+            }
+            Some(UiElement {
+                role: el.role.clone(),
+                name: el.name.clone(),
+                x: new_x.max(0.0),
+                y: new_y.max(0.0),
+                width: inter_w,
+                height: inter_h,
+            })
+        })
+        .collect()
+}
+
 pub fn render_composed_png_bytes(json: &str, image_bytes: &[u8]) -> Result<Vec<u8>, Box<dyn Error>> {
+    render_composed_png_bytes_with_crop(json, image_bytes, None)
+}
+
+pub fn render_composed_png_bytes_with_crop(
+    json: &str,
+    image_bytes: &[u8],
+    crop_margin: Option<u32>,
+) -> Result<Vec<u8>, Box<dyn Error>> {
     let format = image::guess_format(image_bytes)?;
     let format_str = match format {
         ImageFormat::Png => "png",
@@ -379,7 +458,8 @@ pub fn render_composed_png_bytes(json: &str, image_bytes: &[u8]) -> Result<Vec<u
     };
     ensure_canvas_matches(&scene, &info)?;
 
-    let svg = render_from_json(&resolved)?;
+    let render_res = renderer::render_with_layout_from_json(&resolved)?;
+    let svg = &render_res.svg;
     let root_end = svg.find('>').ok_or("Generated SVG has no root element")? + 1;
     let encoded = base64::engine::general_purpose::STANDARD.encode(image_bytes);
     let mut composed = String::with_capacity(svg.len() + encoded.len() + 200);
@@ -410,10 +490,38 @@ pub fn render_composed_png_bytes(json: &str, image_bytes: &[u8]) -> Result<Vec<u
         tiny_skia::Transform::identity(),
         &mut pixmap.as_mut(),
     );
-    let rendered_png = pixmap.encode_png()?;
+    let mut rendered_png = pixmap.encode_png()?;
+
+    let mut crop_rect = None;
+    if let Some(margin) = crop_margin {
+        if let Some([bx, by, bw, bh]) = compute_annotation_bounds(&render_res.elements) {
+            let m = margin as f64;
+            let crop_x = (bx - m).floor().max(0.0) as u32;
+            let crop_y = (by - m).floor().max(0.0) as u32;
+            let crop_right = (bx + bw + m).ceil().min(width as f64) as u32;
+            let crop_bottom = (by + bh + m).ceil().min(height as f64) as u32;
+            let crop_w = crop_right.saturating_sub(crop_x).max(1);
+            let crop_h = crop_bottom.saturating_sub(crop_y).max(1);
+
+            let rendered_image = image::load_from_memory_with_format(&rendered_png, ImageFormat::Png)?;
+            let cropped = crop_image(&rendered_image, crop_x, crop_y, crop_w, crop_h)?;
+            let mut out = std::io::Cursor::new(Vec::new());
+            cropped.write_to(&mut out, ImageFormat::Png)?;
+            rendered_png = out.into_inner();
+            crop_rect = Some((crop_x, crop_y, crop_w, crop_h));
+        }
+    }
+
     if let Some(ref elements) = scene.uimap {
         if !elements.is_empty() {
-            return embed_png_uimap(&rendered_png, elements);
+            let final_elements = if let Some((cx, cy, cw, ch)) = crop_rect {
+                filter_ui_elements_for_crop(elements, cx as f64, cy as f64, cw as f64, ch as f64)
+            } else {
+                elements.clone()
+            };
+            if !final_elements.is_empty() {
+                return embed_png_uimap(&rendered_png, &final_elements);
+            }
         }
     }
     Ok(rendered_png)
@@ -502,5 +610,44 @@ mod tests {
         let extracted_new = extract_png_uimap(&overwritten).expect("extract new failed");
         assert_eq!(extracted_new.len(), 1);
         assert_eq!(extracted_new[0].name, "キャンセル");
+    }
+
+    #[test]
+    fn test_compute_annotation_bounds() {
+        use crate::renderer::LayoutElement;
+        let elements = vec![
+            LayoutElement {
+                id: "el1".to_string(),
+                bounds: [100.0, 50.0, 80.0, 30.0],
+                arrow_path: None,
+            },
+            LayoutElement {
+                id: "el2".to_string(),
+                bounds: [120.0, 100.0, 40.0, 20.0],
+                arrow_path: Some(vec![[150.0, 150.0]]),
+            },
+        ];
+        let bounds = compute_annotation_bounds(&elements).expect("Should compute bounds");
+        assert_eq!(bounds, [100.0, 50.0, 80.0, 100.0]); // min_x: 100, min_y: 50, max_x: 180, max_y: 150 -> w: 80, h: 100
+    }
+
+    #[test]
+    fn test_render_composed_png_bytes_with_crop() {
+        let base_img = image::RgbaImage::new(400, 300);
+        let mut png_bytes = Vec::new();
+        base_img.write_to(&mut std::io::Cursor::new(&mut png_bytes), ImageFormat::Png).unwrap();
+
+        let json = r#"{
+            "annotations": [
+                {
+                    "type": "rect",
+                    "target": [100, 100, 80, 40]
+                }
+            ]
+        }"#;
+
+        let cropped_bytes = render_composed_png_bytes_with_crop(json, &png_bytes, Some(10)).unwrap();
+        let cropped_img = image::load_from_memory(&cropped_bytes).unwrap();
+        assert_eq!(cropped_img.dimensions(), (100, 60));
     }
 }
