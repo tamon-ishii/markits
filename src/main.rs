@@ -39,6 +39,12 @@ enum Commands {
         /// Path for the annotated PNG (requires --image)
         #[arg(long, requires = "image")]
         output: Option<std::path::PathBuf>,
+        /// Crop output image to bounding box of annotations
+        #[arg(long, requires = "image")]
+        crop: bool,
+        /// Margin in pixels around annotation bounding box when cropping
+        #[arg(long, default_value = "32")]
+        crop_margin: u32,
     },
     /// Validate semantic annotation JSON without rendering
     Validate {
@@ -98,6 +104,12 @@ enum Commands {
         /// Optional path to an external UIMap JSON file
         #[arg(long)]
         uimap: Option<std::path::PathBuf>,
+        /// Crop output image to bounding box of annotations
+        #[arg(long)]
+        crop: bool,
+        /// Margin in pixels around annotation bounding box when cropping
+        #[arg(long, default_value = "32")]
+        crop_margin: u32,
         /// Output image path (.png)
         #[arg(short, long)]
         output: std::path::PathBuf,
@@ -165,6 +177,12 @@ enum Commands {
         /// Position hint: auto, top, bottom, left, right
         #[arg(long, default_value = "auto")]
         position: String,
+        /// Crop output image to bounding box of annotations
+        #[arg(long)]
+        crop: bool,
+        /// Margin in pixels around annotation bounding box when cropping
+        #[arg(long, default_value = "32")]
+        crop_margin: u32,
     },
     /// Print the bundled Markdown manual for AI/LLM use
     Manual,
@@ -191,6 +209,8 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             uimap,
             image,
             output,
+            crop,
+            crop_margin,
         } => {
             let mut json_content = read_input(&input)?;
             if let Some(uimap_path) = uimap {
@@ -202,7 +222,13 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 if layout_json || debug {
                     return Err("--image cannot be combined with --layout-json or --debug".into());
                 }
-                raster::render_png(&json_content, &image, &output)?;
+                let (image_bytes, _info) = raster::read_image(&image)?;
+                let png_bytes = raster::render_composed_png_bytes_with_crop(
+                    &json_content,
+                    &image_bytes,
+                    if crop { Some(crop_margin) } else { None },
+                )?;
+                fs::write(output, png_bytes)?;
             } else if layout_json {
                 let mut result = render_with_layout_from_json(&json_content)?;
                 if debug {
@@ -331,6 +357,8 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             style,
             position,
             uimap,
+            crop,
+            crop_margin,
             output,
         } => {
             let info = raster::inspect_image(&image)?;
@@ -383,7 +411,13 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             );
 
             let scene_json = serde_json::to_string(&serde_json::Value::Object(scene_obj))?;
-            raster::render_png(&scene_json, &image, &output)?;
+            let (image_bytes, _info) = raster::read_image(&image)?;
+            let png_bytes = raster::render_composed_png_bytes_with_crop(
+                &scene_json,
+                &image_bytes,
+                if crop { Some(crop_margin) } else { None },
+            )?;
+            fs::write(&output, png_bytes)?;
             println!("Successfully annotated and saved to {}", output.display());
         }
         Commands::Capture {
@@ -401,6 +435,8 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             step,
             style,
             position,
+            crop,
+            crop_margin,
         } => {
             let output_path = output
                 .or(output_flag)
@@ -483,10 +519,17 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 );
 
                 let scene_json = serde_json::to_string(&serde_json::Value::Object(scene_obj))?;
-                let rendered_bytes = raster::render_composed_png_bytes(&scene_json, &png_bytes)?;
+                let rendered_bytes = raster::render_composed_png_bytes_with_crop(
+                    &scene_json,
+                    &png_bytes,
+                    if crop { Some(crop_margin) } else { None },
+                )?;
                 fs::write(&output_path, rendered_bytes)?;
                 println!("Screenshot captured, annotated, and saved to {}", output_path.display());
             } else {
+                if crop {
+                    eprintln!("Warning: --crop was specified, but no --target annotation was provided. Outputting full image.");
+                }
                 fs::write(&output_path, png_bytes)?;
                 if let Some(ref elements) = effective_uimap {
                     println!(

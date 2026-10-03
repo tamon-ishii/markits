@@ -207,7 +207,7 @@ pub struct ImageInfo {
     pub uimap: Option<Vec<UiElement>>,
 }
 
-fn read_image(path: &Path) -> Result<(Vec<u8>, ImageInfo), Box<dyn Error>> {
+pub fn read_image(path: &Path) -> Result<(Vec<u8>, ImageInfo), Box<dyn Error>> {
     let bytes = fs::read(path)?;
     let (format, name) = match image::guess_format(&bytes)? {
         ImageFormat::Png => (ImageFormat::Png, "png"),
