@@ -37,7 +37,7 @@ enum Commands {
         #[arg(long, requires = "output")]
         image: Option<std::path::PathBuf>,
         /// Path for the annotated PNG (requires --image)
-        #[arg(long, requires = "image")]
+        #[arg(short, long, requires = "image")]
         output: Option<std::path::PathBuf>,
         /// Crop output image to bounding box of annotations
         #[arg(long, requires = "image")]
