@@ -2,18 +2,35 @@
 
 For agents that can view images and run local commands. MarkIts draws annotations at pixel coordinates or resolved UI targets supplied in JSON or extracted from image UIMap metadata.
 
-## Image-to-image workflow
+## Screen Capture & Image Workflow
 
-1. View the source image or inspect UI elements using `markits uimap screenshot.png`.
-   Export the map for later commands with `markits uimap screenshot.png --json --output uimap.json`.
-2. Run `markits inspect screenshot.png` for dimensions and embedded UIMap status. Output: `{"width":800,"height":480,"format":"png","has_uimap":true,"uimap_elements_count":5}`.
-3. If annotating by UI element name, you can use:
-   - **Quick Command (No JSON file needed)**:
-     `markits annotate screenshot.png -o annotated.png --target "保存" --mark pin --text "ここをクリック"`
-   - **Custom Scene JSON**: write JSON using `"target": "保存"` or `[x, y, w, h]`.
-4. Run `markits validate annotations.json --image screenshot.png` (supports `--uimap elements.json` if using external UI map).
-5. Run `markits render annotations.json --image screenshot.png --output annotated.png`.
-6. Output PNG automatically preserves UIMap metadata so further annotations can be chained.
+### 1. Standalone Screen Capture (`markits capture`)
+Take screenshots directly using MarkIts CLI:
+```bash
+# Fast capture without UI detection (<20ms)
+markits capture screenshot.png
+
+# Capture with desktop UI detection (embeds UIMap into PNG metadata)
+markits capture screenshot.png --detect-ui
+
+# REUSE UIMAP: Fast capture carrying over UIMap metadata from a previous screenshot
+markits capture screenshot2.png --uimap screenshot.png
+
+# Capture and immediately box a button in one shot
+markits capture annotated.png --uimap screenshot.png --target "保存ボタン" --mark rect
+```
+
+### 2. Inspecting and Reusing UIMap
+1. View source image or inspect UI elements using `markits uimap screenshot.png`.
+   Export map as JSON if needed: `markits uimap screenshot.png --json --output uimap.json`.
+2. Run `markits inspect screenshot.png` for dimensions and embedded UIMap status.
+   Output: `{"width":800,"height":480,"format":"png","has_uimap":true,"uimap_elements_count":5}`.
+3. Annotating by UI element name:
+   - **Quick Command**:
+     `markits annotate screenshot.png -o annotated.png --target "保存ボタン" --mark rect`
+     (or `--mark pin --text "ここをクリック"`)
+   - **External / Carried-Over UIMap**: `--uimap` accepts both `.json` files AND `.png` images containing embedded metadata!
+4. Output PNG automatically preserves UIMap metadata so further annotations can be chained.
 
 PNG and JPEG input are supported; image output is PNG. `--output` must end in `.png`. If JSON explicitly includes `canvas`, its dimensions must match the image. Errors go to stderr with a nonzero exit status.
 
@@ -61,8 +78,7 @@ Arguments:
 - `--step <NUMBER>`: Number shown by `badge` or `step-arrow` (for example, `--step 1`).
 - `--text <STRING>`: Optional label text.
 - `--style <STYLE>`: `primary` (default), `secondary`, `warning`, `danger`, `info`, `step`, `pink`.
-- `--position <POS>`: Placement hint: `auto`, `top`, `bottom`, `left`, `right`.
-- `--uimap <PATH>`: Optional external UIMap JSON file (if image doesn't have embedded metadata).
+- `--uimap <PATH>`: Optional external UIMap file: accepts either a `.json` file or an existing `.png` image with embedded metadata.
 
 ### Natural-language UIMap example
 

@@ -16,70 +16,133 @@ AI（LLM）がドキュメント作成時にスクリーンショットを装飾
 
 ---
 
-## LLM にそのまま頼む
+## 🎯 UI要素指定・スクショ撮影・AI自律連携 (UI Targeting & Screen Capture)
 
-画像を見て CLI を実行できる LLM エージェントなら、MarkIts の JSON を手で書かずに自然文で依頼できます。インストール済みの `markits -h` から `markits manual` を見つけられます。キャプチャ画像に UIMap が埋め込まれている場合は、`markits` 単体で要素一覧を出力し、番号で対象を指定できます。
+MarkIts は、**AI（LLM）が自律的に画面を認識し、UI要素を指定して的確な注釈を描画する**ための強力な機能を備えています。
 
-### UIMapを使って番号を付ける
+ピクセル座標の計算や推測は不要です。AIは「**保存ボタンを四角で囲む**」「**検索欄に手順1の番号を付ける**」といった意図を、UI要素名やロール、番号で直接 CLI に指定できます。
 
-まずキャプチャ画像から UIMap を JSON として取り出します。
+---
 
-```sh
-markits uimap screenshot.png --json --output uimap.json
-```
+### 1. MarkIts 単体でのスクリーンショット撮影 (`markits capture`)
 
-AI は `uimap.json` の要素名と座標を確認して、たとえば「保存ボタンを 1 という印をつけて」と判断したら、次のコマンドを実行できます。
+外部ツールを介さず、MarkIts だけで画面全体のキャプチャや特定矩形の切り抜き撮影が可能です。
 
 ```sh
-markits annotate screenshot.png \
-  --uimap uimap.json \
-  --target 1 \
-  --mark badge \
-  --step 1 \
-  --style step \
-  --output annotated.png
+# 基本キャプチャ（高速: UI検出なし）
+markits capture screen.png
+
+# UI要素検出つきキャプチャ（UI要素を検出し、PNGメタデータにUIMapを埋め込み）
+markits capture screen.png --detect-ui
+
+# 画面の特定領域のみをキャプチャ
+markits capture screen.png --x 100 --y 100 --width 800 --height 600
 ```
 
-`--target 1` は UIMap の1番目の要素を指します。名前で指定する場合は `--target "保存"`、役割を限定する場合は `--target "button:保存"`、座標を直接指定する場合は `--target "[x,y,width,height]"` を使えます。`--target` の番号は1始まりです。
+---
+
+### 2. ⚡ UIMap メタデータの使い回し（高速化の鍵）
+
+画面上の UI ツリー探索（AT-SPI / Accessibility）は、アプリが多い環境では 1〜3 秒程度を要する重い処理です。
+
+MarkIts は検出した UIMap を **PNG の標準メタデータ（`markits:ui_elements` テキストチャンク）に永続化**します。そのため、**過去の画像から UIMap をそのまま引き継ぐ（使い回す）** ことができます。
+
+```sh
+# 【UIMapの引き継ぎ】重いUI検出をスキップし、既存画像のメタデータをコピーして瞬時に撮影
+markits capture screen2.png --uimap screen.png
+```
+
+- **メリット**: 新たなスクショ撮影はわずか数ミリ秒で完了し、かつ `screen.png` で検出した UI 要素情報（ボタンや入力欄の位置・名前）がそのまま `screen2.png` にも保持されます。
+- `--uimap <PATH>` 引数は、すべてのコマンド（`capture`, `annotate`, `render`, `validate`）で **`.png` 画像パス** または **`.json` ファイル** の両方を透過的に受け付けます。
+
+---
+
+### 3. 🤖 AI による UI 要素指定と「保存ボタンを囲む」
+
+AI は UIMap の要素名や役割、番号をそのまま `--target` に指定できます。
+
+#### 「保存ボタンを四角で囲む」
+```sh
+# 四角枠（矩形）で囲む
+markits annotate screen.png --target "保存ボタン" --mark rect -o annotated.png
+
+# 角丸四角枠で囲む
+markits annotate screen.png --target "保存ボタン" --mark rounded-rect -o annotated.png
+```
+
+#### スマートなターゲット名解決
+MarkIts のパーサーは、AI が指定した名前を柔軟に解決します：
+- **完全一致**: `--target "保存"`（要素名が `保存` のものにマッチ）
+- **サフィックス自動除去**: `--target "保存ボタン"` → 自動で `"ボタン"` を除外して `"保存"` にマッチ（`"Submit button"` も同様）
+- **ロールによる絞り込み**: `--target "button:保存"`（テキストラベルとボタンの同名衝突を回避）
+- **UIMap 番号インデックス**: `--target 1`（UIMap の1番目の要素）、`--target "button:1"`（1番目のボタン）
+- **座標フォールバック**: `--target "[100, 50, 80, 32]"`
+
+#### マーク種別の使い分け
+| 意図・指示 | マーク種別 (`--mark`) | 実行例 |
+| :--- | :--- | :--- |
+| **四角で囲む** | `rect` | `--target "保存ボタン" --mark rect` |
+| **角丸で囲む** | `rounded-rect` | `--target "キャンセル" --mark rounded-rect` |
+| **スポットライト（周囲を暗転）** | `spotlight` | `--target "設定" --mark spotlight` |
+| **ピンタグを刺す** | `pin` | `--target "保存" --mark pin --text "ここをクリック"` |
+| **操作順を番号で示す** | `badge` / `step-arrow` | `--target "送信" --mark badge --step 1` |
+| **矢印で指し示す** | `arrow` | `--target "メニュー" --mark arrow --position left` |
+
+---
+
+### 4. 🚀 キャプチャと注釈を 1 コマンドで一発実行
+
+スクショ撮影と注釈描画を同時に行いたい場合、`capture` コマンドに対象マークを直接指定できます。
+
+```sh
+# スクショ撮影から「保存ボタンを囲む」まで1コマンドで完了
+markits capture out.png --uimap screen.png --target "保存ボタン" --mark rect
+```
+
+---
+
+### 5. 📋 AI エージェントの自律ワークフロー例
+
+AI エージェントが画面を操作・案内する際の標準的な実行手順です：
+
+```sh
+# Step 1: 初回スクリーンショット（UI要素を検出してメタデータ埋め込み）
+markits capture step1.png --detect-ui
+
+# Step 2: 画面上のUI要素一覧を確認（人間可読またはJSON）
+markits uimap step1.png
+# または JSON で取得: markits uimap step1.png --json
+
+# Step 3: LLMが「保存ボタンを囲む」と判断し、注釈を適用
+markits annotate step1.png --target "保存ボタン" --mark rect -o step1_annotated.png
+
+# Step 4: 次の操作画面をキャプチャ（UIMapを引き継いで超高速撮影）
+markits capture step2.png --uimap step1.png
+
+# Step 5: 手順2の番号バッジを付与
+markits annotate step2.png --target "次へ" --mark badge --step 2 -o step2_annotated.png
+```
+
+---
+
+### 視覚的な注釈例
 
 以下の例は同じ[デモ用スクリーンショット](docs/images/llm_demo_input.png)から、実際に MarkIts で生成した PNG です。
 
-### 例 1: ボタンを四角で囲む
+#### 例 1: ボタンを四角で囲む
+[![Save ボタンを四角で囲んだ出力](docs/images/llm_rect_boxed.png)](docs/images/llm_rect_boxed.png)  
+`markits annotate docs/images/llm_demo_input.png --target "Save" --mark rect -o docs/images/llm_rect_boxed.png`
 
-> MarkIts でこのスクリーンショットの Save ボタンを四角で囲んで、完成した PNG を見せて。
+#### 例 2: 操作対象をスポットライトで示す
+[![「Click Save」の文字入り出力](docs/images/llm_focus_labeled.png)](docs/images/llm_focus_labeled.png)  
+`markits annotate docs/images/llm_demo_input.png --target "Save" --mark spotlight -o docs/images/llm_focus_labeled.png`
 
-[![Save ボタンを四角で囲んだ出力](docs/images/llm_rect_boxed.png)](docs/images/llm_rect_boxed.png)
-
-[生成した注釈 JSON](examples/llm_rect.json) · `markits render examples/llm_rect.json --image docs/images/llm_demo_input.png --output docs/images/llm_rect_boxed.png`
-
-### 例 2: 操作対象をスポットライトで示す
-
-> MarkIts で Save ボタンだけを目立たせて、「Click Save」の説明を付けて。
-
-[![「Click Save」の文字入り出力](docs/images/llm_focus_labeled.png)](docs/images/llm_focus_labeled.png)
-
-[生成した注釈 JSON](examples/llm_focus.json) · `markits render examples/llm_focus.json --image docs/images/llm_demo_input.png --output docs/images/llm_focus_labeled.png`
-
-### 例 3: 操作順を番号で示す
-
-> MarkIts で検索欄を手順 1、Save ボタンを手順 2 として番号を付けて。
-
-[![検索欄の 1 と Save ボタンの 2 を付けた出力](docs/images/llm_steps_numbered.png)](docs/images/llm_steps_numbered.png)
-
-[生成した注釈 JSON](examples/llm_steps.json) · `markits render examples/llm_steps.json --image docs/images/llm_demo_input.png --output docs/images/llm_steps_numbered.png`
-
-生成の前に画像の寸法を知りたい場合は `markits inspect screenshot.png`、注釈を検証する場合は `markits validate annotations.json --image screenshot.png` を使えます。画像モードでは JSON の `canvas` を省略できます。
-
-画像の一部だけを使う場合は、注釈を付ける前に実際の画素を切り抜けます。
-
-```sh
-markits crop screenshot.png --x 120 --y 80 --width 640 --height 400 --output cropped.png
-markits inspect cropped.png
-```
-
-出力は 640 × 400 ピクセルの PNG になります。切り抜き後の注釈座標は、新しい画像の左上を原点に指定してください。
+#### 例 3: 操作順を番号で示す
+[![検索欄の 1 と Save ボタンの 2 を付けた出力](docs/images/llm_steps_numbered.png)](docs/images/llm_steps_numbered.png)  
+`markits annotate docs/images/llm_demo_input.png --target "Search" --mark badge --step 1 -o docs/images/llm_steps_numbered.png`
 
 ---
+
 
 ## 🔖 対応マーク（アノテーション）一覧 & スクリーンショット
 
