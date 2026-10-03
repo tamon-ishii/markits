@@ -284,6 +284,7 @@ mod tests {
             DetectedUiElement {
                 role: "button".into(),
                 name: Some("OK".into()),
+                window_id: None, pid: None,
                 x: 2.0,
                 y: 2.0,
                 width: 8.0,

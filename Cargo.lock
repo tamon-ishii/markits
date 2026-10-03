@@ -2812,7 +2812,7 @@ dependencies = [
 
 [[package]]
 name = "markits"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "base64 0.22.1",
  "clap",
@@ -2825,7 +2825,7 @@ dependencies = [
 
 [[package]]
 name = "markits-desktop"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "arboard",
  "base64 0.22.1",
@@ -2844,8 +2844,10 @@ dependencies = [
  "tauri-plugin-fs",
  "tauri-plugin-global-shortcut",
  "thiserror 2.0.21",
+ "tokio",
  "x11-dl",
  "xa11y",
+ "zbus",
 ]
 
 [[package]]

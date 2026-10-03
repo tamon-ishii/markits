@@ -636,11 +636,23 @@ pub struct Scene {
     pub shadow: bool,
     #[serde(default)]
     pub annotations: Vec<Annotation>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub hidden_annotations: Vec<usize>,
     #[serde(default, skip_serializing_if = "Option::is_none", alias = "ui_map", alias = "ui_elements")]
     pub uimap: Option<Vec<UiElement>>,
 }
 
 impl Scene {
+    pub fn visible_scene(&self) -> Self {
+        let mut scene = self.clone();
+        scene.annotations = self.annotations.iter().enumerate()
+            .filter(|(index, _)| !self.hidden_annotations.contains(index))
+            .map(|(_, annotation)| annotation.clone())
+            .collect();
+        scene.hidden_annotations.clear();
+        scene
+    }
+
     pub fn from_json(json_str: &str) -> Result<Self> {
         let prepared = crate::semantic::prepare(json_str)?;
         let scene: Self = serde_json::from_value(prepared.scene)?;

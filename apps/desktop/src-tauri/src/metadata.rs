@@ -366,6 +366,7 @@ mod tests {
             DetectedUiElement {
                 role: "button".into(),
                 name: Some("Submit".into()),
+                window_id: None, pid: None,
                 x: 10.0,
                 y: 20.0,
                 width: 80.0,

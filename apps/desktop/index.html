@@ -30,6 +30,7 @@
         <div id="editor-actions" class="editor-actions-group" style="display: none;">
           <div class="divider-v"></div>
           <button id="btn-toggle-snap" class="btn btn-toggle active" title="UI要素スナップ (Altで一時切替)">🧲 スナップ</button>
+          <span id="ui-detection-status" class="ui-detection-status" role="status" aria-live="polite">UI 検出なし</span>
           <button id="btn-crop" class="btn btn-toggle" title="キャンバスをクロップ (切り抜き)">✂️ クロップ</button>
           <div class="divider-v"></div>
           <div class="zoom-controls">
@@ -98,6 +99,10 @@
       <!-- Left Tool Palette -->
       <aside class="palette-panel">
         <div class="panel-title">マークツール</div>
+        <div id="recent-tools" class="recent-tools" hidden>
+          <div class="tool-group-label">最近使ったツール</div>
+          <div id="recent-tool-list" class="tool-list"></div>
+        </div>
         <div class="tool-list">
           <button class="tool-btn active" data-type="select" title="選択・ハンドル操作モード">
             👆 選択
@@ -192,6 +197,19 @@
 
       <!-- Right Inspector Properties Panel -->
       <aside class="inspector-panel" id="inspector">
+        <div class="output-size-panel">
+          <div class="panel-title">出力サイズ</div>
+          <div class="editor-output-controls">
+            <label>幅 <input id="editor-export-width" type="number" min="10" max="10000" step="1" aria-label="出力幅" /> px</label>
+            <button id="editor-aspect-lock" class="btn-aspect-lock active" type="button" title="アスペクト比を固定" aria-label="アスペクト比を固定" aria-pressed="true">🔒</button>
+            <label>高さ <input id="editor-export-height" type="number" min="10" max="10000" step="1" aria-label="出力高さ" /> px</label>
+          </div>
+          <div class="output-size-hint">このサイズと縦横比でプレビュー・保存します</div>
+        </div>
+        <div class="layer-section">
+          <div class="panel-title layer-title">マーク一覧 <span id="layer-count">0</span></div>
+          <div id="layer-list" class="layer-list"><div class="layer-empty">マークはまだありません</div></div>
+        </div>
         <div class="panel-title">プロパティ</div>
         <div id="inspector-content" class="inspector-content">
           <div class="empty-selection">マークを選択してください</div>
@@ -203,20 +221,27 @@
     <div id="capture-overlay" class="capture-overlay hidden">
       <img id="overlay-bg" class="overlay-bg" alt="Screen Capture Base" />
       <div id="overlay-mask" class="overlay-mask">
-        <svg id="overlay-ui-elements-layer" class="overlay-ui-elements-layer"></svg>
+        <!-- SVG dimming layer with window cutout / hole-punching -->
+        <svg id="overlay-dim-svg" class="overlay-dim-svg" preserveAspectRatio="none">
+          <path id="overlay-dim-path" class="overlay-dim-path" fill="rgba(0, 0, 0, 0.55)" fill-rule="evenodd" />
+        </svg>
         <div id="ui-element-hover-box" class="ui-element-hover-box">
-          <span id="ui-element-badge" class="ui-element-badge"></span>
+          <div class="ui-element-header">
+            <span id="ui-element-badge" class="ui-element-badge"></span>
+            <span id="ui-element-action-hint" class="ui-element-action-hint">クリックでキャプチャ</span>
+          </div>
         </div>
-        <div id="snap-point-indicator" class="snap-point-indicator"></div>
         <div id="selection-box" class="selection-box">
-          <div id="selection-size-badge" class="selection-size-badge">0 x 0</div>
+          <div id="selection-size-badge" class="selection-size-badge">0 × 0</div>
         </div>
       </div>
       <div class="overlay-toolbar">
-        <span class="overlay-hint">ドラッグで範囲選択、またはボタンをクリックで自動選択（Escでキャンセル）</span>
-        <button id="btn-capture-fullscreen" class="btn btn-sm">全画面をキャプチャ</button>
-        <button id="btn-cancel-capture" class="btn btn-sm btn-danger">キャンセル</button>
+        <span class="overlay-hint">ウィンドウをクリックしてキャプチャ / ドラッグで範囲指定</span>
+        <button id="btn-capture-fullscreen" class="btn btn-sm btn-primary">🖥️ 全画面キャプチャ</button>
+        <button id="btn-cancel-capture" class="btn btn-sm btn-danger">✕ キャンセル (Esc)</button>
       </div>
+    </div>
+
     <!-- Export Resolution Modal -->
     <div id="modal-export" class="modal-backdrop" style="display: none;">
       <div class="modal-card">
@@ -268,7 +293,6 @@
         </div>
       </div>
     </div>
-  </div>
 
   <input type="file" id="file-input" accept="image/png,image/jpeg" style="display: none;" />
   <script type="module" src="/src/main.ts"></script>

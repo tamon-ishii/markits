@@ -157,11 +157,14 @@ export interface Scene {
   canvas: Canvas;
   shadow?: boolean;
   annotations: Annotation[];
+  hidden_annotations?: number[];
 }
 
 export interface DetectedUiElement {
   role: string;
   name?: string;
+  window_id?: string;
+  pid?: number;
   x: number;
   y: number;
   width: number;
@@ -183,4 +186,3 @@ export interface LoadedImageResult {
   history_id?: string | null;
   ui_elements?: DetectedUiElement[] | null;
 }
-

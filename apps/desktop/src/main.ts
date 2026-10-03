@@ -26,7 +26,77 @@ async function invokeTauri<T>(cmd: string, args: Record<string, any> = {}): Prom
   }
 }
 
+async function raiseAppWindow() {
+  if (isTauri) {
+    try {
+      await invokeTauri('cmd_raise_window');
+    } catch (e) {
+      console.warn('Failed to raise window:', e);
+    }
+  }
+}
+
 document.addEventListener('DOMContentLoaded', async () => {
+  let windowLabel = 'main';
+  if (isTauri) {
+    try {
+      const { getCurrentWindow } = await import('@tauri-apps/api/window');
+      windowLabel = getCurrentWindow().label;
+    } catch (e) {
+      console.warn('Failed to get current window label:', e);
+    }
+  }
+
+  // Dedicated Fullscreen Snipping Overlay Mode
+  if (windowLabel === 'overlay') {
+    document.body.classList.add('overlay-mode');
+    const overlay = new CaptureOverlay();
+
+    if (isTauri) {
+      const { listen } = await import('@tauri-apps/api/event');
+      await listen<CapturedImage>('show-capture-overlay', (event) => {
+        const captured = event.payload;
+        overlay.show(
+          captured.data_url,
+          captured.ui_elements || [],
+          async (crop: CropRect | null, elements: DetectedUiElement[]) => {
+            try {
+              await invokeTauri('cmd_finish_capture', {
+                rawDataUrl: captured.data_url,
+                uiElements: elements,
+                cropRect: crop
+                  ? {
+                      x: crop.x,
+                      y: crop.y,
+                      width: crop.width,
+                      height: crop.height,
+                    }
+                  : null,
+              });
+            } catch (err) {
+              console.warn('Failed to finish capture:', err);
+              await invokeTauri('cmd_cancel_capture').catch((restoreErr) => {
+                console.warn('Failed to restore editor after capture error:', restoreErr);
+              });
+              const { emitTo } = await import('@tauri-apps/api/event');
+              await emitTo('main', 'capture-error', String(err));
+            }
+          },
+          async () => {
+            try {
+              await invokeTauri('cmd_cancel_capture');
+            } catch (err) {
+              console.warn('Failed to cancel capture:', err);
+            }
+          }
+        );
+      });
+      await invokeTauri('cmd_overlay_ready');
+    }
+    return; // Overlay window does not run editor / history logic
+  }
+
+  // Main Editor Window Mode
   // Elements
   const tabHome = document.getElementById('tab-home')!;
   const tabEditor = document.getElementById('tab-editor')!;
@@ -79,21 +149,30 @@ document.addEventListener('DOMContentLoaded', async () => {
       homeView.style.display = 'none';
       editorView.style.display = 'flex';
       editorActions.style.display = 'flex';
+      await raiseAppWindow();
     }
   };
 
   tabHome.addEventListener('click', () => switchView('home'));
   tabEditor.addEventListener('click', () => switchView('editor'));
 
-  // Initialize Overlay & Editor
-  const overlay = new CaptureOverlay();
-
+  // Initialize Editor
   const editor = new AnnotationEditor(async (sceneJson: string) => {
     if (isTauri) {
       return await invokeTauri<string>('cmd_render_svg', { sceneJson });
     } else {
       return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 600"><text x="20" y="40" fill="#3b82f6" font-size="20">MarkIts Preview</text></svg>`;
     }
+  });
+
+  const uiStatusEl = document.getElementById('ui-detection-status')!;
+  const setUiStatus = (state: 'idle' | 'scanning' | 'ready' | 'failed', label: string) => {
+    uiStatusEl.dataset.state = state;
+    uiStatusEl.textContent = label;
+  };
+  window.addEventListener('markits-image-loaded', () => {
+    const count = editor.getUiElements().length;
+    setUiStatus(count > 0 ? 'ready' : 'idle', count > 0 ? `UI ${count} 要素` : 'UI 検出なし');
   });
 
   // Tool buttons
@@ -104,6 +183,46 @@ document.addEventListener('DOMContentLoaded', async () => {
         editor.setTool(tool);
       }
     });
+  });
+
+  const recentToolsEl = document.getElementById('recent-tools')!;
+  const recentToolListEl = document.getElementById('recent-tool-list')!;
+  const toolTemplates = new Map<string, { label: string; title: string }>();
+  document.querySelectorAll<HTMLButtonElement>('.palette-panel > .tool-list > .tool-btn').forEach((button) => {
+    const type = button.dataset.type;
+    if (type && type !== 'select') toolTemplates.set(type, { label: button.textContent?.trim() ?? type, title: button.title });
+  });
+  let recentTools: string[] = [];
+  let activeRecentTool = 'select';
+  try {
+    const saved = JSON.parse(localStorage.getItem('markits-recent-tools') ?? '[]');
+    if (Array.isArray(saved)) recentTools = saved.filter((tool): tool is string => typeof tool === 'string' && toolTemplates.has(tool)).slice(0, 3);
+  } catch { /* Storage is optional. */ }
+  const renderRecentTools = () => {
+    recentToolListEl.replaceChildren();
+    recentToolsEl.hidden = recentTools.length === 0;
+    for (const tool of recentTools) {
+      const template = toolTemplates.get(tool)!;
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'tool-btn';
+      button.classList.toggle('active', tool === activeRecentTool);
+      button.dataset.type = tool;
+      button.title = template.title;
+      button.textContent = template.label;
+      button.addEventListener('click', () => editor.setTool(tool));
+      recentToolListEl.appendChild(button);
+    }
+  };
+  renderRecentTools();
+  window.addEventListener('markits-tool-changed', (event) => {
+    const tool = (event as CustomEvent<string>).detail;
+    activeRecentTool = tool;
+    if (tool === 'select') { renderRecentTools(); return; }
+    if (!toolTemplates.has(tool)) return;
+    recentTools = [tool, ...recentTools.filter((item) => item !== tool)].slice(0, 3);
+    try { localStorage.setItem('markits-recent-tools', JSON.stringify(recentTools)); } catch { /* Storage is optional. */ }
+    renderRecentTools();
   });
 
   // Undo / Redo
@@ -203,81 +322,15 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   // Screen Capture Flow
   const handleCaptureTrigger = async () => {
-    let appWindow: any = null;
-    let wasFullscreen = false;
-
     if (isTauri) {
       try {
-        const { getCurrentWindow } = await import('@tauri-apps/api/window');
-        appWindow = getCurrentWindow();
-        wasFullscreen = await appWindow.isFullscreen();
-        await appWindow.setFullscreen(true);
-      } catch (e) {
-        console.warn('Failed to enter fullscreen for capture:', e);
+        await invokeTauri('cmd_start_capture');
+      } catch (e: any) {
+        console.warn('Failed to start capture:', e);
+        alert(`画面キャプチャの起動に失敗しました: ${e?.message ?? e}`);
       }
-    }
-
-    const restoreFullscreen = async () => {
-      if (appWindow && !wasFullscreen) {
-        try {
-          await appWindow.setFullscreen(false);
-        } catch (e) {
-          console.warn('Failed to restore fullscreen state:', e);
-        }
-      }
-    };
-
-    try {
-      const captured = await invokeTauri<CapturedImage>('cmd_capture_screen');
-
-      overlay.show(
-        captured.data_url,
-        captured.ui_elements || [],
-        async (crop: CropRect | null, allElements: DetectedUiElement[]) => {
-          try {
-            if (!crop) {
-              // Full screen capture
-              editor.setBackgroundImage(captured.data_url, captured.width, captured.height, null, captured.ui_elements);
-              if (isTauri) {
-                try {
-                  const item = await invokeTauri<HistoryItem>('cmd_save_to_history', {
-                    backgroundDataUrl: captured.data_url,
-                    sceneJson: null,
-                    existingId: null,
-                    uiElements: captured.ui_elements,
-                  });
-                  currentHistoryId = item.id;
-                } catch (err) {
-                  console.warn('Failed to save fullscreen capture to history:', err);
-                }
-              }
-              await switchView('editor');
-            } else {
-              // Cropped region capture
-              const result = await invokeTauri<LoadedImageResult>('cmd_crop_and_load', {
-                rawDataUrl: captured.data_url,
-                x: Math.round(crop.x),
-                y: Math.round(crop.y),
-                width: Math.round(crop.width),
-                height: Math.round(crop.height),
-                uiElements: allElements,
-              });
-              editor.setBackgroundImage(result.image_data_url, result.width, result.height, result.annotations_json, result.ui_elements);
-              currentHistoryId = result.history_id ?? null;
-              await switchView('editor');
-            }
-          } finally {
-            await restoreFullscreen();
-          }
-        },
-        async () => {
-          // Cancelled capture
-          await restoreFullscreen();
-        }
-      );
-    } catch (e: any) {
-      await restoreFullscreen();
-      alert(`画面キャプチャの起動に失敗しました: ${e?.message ?? e}`);
+    } else {
+      alert('画面キャプチャはデスクトップ環境で動作します。');
     }
   };
 
@@ -371,6 +424,52 @@ document.addEventListener('DOMContentLoaded', async () => {
   document.getElementById('btn-zoom-fit')?.addEventListener('click', () => editor.zoomFit());
   document.getElementById('zoom-label')?.addEventListener('click', () => editor.resetZoom());
 
+  const editorWidthInput = document.getElementById('editor-export-width') as HTMLInputElement | null;
+  const editorHeightInput = document.getElementById('editor-export-height') as HTMLInputElement | null;
+  const editorAspectLock = document.getElementById('editor-aspect-lock') as HTMLButtonElement | null;
+  let editorAspectLocked = true;
+  let editorAspectRatio = 1;
+  const syncEditorOutputInputs = () => {
+    const dimensions = editor.getOutputDimensions();
+    editorWidthInput?.setAttribute('value', String(dimensions.width));
+    editorHeightInput?.setAttribute('value', String(dimensions.height));
+    if (editorWidthInput) editorWidthInput.value = String(dimensions.width);
+    if (editorHeightInput) editorHeightInput.value = String(dimensions.height);
+    editorAspectRatio = dimensions.width / Math.max(1, dimensions.height);
+  };
+  window.addEventListener('markits-image-loaded', () => syncEditorOutputInputs());
+  editorAspectLock?.addEventListener('click', () => {
+    if (!editorAspectLocked) {
+      const width = Number.parseInt(editorWidthInput?.value ?? '', 10);
+      const height = Number.parseInt(editorHeightInput?.value ?? '', 10);
+      if (Number.isFinite(width) && Number.isFinite(height) && height > 0) {
+        editorAspectRatio = width / height;
+      }
+    }
+    editorAspectLocked = !editorAspectLocked;
+    editorAspectLock.classList.toggle('active', editorAspectLocked);
+    editorAspectLock.textContent = editorAspectLocked ? '🔒' : '🔓';
+    editorAspectLock.setAttribute('aria-pressed', String(editorAspectLocked));
+  });
+  editorWidthInput?.addEventListener('input', () => {
+    const width = Number.parseInt(editorWidthInput.value, 10);
+    if (!Number.isFinite(width) || width < 10) return;
+    if (editorAspectLocked && editorHeightInput) {
+      editorHeightInput.value = String(Math.max(10, Math.round(width / editorAspectRatio)));
+    }
+    const height = Number.parseInt(editorHeightInput?.value ?? '', 10);
+    if (Number.isFinite(height) && height >= 10) editor.setOutputDimensions(width, height);
+  });
+  editorHeightInput?.addEventListener('input', () => {
+    const height = Number.parseInt(editorHeightInput.value, 10);
+    if (!Number.isFinite(height) || height < 10) return;
+    if (editorAspectLocked && editorWidthInput) {
+      editorWidthInput.value = String(Math.max(10, Math.round(height * editorAspectRatio)));
+    }
+    const width = Number.parseInt(editorWidthInput?.value ?? '', 10);
+    if (Number.isFinite(width) && width >= 10) editor.setOutputDimensions(width, height);
+  });
+
   // --- In-Editor Crop Control ---
   document.getElementById('btn-crop')?.addEventListener('click', () => {
     editor.toggleCropMode();
@@ -406,22 +505,23 @@ document.addEventListener('DOMContentLoaded', async () => {
     const scene = editor.getScene();
     originalWidth = scene.canvas.width;
     originalHeight = scene.canvas.height;
+    const currentOutput = editor.getOutputDimensions();
     aspectRatio = originalWidth / Math.max(1, originalHeight);
 
     if (exportOrigDims) {
       exportOrigDims.textContent = `${originalWidth} × ${originalHeight}`;
     }
     if (exportWidthInput) {
-      exportWidthInput.value = originalWidth.toString();
+      exportWidthInput.value = currentOutput.width.toString();
     }
     if (exportHeightInput) {
-      exportHeightInput.value = originalHeight.toString();
+      exportHeightInput.value = currentOutput.height.toString();
     }
 
-    isAspectLocked = true;
+    isAspectLocked = editorAspectLocked;
     if (btnAspectLock) {
-      btnAspectLock.classList.add('active');
-      btnAspectLock.textContent = '🔒';
+      btnAspectLock.classList.toggle('active', isAspectLocked);
+      btnAspectLock.textContent = isAspectLocked ? '🔒' : '🔓';
     }
 
     // Reset preset chips to original
@@ -445,6 +545,15 @@ document.addEventListener('DOMContentLoaded', async () => {
     btnAspectLock.textContent = isAspectLocked ? '🔒' : '🔓';
   });
 
+  const applyExportDimensionsToEditor = () => {
+    const width = exportWidthInput ? Number.parseInt(exportWidthInput.value, 10) : NaN;
+    const height = exportHeightInput ? Number.parseInt(exportHeightInput.value, 10) : NaN;
+    if (!Number.isFinite(width) || !Number.isFinite(height) || width < 10 || height < 10) return;
+    editor.setOutputDimensions(width, height);
+    if (editorWidthInput) editorWidthInput.value = String(width);
+    if (editorHeightInput) editorHeightInput.value = String(height);
+  };
+
   // Width input change
   exportWidthInput?.addEventListener('input', () => {
     const w = parseInt(exportWidthInput.value, 10);
@@ -452,6 +561,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       const h = Math.max(1, Math.round(w / aspectRatio));
       exportHeightInput.value = h.toString();
     }
+    applyExportDimensionsToEditor();
     document.querySelectorAll('.preset-chip').forEach((chip) => chip.classList.remove('active'));
   });
 
@@ -462,6 +572,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       const w = Math.max(1, Math.round(h * aspectRatio));
       exportWidthInput.value = w.toString();
     }
+    applyExportDimensionsToEditor();
     document.querySelectorAll('.preset-chip').forEach((chip) => chip.classList.remove('active'));
   });
 
@@ -501,6 +612,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
       if (exportWidthInput) exportWidthInput.value = targetW.toString();
       if (exportHeightInput) exportHeightInput.value = targetH.toString();
+      applyExportDimensionsToEditor();
 
       document.querySelectorAll('.preset-chip').forEach((c) => c.classList.toggle('active', c === chip));
     });
@@ -602,17 +714,53 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
   });
 
-  // Listen to Tauri events from system tray or global shortcuts
+  // Listen to Tauri events from system tray, global shortcuts, or overlay window
   if (isTauri) {
     const { listen } = await import('@tauri-apps/api/event');
-    await listen('trigger-capture', () => {
+
+    await listen<LoadedImageResult>('capture-finished', async (event) => {
+      const result = event.payload;
+      editor.setBackgroundImage(
+        result.image_data_url,
+        result.width,
+        result.height,
+        result.annotations_json,
+        result.ui_elements
+      );
+      currentHistoryId = result.history_id ?? null;
+      await switchView('editor');
+    });
+
+    await listen<{ history_id: string; elements: DetectedUiElement[] }>('capture-ui-elements', (event) => {
+      if (event.payload.history_id === currentHistoryId) {
+        editor.setUiElements(event.payload.elements);
+        const count = editor.getUiElements().length;
+        setUiStatus(count > 0 ? 'ready' : 'idle', count > 0 ? `UI ${count} 要素` : 'UI 要素なし');
+      }
+    });
+
+    await listen<{ history_id: string; status: string }>('capture-ui-scan-status', (event) => {
+      if (event.payload.history_id !== currentHistoryId) return;
+      if (event.payload.status === 'started') setUiStatus('scanning', 'UI 解析中…');
+      else if (event.payload.status === 'timeout') setUiStatus('failed', 'UI 取得が時間切れ');
+      else if (event.payload.status === 'failed') setUiStatus('failed', 'UI を取得できません');
+    });
+
+    await listen<string>('capture-error', (event) => {
+      alert(`画面キャプチャに失敗しました: ${event.payload}`);
+    });
+
+    await listen('trigger-capture', async () => {
+      await raiseAppWindow();
       handleCaptureTrigger();
     });
-    await listen('trigger-open-file', () => {
+    await listen('trigger-open-file', async () => {
+      await raiseAppWindow();
       handleOpenFile();
     });
   }
 
   // Initial load
   switchView('home');
+  await raiseAppWindow();
 });

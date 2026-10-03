@@ -1,13 +1,10 @@
 import { Annotation, BezierArrowAnnotation, ArrowAnnotation, Scene, SemanticStyle, PositionHint, DetectedUiElement } from './types.ts';
 
 function escapeXml(str: string): string {
-  return str
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&apos;');
+  return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&apos;');
 }
+
 
 export class AnnotationEditor {
   private viewportEl: HTMLElement;
@@ -16,7 +13,10 @@ export class AnnotationEditor {
   private svgLayerEl: HTMLElement;
   private handlesLayerEl: SVGSVGElement;
   private snapGuideLayerEl: SVGSVGElement;
+  private activeSnapLayerEl: SVGGElement | null = null;
   private inspectorEl: HTMLElement;
+  private layerListEl: HTMLElement;
+  private layerCountEl: HTMLElement;
   private emptyStateEl: HTMLElement;
 
   // In-Editor Crop Overlay elements
@@ -31,6 +31,8 @@ export class AnnotationEditor {
   // Zoom elements & state
   private zoomLabelEl: HTMLElement | null = null;
   private zoomLevel: number = 1.0;
+  private outputWidth: number = 800;
+  private outputHeight: number = 600;
 
   // Crop mode state
   private isCropMode: boolean = false;
@@ -85,6 +87,8 @@ export class AnnotationEditor {
     this.handlesLayerEl = document.getElementById('handles-layer') as unknown as SVGSVGElement;
     this.snapGuideLayerEl = document.getElementById('snap-guide-layer') as unknown as SVGSVGElement;
     this.inspectorEl = document.getElementById('inspector-content')!;
+    this.layerListEl = document.getElementById('layer-list')!;
+    this.layerCountEl = document.getElementById('layer-count')!;
     this.emptyStateEl = document.getElementById('empty-state')!;
 
     // Crop elements
@@ -100,6 +104,29 @@ export class AnnotationEditor {
     this.zoomLabelEl = document.getElementById('zoom-label');
 
     this.bindEvents();
+    this.layerListEl.addEventListener('click', (event) => {
+      const button = (event.target as HTMLElement).closest<HTMLButtonElement>('button[data-layer-action]');
+      if (!button) return;
+      const index = Number(button.dataset.layerIndex);
+      if (!Number.isInteger(index) || index < 0 || index >= this.scene.annotations.length) return;
+      switch (button.dataset.layerAction) {
+        case 'select':
+          this.setTool('select');
+          this.selectedIndex = index;
+          this.updateHandles();
+          this.updateInspector();
+          break;
+        case 'visibility':
+          this.toggleLayerVisibility(index);
+          break;
+        case 'up':
+          this.moveLayer(index, 1);
+          break;
+        case 'down':
+          this.moveLayer(index, -1);
+          break;
+      }
+    });
   }
 
   public setTool(tool: string) {
@@ -112,12 +139,13 @@ export class AnnotationEditor {
       }
     });
 
+    this.clearSnapGuide();
+    window.dispatchEvent(new CustomEvent('markits-tool-changed', { detail: tool }));
     if (tool !== 'select') {
       this.selectedIndex = null;
       this.updateHandles();
       this.updateInspector();
     }
-    this.renderAllSnapTargets();
   }
 
   public setBackgroundImage(
@@ -129,15 +157,12 @@ export class AnnotationEditor {
   ) {
     this.bgImgEl.src = dataUrl;
     this.scene.canvas = { width, height };
-    // Filter out window bounds that match the full canvas size to prevent snapping to canvas borders
-    this.uiElements = (uiElements || []).filter((el) => {
-      if (el.role === 'window') {
-        const isFullCanvas = Math.abs(el.x) <= 8 && Math.abs(el.y) <= 8 &&
-          Math.abs(el.width - width) <= 16 && Math.abs(el.height - height) <= 16;
-        if (isFullCanvas) return false;
-      }
-      return true;
-    });
+    this.outputWidth = width;
+    this.outputHeight = height;
+    this.setZoom(this.zoomLevel);
+    this.uiElements = this.sanitizeUiElements(uiElements, width, height);
+    this.activeSnapLayerEl = null;
+    console.log(`[MarkIts Editor] Initial background set with ${this.uiElements.length} snappable elements`);
 
     this.canvasContainerEl.style.width = `${width}px`;
     this.canvasContainerEl.style.height = `${height}px`;
@@ -156,13 +181,16 @@ export class AnnotationEditor {
           canvas: { width, height },
           shadow: parsed.shadow ?? true,
           annotations: parsed.annotations ?? [],
+          hidden_annotations: parsed.hidden_annotations ?? [],
         };
       } catch (e) {
         console.error('Failed to parse embedded annotations JSON', e);
         this.scene.annotations = [];
+        this.scene.hidden_annotations = [];
       }
     } else {
       this.scene.annotations = [];
+      this.scene.hidden_annotations = [];
     }
 
     this.undoStack = [];
@@ -174,6 +202,7 @@ export class AnnotationEditor {
     this.updateInspector();
     this.renderAllSnapTargets();
     setTimeout(() => this.zoomFit(), 50);
+    window.dispatchEvent(new CustomEvent('markits-image-loaded', { detail: { width, height } }));
   }
 
   public toggleSnap(): boolean {
@@ -194,15 +223,35 @@ export class AnnotationEditor {
   public setUiElements(elements: DetectedUiElement[]): void {
     const width = this.scene.canvas.width;
     const height = this.scene.canvas.height;
-    this.uiElements = (elements || []).filter((el) => {
-      if (el.role === 'window') {
-        const isFullCanvas = Math.abs(el.x) <= 8 && Math.abs(el.y) <= 8 &&
-          Math.abs(el.width - width) <= 16 && Math.abs(el.height - height) <= 16;
-        if (isFullCanvas) return false;
+    this.uiElements = this.sanitizeUiElements(elements, width, height);
+    this.activeSnapLayerEl = null;
+    console.log(`[MarkIts Editor] Loaded ${this.uiElements.length} snappable UI elements`);
+    this.renderAllSnapTargets();
+  }
+
+  private sanitizeUiElements(
+    elements: DetectedUiElement[] | null | undefined,
+    width: number,
+    height: number
+  ): DetectedUiElement[] {
+    if (!elements || elements.length === 0) return [];
+    // Only ignore purely transient menus / toolbars
+    const ignoredRoles = new Set(['menubar', 'menu', 'viewport']);
+    return elements.filter((el) => {
+      if (ignoredRoles.has(el.role)) return false;
+      // Must be within canvas
+      if (el.x < 0 || el.y < 0 || el.x >= width || el.y >= height) return false;
+      // Filter out tiny artifacts
+      if (el.width < 6 || el.height < 6) return false;
+      // Filter ghost / unmapped elements that default to absolute (0, 0)
+      if (el.x === 0 && el.y === 0 && (el.role === 'menuitem' || !el.name)) return false;
+      // A captured window can nearly fill the image; only discard its exact canvas border.
+      if (Math.abs(el.x) <= 4 && Math.abs(el.y) <= 4 &&
+          Math.abs(el.width - width) <= 8 && Math.abs(el.height - height) <= 8) {
+        return false;
       }
       return true;
     });
-    this.renderAllSnapTargets();
   }
 
   public getUiElements(): DetectedUiElement[] {
@@ -226,6 +275,7 @@ export class AnnotationEditor {
       canvas: { ...this.scene.canvas },
       shadow: this.scene.shadow ?? true,
       annotations: this.scene.annotations.map((ann) => this.cleanAnnotation(ann)),
+      hidden_annotations: this.scene.hidden_annotations?.length ? [...this.scene.hidden_annotations] : undefined,
     };
   }
 
@@ -411,6 +461,78 @@ export class AnnotationEditor {
   private pushState() {
     this.undoStack.push(JSON.stringify(this.scene));
     this.redoStack = [];
+    this.updateLayerList();
+  }
+
+  private removeAnnotation(index: number): void {
+    this.scene.annotations.splice(index, 1);
+    this.scene.hidden_annotations = (this.scene.hidden_annotations ?? [])
+      .filter((hidden) => hidden !== index)
+      .map((hidden) => hidden > index ? hidden - 1 : hidden);
+    this.selectedIndex = null;
+    this.pushState();
+    this.render();
+    this.updateInspector();
+  }
+
+  private toggleLayerVisibility(index: number): void {
+    const hidden = new Set(this.scene.hidden_annotations ?? []);
+    if (hidden.has(index)) hidden.delete(index);
+    else hidden.add(index);
+    this.scene.hidden_annotations = [...hidden].sort((a, b) => a - b);
+    this.pushState();
+    this.render();
+    this.updateInspector();
+  }
+
+  private moveLayer(index: number, direction: number): void {
+    const next = index + direction;
+    if (next < 0 || next >= this.scene.annotations.length) return;
+    [this.scene.annotations[index], this.scene.annotations[next]] =
+      [this.scene.annotations[next], this.scene.annotations[index]];
+    this.scene.hidden_annotations = (this.scene.hidden_annotations ?? []).map((hidden) =>
+      hidden === index ? next : hidden === next ? index : hidden);
+    if (this.selectedIndex === index) this.selectedIndex = next;
+    else if (this.selectedIndex === next) this.selectedIndex = index;
+    this.pushState();
+    this.render();
+    this.updateInspector();
+  }
+
+  private updateLayerList(): void {
+    const annotations = this.scene.annotations;
+    this.layerCountEl.textContent = String(annotations.length);
+    this.layerListEl.replaceChildren();
+    if (annotations.length === 0) {
+      const empty = document.createElement('div');
+      empty.className = 'layer-empty';
+      empty.textContent = 'マークはまだありません';
+      this.layerListEl.appendChild(empty);
+      return;
+    }
+    for (let index = annotations.length - 1; index >= 0; index--) {
+      const annotation = annotations[index];
+      const hidden = this.scene.hidden_annotations?.includes(index) ?? false;
+      const row = document.createElement('div');
+      row.className = `layer-row${this.selectedIndex === index ? ' active' : ''}${hidden ? ' hidden-layer' : ''}`;
+      const addButton = (action: string, label: string, title: string): HTMLButtonElement => {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = action === 'select' ? 'layer-select' : 'layer-action';
+        button.dataset.layerAction = action;
+        button.dataset.layerIndex = String(index);
+        button.textContent = label;
+        button.title = title;
+        row.appendChild(button);
+        return button;
+      };
+      const detail = 'text' in annotation && annotation.text ? `: ${annotation.text}` : '';
+      addButton('select', `${index + 1}. ${annotation.type}${detail}`, 'このマークを選択');
+      addButton('visibility', hidden ? '◌' : '◉', hidden ? '表示する' : '非表示にする');
+      addButton('up', '↑', '前面に移動').disabled = index === annotations.length - 1;
+      addButton('down', '↓', '背面に移動').disabled = index === 0;
+      this.layerListEl.appendChild(row);
+    }
   }
 
   public undo() {
@@ -438,9 +560,25 @@ export class AnnotationEditor {
 
   private bindEvents() {
     this.handlesLayerEl.addEventListener('mousedown', (e) => this.handleMouseDown(e));
+    this.handlesLayerEl.addEventListener('mouseleave', () => this.clearSnapGuide());
+    this.viewportEl.addEventListener('mouseleave', () => this.clearSnapGuide());
     window.addEventListener('mousemove', (e) => this.handleMouseMove(e));
     window.addEventListener('mouseup', () => this.handleMouseUp());
     window.addEventListener('blur', () => this.handleMouseUp());
+
+    // Prevent text / element drag selection artifacts in WebKitGTK
+    window.addEventListener('selectstart', (e) => {
+      const target = e.target as HTMLElement;
+      if (target.tagName !== 'INPUT' && target.tagName !== 'TEXTAREA') {
+        e.preventDefault();
+      }
+    });
+    window.addEventListener('dragstart', (e) => {
+      const target = e.target as HTMLElement;
+      if (target.tagName !== 'A') {
+        e.preventDefault();
+      }
+    });
 
     // Zoom on Ctrl/Cmd + Mouse Wheel
     this.viewportEl.addEventListener(
@@ -484,11 +622,7 @@ export class AnnotationEditor {
 
       if (e.key === 'Delete' || e.key === 'Backspace') {
         if (this.selectedIndex !== null) {
-          this.scene.annotations.splice(this.selectedIndex, 1);
-          this.selectedIndex = null;
-          this.pushState();
-          this.render();
-          this.updateInspector();
+          this.removeAnnotation(this.selectedIndex);
         }
       } else if (e.ctrlKey || e.metaKey) {
         if (e.key === 'z') {
@@ -520,7 +654,7 @@ export class AnnotationEditor {
     return Math.hypot(p.x - (v.x + t * (w.x - v.x)), p.y - (v.y + t * (w.y - v.y)));
   }
 
-  private findSnapPoint(x: number, y: number, threshold: number = 14): {
+  private findSnapPoint(x: number, y: number, threshold: number = 18): {
     x: number;
     y: number;
     snapped: boolean;
@@ -534,6 +668,16 @@ export class AnnotationEditor {
     let bestPt: { x: number; y: number; el: DetectedUiElement } | null = null;
 
     for (const el of this.uiElements) {
+      // Ignore elements whose bounding box is completely away from the cursor
+      if (
+        x < el.x - threshold ||
+        x > el.x + el.width + threshold ||
+        y < el.y - threshold ||
+        y > el.y + el.height + threshold
+      ) {
+        continue;
+      }
+
       const pts = [
         // 4 corners
         { x: el.x, y: el.y },
@@ -564,58 +708,61 @@ export class AnnotationEditor {
     return { x, y, snapped: false };
   }
 
+  public clearSnapGuide(): void {
+    this.renderAllSnapTargets();
+  }
+
   /**
-   * Render rectangles for all snappable UI elements on the canvas so user clearly sees snap targets.
-   * If an element is actively snapped, highlight it with active styling, snap dot, and label badge.
+   * Keep every snap target visible while snapping is enabled, and highlight the active one.
    */
   private renderAllSnapTargets(snap?: { x: number; y: number; snapped: boolean; element?: DetectedUiElement }) {
     if (!this.snapGuideLayerEl) return;
     if (!this.isSnapEnabled || this.uiElements.length === 0 || this.isCropMode) {
       this.snapGuideLayerEl.innerHTML = '';
+      this.activeSnapLayerEl = null;
       return;
     }
 
-    const activeEl = snap?.snapped ? snap.element : null;
-    let html = '';
-
-    for (let i = 0; i < this.uiElements.length; i++) {
-      const el = this.uiElements[i];
-      const isActive = activeEl === el;
-      const activeClass = isActive ? ' active' : '';
-
-      html += `
-        <rect
-          class="snap-target-rect${activeClass}"
-          data-index="${i}"
-          x="${el.x}"
-          y="${el.y}"
-          width="${el.width}"
-          height="${el.height}"
-        />
-      `;
+    if (!this.activeSnapLayerEl || !this.snapGuideLayerEl.contains(this.activeSnapLayerEl)) {
+      const targets = this.uiElements.map((el) => `
+        <rect class="snap-target-rect" x="${el.x}" y="${el.y}"
+          width="${el.width}" height="${el.height}" rx="3" />
+      `).join('');
+      this.snapGuideLayerEl.innerHTML = `<g class="snap-targets">${targets}</g><g class="active-snap-layer"></g>`;
+      this.activeSnapLayerEl = this.snapGuideLayerEl.querySelector('.active-snap-layer');
     }
 
-    if (snap?.snapped && snap.element) {
-      const el = snap.element;
-      const rawLabel = el.name ? `[${el.role}] ${el.name}` : `[${el.role}]`;
-      const escapedLabel = escapeXml(rawLabel);
-      const badgeW = Math.max(60, rawLabel.length * 8 + 12);
-      const badgeY = Math.max(0, el.y - 18);
-
-      html += `
-        <g class="active-snap-indicator">
-          <circle cx="${snap.x}" cy="${snap.y}" r="6" fill="#38bdf8" stroke="#ffffff" stroke-width="2" />
-          <rect x="${el.x}" y="${badgeY}" width="${badgeW}" height="16" fill="#0284c7" rx="3" />
-          <text x="${el.x + 6}" y="${badgeY + 12}" fill="#ffffff" font-size="10" font-weight="600" font-family="sans-serif">${escapedLabel}</text>
-        </g>
-      `;
+    if (!snap?.snapped || !snap.element || !this.activeSnapLayerEl) {
+      if (this.activeSnapLayerEl) this.activeSnapLayerEl.innerHTML = '';
+      return;
     }
 
-    this.snapGuideLayerEl.innerHTML = html;
+    const el = snap.element;
+    const badgeText = el.name ? `[${el.role}] ${el.name}` : `[${el.role}]`;
+    const badgeW = Math.max(50, Math.min(200, badgeText.length * 7 + 10));
+    const badgeY = Math.max(0, el.y - 18);
+
+    this.activeSnapLayerEl.innerHTML = `
+      <rect
+        class="snap-target-rect active"
+        x="${el.x}"
+        y="${el.y}"
+        width="${el.width}"
+        height="${el.height}"
+        pointer-events="none"
+      />
+      <g class="active-snap-indicator">
+        <circle cx="${snap.x}" cy="${snap.y}" r="6" fill="#38bdf8" stroke="#ffffff" stroke-width="2" />
+        <circle cx="${snap.x}" cy="${snap.y}" r="2" fill="#ffffff" />
+        <rect x="${el.x}" y="${badgeY}" width="${badgeW}" height="16" fill="#0284c7" rx="3" opacity="0.9" />
+        <text x="${el.x + 5}" y="${badgeY + 12}" fill="#ffffff" font-size="10" font-weight="600" font-family="sans-serif">${escapeXml(badgeText)}</text>
+      </g>
+    `;
   }
 
   private findAnnotationAt(x: number, y: number): number | null {
     for (let i = this.scene.annotations.length - 1; i >= 0; i--) {
+      if (this.scene.hidden_annotations?.includes(i)) continue;
       const anno = this.scene.annotations[i];
       if (anno.type === 'arrow') {
         const arrow = anno as ArrowAnnotation;
@@ -706,13 +853,27 @@ export class AnnotationEditor {
 
       const newAnno = this.createDefaultAnnotation(this.activeTool, snap.x, snap.y);
       if (snap.snapped && snap.element && 'target' in newAnno) {
-        (newAnno as any).target = [
-          Math.round(snap.element.x),
-          Math.round(snap.element.y),
-          Math.round(snap.element.width),
-          Math.round(snap.element.height),
-        ];
+        const cw = this.scene.canvas.width;
+        const ch = this.scene.canvas.height;
+        const el = snap.element;
+        const isNotHuge =
+          el.width <= 650 &&
+          el.height <= 450 &&
+          (cw < 200 || ch < 200 || (
+            el.width < cw * 0.65 &&
+            el.height < ch * 0.65 &&
+            el.width * el.height < cw * ch * 0.40
+          ));
+        if (isNotHuge) {
+          (newAnno as any).target = [
+            Math.round(el.x),
+            Math.round(el.y),
+            Math.round(el.width),
+            Math.round(el.height),
+          ];
+        }
       }
+      this.clearSnapGuide();
       if (this.activeTool === 'arrow') {
         (newAnno as ArrowAnnotation).start = [Math.round(snap.x), Math.round(snap.y)];
         (newAnno as ArrowAnnotation).end = [Math.round(snap.x + 1), Math.round(snap.y + 1)];
@@ -865,11 +1026,15 @@ export class AnnotationEditor {
     }
 
     // Hovering mode (not dragging)
-    if (this.activeTool !== 'select' && this.isSnapEnabled) {
+    const cw = this.scene.canvas.width;
+    const ch = this.scene.canvas.height;
+    const isInsideCanvas = coords.x >= 0 && coords.x <= cw && coords.y >= 0 && coords.y <= ch;
+
+    if (this.activeTool !== 'select' && this.isSnapEnabled && isInsideCanvas) {
       const snap = e.altKey ? { x: coords.x, y: coords.y, snapped: false } : this.findSnapPoint(coords.x, coords.y);
       this.renderAllSnapTargets(snap);
     } else {
-      this.renderAllSnapTargets();
+      this.clearSnapGuide();
     }
   }
 
@@ -881,7 +1046,7 @@ export class AnnotationEditor {
       return;
     }
     try {
-      this.renderAllSnapTargets();
+      this.clearSnapGuide();
 
       if (this.isCreating && this.selectedIndex !== null) {
         const anno = this.scene.annotations[this.selectedIndex];
@@ -892,7 +1057,13 @@ export class AnnotationEditor {
             (arrow.end?.[1] ?? 0) - (arrow.start?.[1] ?? 0)
           );
           if (dist < 10) {
-            arrow.start = [Math.round(this.createStartX - 80), Math.round(this.createStartY - 60)];
+            const cw = this.scene.canvas.width;
+            const ch = this.scene.canvas.height;
+            let sx = this.createStartX - 80;
+            let sy = this.createStartY - 60;
+            if (sx < 10) sx = Math.min(cw - 10, this.createStartX + 80);
+            if (sy < 10) sy = Math.min(ch - 10, this.createStartY + 60);
+            arrow.start = [Math.round(sx), Math.round(sy)];
             arrow.end = [Math.round(this.createStartX), Math.round(this.createStartY)];
             this.render();
           }
@@ -906,14 +1077,18 @@ export class AnnotationEditor {
         this.isCreating = false;
         this.activeHandle = null;
         this.initialAnnotationState = null;
+        this.clearSnapGuide();
+        if (wasCreating) {
+          // Finalize annotation: completely clear selection so no blue lines, handles, or boxes remain!
+          this.selectedIndex = null;
+        }
         this.setTool('select');
         this.pushState();
-        if (wasCreating) {
-          this.updateInspector();
-        }
+        this.updateInspector();
         this.updateHandles();
       }
     } finally {
+      this.clearSnapGuide();
       this.isDraggingHandle = false;
       this.isDraggingAnnotation = false;
       this.isCreating = false;
@@ -933,8 +1108,8 @@ export class AnnotationEditor {
           end: [Math.round(x), Math.round(y)],
           style: 'primary',
           stroke_width: 2.5,
-          text: 'クリック',
-          has_text: true,
+          text: '',
+          has_text: false,
           box: true,
           position: 'auto',
         };
@@ -944,8 +1119,8 @@ export class AnnotationEditor {
           start: [Math.round(x - 100), Math.round(y)],
           control: [Math.round(x - 50), Math.round(y - 60)],
           end: [Math.round(x), Math.round(y)],
-          text: 'クリック',
-          has_text: true,
+          text: '',
+          has_text: false,
           style: 'primary',
           stroke_width: 2.5,
           box: true,
@@ -1105,6 +1280,7 @@ export class AnnotationEditor {
 
     // 2. Generous hit-test proxies for all annotations so clicking on any arrow or shape re-selects it!
     for (let i = 0; i < this.scene.annotations.length; i++) {
+      if (this.scene.hidden_annotations?.includes(i)) continue;
       const anno = this.scene.annotations[i];
       if (anno.type === 'arrow') {
         const arrow = anno as ArrowAnnotation;
@@ -1169,7 +1345,8 @@ export class AnnotationEditor {
       }
     }
 
-    if (this.selectedIndex === null || this.selectedIndex >= this.scene.annotations.length) {
+    if (this.selectedIndex === null || this.selectedIndex >= this.scene.annotations.length
+        || this.scene.hidden_annotations?.includes(this.selectedIndex)) {
       return;
     }
 
@@ -1247,6 +1424,7 @@ export class AnnotationEditor {
   }
 
   private updateInspector() {
+    this.updateLayerList();
     if (this.selectedIndex === null || this.selectedIndex >= this.scene.annotations.length) {
       this.inspectorEl.innerHTML = '<div class="empty-selection">マークを選択してください</div>';
       return;
@@ -1537,11 +1715,7 @@ export class AnnotationEditor {
     }
 
     document.getElementById('btn-delete-anno')?.addEventListener('click', () => {
-      this.scene.annotations.splice(idx, 1);
-      this.selectedIndex = null;
-      this.pushState();
-      this.render();
-      this.updateInspector();
+      this.removeAnnotation(idx);
     });
   }
 
@@ -1818,9 +1992,24 @@ export class AnnotationEditor {
 
   // --- Zoom Controls ---
 
+  public setOutputDimensions(width: number, height: number): void {
+    if (!Number.isInteger(width) || !Number.isInteger(height) || width < 10 || height < 10
+        || width > 10000 || height > 10000) return;
+    this.outputWidth = width;
+    this.outputHeight = height;
+    this.setZoom(this.zoomLevel);
+    this.zoomFit();
+  }
+
+  public getOutputDimensions(): { width: number; height: number } {
+    return { width: this.outputWidth, height: this.outputHeight };
+  }
+
   public setZoom(level: number): void {
     this.zoomLevel = Math.max(0.2, Math.min(5.0, Math.round(level * 100) / 100));
-    this.canvasContainerEl.style.transform = `scale(${this.zoomLevel})`;
+    const sx = this.zoomLevel * this.outputWidth / Math.max(1, this.scene.canvas.width);
+    const sy = this.zoomLevel * this.outputHeight / Math.max(1, this.scene.canvas.height);
+    this.canvasContainerEl.style.transform = `scale(${sx}, ${sy})`;
     this.canvasContainerEl.style.transformOrigin = 'center center';
     if (this.zoomLabelEl) {
       this.zoomLabelEl.textContent = `${Math.round(this.zoomLevel * 100)}%`;
@@ -1843,16 +2032,23 @@ export class AnnotationEditor {
     this.setZoom(1.0);
   }
 
+  private centerImage(): void {
+    const viewport = this.viewportEl.getBoundingClientRect();
+    const image = this.canvasContainerEl.getBoundingClientRect();
+    this.viewportEl.scrollLeft += image.left + image.width / 2 - viewport.left - viewport.width / 2;
+    this.viewportEl.scrollTop += image.top + image.height / 2 - viewport.top - viewport.height / 2;
+  }
+
   public zoomFit(): void {
     const vpWidth = this.viewportEl.clientWidth - 48;
     const vpHeight = this.viewportEl.clientHeight - 48;
-    const cw = this.scene.canvas.width;
-    const ch = this.scene.canvas.height;
+    const cw = this.outputWidth;
+    const ch = this.outputHeight;
     if (cw <= 0 || ch <= 0 || vpWidth <= 0 || vpHeight <= 0) return;
     const scaleX = vpWidth / cw;
     const scaleY = vpHeight / ch;
     const fitScale = Math.min(scaleX, scaleY, 1.0);
     this.setZoom(fitScale);
+    this.centerImage();
   }
 }
-

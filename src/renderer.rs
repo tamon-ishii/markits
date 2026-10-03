@@ -600,8 +600,9 @@ impl Scene {
     /// Renders the scene to an SVG string using the default layout engine and renderer.
     pub fn render_svg(&self) -> Result<String> {
         self.validate()?;
+        let visible = self.visible_scene();
         let layout_engine = LayoutEngine::new();
-        let resolved = layout_engine.layout_scene(self);
+        let resolved = layout_engine.layout_scene(&visible);
         let renderer = SvgRenderer::new();
         Ok(renderer.render_scene(&resolved))
     }
@@ -616,6 +617,7 @@ pub fn render_from_json(json_str: &str) -> Result<String> {
 /// Renders the final layout with target, candidate, collision and selected boxes overlaid.
 pub fn render_debug_from_json(json_str: &str) -> Result<String> {
     let scene = Scene::from_json(json_str)?;
+    let scene = scene.visible_scene();
     let engine = LayoutEngine::new();
     let resolved = engine.layout_scene(&scene);
     let mut svg = SvgRenderer::new().render_scene(&resolved);
@@ -645,9 +647,12 @@ pub fn render_with_layout_from_json(json_str: &str) -> Result<RenderResult> {
     let prepared = crate::semantic::prepare(json_str)?;
     let scene: Scene = serde_json::from_value(prepared.scene)?;
     scene.validate()?;
-    let resolved = LayoutEngine::new().layout_scene(&scene);
+    let ids = prepared.ids.into_iter().enumerate()
+        .filter(|(index, _)| !scene.hidden_annotations.contains(index))
+        .map(|(_, id)| id);
+    let resolved = LayoutEngine::new().layout_scene(&scene.visible_scene());
     let svg = SvgRenderer::new().render_scene(&resolved);
-    let elements = resolved.annotations.iter().zip(prepared.ids).map(|(annotation, id)| {
+    let elements = resolved.annotations.iter().zip(ids).map(|(annotation, id)| {
         let (bounds, arrow_path) = element_geometry(annotation);
         LayoutElement { id, bounds, arrow_path }
     }).collect();
@@ -670,6 +675,7 @@ mod tests {
             canvas: Canvas { width: 1920, height: 1080 },
             shadow: true,
             annotations: vec![],
+            hidden_annotations: vec![],
             uimap: None,
         };
         let svg = scene.render_svg().unwrap();

@@ -249,7 +249,7 @@ pub fn prepare(json_str: &str) -> Result<PreparedInput> {
         .as_object_mut()
         .ok_or_else(|| invalid("scene: expected a JSON object"))?;
     for key in object.keys() {
-        if !["canvas", "shadow", "annotations", "targets", "uimap", "ui_map", "ui_elements"].contains(&key.as_str()) {
+        if !["canvas", "shadow", "annotations", "hidden_annotations", "targets", "uimap", "ui_map", "ui_elements"].contains(&key.as_str()) {
             return Err(invalid(format!("scene: unknown field '{key}'")));
         }
     }

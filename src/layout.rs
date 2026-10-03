@@ -1430,6 +1430,7 @@ mod tests {
                     shadow: Some(false),
                 },
             ],
+            hidden_annotations: vec![],
             uimap: None,
         };
 
@@ -1496,6 +1497,7 @@ mod tests {
                     text_placement: None,
                 },
             ],
+            hidden_annotations: vec![],
             uimap: None,
         };
 
