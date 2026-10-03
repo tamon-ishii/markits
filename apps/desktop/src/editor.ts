@@ -6,6 +6,22 @@ function escapeXml(str: string): string {
 }
 
 
+export interface BaseImageState {
+  dataUrl: string;
+  width: number;
+  height: number;
+  uiElements: DetectedUiElement[];
+}
+
+export interface CropHistoryState {
+  dataUrl: string;
+  width: number;
+  height: number;
+  uiElements: DetectedUiElement[];
+  offset: { x: number; y: number };
+  annotations: any[];
+}
+
 export class AnnotationEditor {
   private viewportEl: HTMLElement;
   private canvasContainerEl: HTMLElement;
@@ -51,6 +67,11 @@ export class AnnotationEditor {
 
   private uiElements: DetectedUiElement[] = [];
   private isSnapEnabled: boolean = true;
+
+  private baseImageState: BaseImageState | null = null;
+  private isAutoCropped: boolean = false;
+  private autoCropOffset: { x: number; y: number } = { x: 0, y: 0 };
+  private cropHistoryStack: CropHistoryState[] = [];
 
   private activeTool: string = 'select';
   private selectedIndex: number | null = null;
@@ -153,7 +174,8 @@ export class AnnotationEditor {
     width: number,
     height: number,
     annotationsJson?: string | null,
-    uiElements?: DetectedUiElement[] | null
+    uiElements?: DetectedUiElement[] | null,
+    isInternalCrop: boolean = false
   ) {
     this.bgImgEl.src = dataUrl;
     this.scene.canvas = { width, height };
@@ -162,7 +184,21 @@ export class AnnotationEditor {
     this.setZoom(this.zoomLevel);
     this.uiElements = this.sanitizeUiElements(uiElements, width, height);
     this.activeSnapLayerEl = null;
-    console.log(`[MarkIts Editor] Initial background set with ${this.uiElements.length} snappable elements`);
+
+    if (!isInternalCrop) {
+      this.baseImageState = {
+        dataUrl,
+        width,
+        height,
+        uiElements: this.uiElements.map((el) => ({ ...el })),
+      };
+      this.isAutoCropped = false;
+      this.autoCropOffset = { x: 0, y: 0 };
+      this.cropHistoryStack = [];
+      const btnAutoCrop = document.getElementById('btn-autocrop');
+      if (btnAutoCrop) btnAutoCrop.classList.remove('active');
+      this.updateRevertCropButton();
+    }
 
     this.canvasContainerEl.style.width = `${width}px`;
     this.canvasContainerEl.style.height = `${height}px`;
@@ -193,16 +229,29 @@ export class AnnotationEditor {
       this.scene.hidden_annotations = [];
     }
 
-    this.undoStack = [];
-    this.redoStack = [];
+    if (!isInternalCrop) {
+      this.undoStack = [];
+      this.redoStack = [];
+    }
     this.selectedIndex = null;
     this.pushState();
     this.initialSceneJson = this.getSceneJson();
     this.render();
     this.updateInspector();
     this.renderAllSnapTargets();
-    setTimeout(() => this.zoomFit(), 50);
+    if (!isInternalCrop) {
+      setTimeout(() => this.zoomFit(), 50);
+    }
     window.dispatchEvent(new CustomEvent('markits-image-loaded', { detail: { width, height } }));
+  }
+
+  public updateRevertCropButton(): void {
+    const btnRevert = document.getElementById('btn-revert-crop') as HTMLButtonElement | null;
+    if (btnRevert) {
+      const isCropped = this.isAutoCropped || this.cropHistoryStack.length > 0;
+      btnRevert.disabled = !isCropped;
+      btnRevert.style.display = isCropped ? 'inline-flex' : 'none';
+    }
   }
 
   public toggleSnap(): boolean {
@@ -542,6 +591,23 @@ export class AnnotationEditor {
       const prev = this.undoStack[this.undoStack.length - 1];
       this.scene = JSON.parse(prev);
       this.selectedIndex = null;
+
+      if (this.cropHistoryStack.length > 0 &&
+          (this.scene.canvas.width !== this.outputWidth || this.scene.canvas.height !== this.outputHeight)) {
+        const lastCrop = this.cropHistoryStack.pop()!;
+        this.bgImgEl.src = lastCrop.dataUrl;
+        this.outputWidth = lastCrop.width;
+        this.outputHeight = lastCrop.height;
+        this.canvasContainerEl.style.width = `${lastCrop.width}px`;
+        this.canvasContainerEl.style.height = `${lastCrop.height}px`;
+        this.handlesLayerEl.setAttribute('viewBox', `0 0 ${lastCrop.width} ${lastCrop.height}`);
+        if (this.snapGuideLayerEl) {
+          this.snapGuideLayerEl.setAttribute('viewBox', `0 0 ${lastCrop.width} ${lastCrop.height}`);
+        }
+        this.uiElements = lastCrop.uiElements;
+        this.updateRevertCropButton();
+      }
+
       this.render();
       this.updateInspector();
     }
@@ -2043,14 +2109,189 @@ export class AnnotationEditor {
       }
     }
 
+    this.cropHistoryStack.push({
+      dataUrl: this.bgImgEl.src,
+      width: this.scene.canvas.width,
+      height: this.scene.canvas.height,
+      uiElements: this.uiElements.map((el) => ({ ...el })),
+      offset: { x: rx, y: ry },
+      annotations: JSON.parse(JSON.stringify(this.scene.annotations)),
+    });
+
     this.cancelCropMode();
     this.setBackgroundImage(
       croppedDataUrl,
       rw,
       rh,
       JSON.stringify({ canvas: { width: rw, height: rh }, shadow: this.scene.shadow, annotations: shiftedAnnotations }),
-      shiftedUiElements
+      shiftedUiElements,
+      true
     );
+    this.updateRevertCropButton();
+  }
+
+  public toggleAutoCrop(margin: number = 32): boolean {
+    if (!this.hasImage()) return false;
+
+    if (this.isAutoCropped) {
+      if (!this.baseImageState) return false;
+
+      const unshiftedAnnotations = this.scene.annotations.map((anno) => {
+        const clone = JSON.parse(JSON.stringify(anno));
+        if (clone.type === 'arrow') {
+          if (clone.start) { clone.start[0] += this.autoCropOffset.x; clone.start[1] += this.autoCropOffset.y; }
+          if (clone.end) { clone.end[0] += this.autoCropOffset.x; clone.end[1] += this.autoCropOffset.y; }
+        } else if (clone.type === 'bezier-arrow') {
+          clone.start[0] += this.autoCropOffset.x; clone.start[1] += this.autoCropOffset.y;
+          clone.control[0] += this.autoCropOffset.x; clone.control[1] += this.autoCropOffset.y;
+          clone.end[0] += this.autoCropOffset.x; clone.end[0] += this.autoCropOffset.y;
+        } else if ('target' in clone && Array.isArray(clone.target)) {
+          clone.target[0] += this.autoCropOffset.x;
+          clone.target[1] += this.autoCropOffset.y;
+        }
+        return clone;
+      });
+
+      this.isAutoCropped = false;
+      this.autoCropOffset = { x: 0, y: 0 };
+      const btnAutoCrop = document.getElementById('btn-autocrop');
+      if (btnAutoCrop) btnAutoCrop.classList.remove('active');
+
+      this.setBackgroundImage(
+        this.baseImageState.dataUrl,
+        this.baseImageState.width,
+        this.baseImageState.height,
+        JSON.stringify({
+          canvas: { width: this.baseImageState.width, height: this.baseImageState.height },
+          shadow: this.scene.shadow,
+          annotations: unshiftedAnnotations,
+        }),
+        this.baseImageState.uiElements.map((el) => ({ ...el })),
+        true
+      );
+      this.updateRevertCropButton();
+      return false;
+    } else {
+      const bounds = this.getAnnotationBounds();
+      if (!bounds) return false;
+
+      const cw = this.scene.canvas.width;
+      const ch = this.scene.canvas.height;
+      const rx = Math.max(0, Math.floor(bounds.minX - margin));
+      const ry = Math.max(0, Math.floor(bounds.minY - margin));
+      const rw = Math.min(cw - rx, Math.ceil(bounds.maxX + margin) - rx);
+      const rh = Math.min(ch - ry, Math.ceil(bounds.maxY + margin) - ry);
+
+      if (rw <= 0 || rh <= 0) return false;
+
+      const canvas = document.createElement('canvas');
+      canvas.width = rw;
+      canvas.height = rh;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return false;
+
+      ctx.drawImage(this.bgImgEl, rx, ry, rw, rh, 0, 0, rw, rh);
+      const croppedDataUrl = canvas.toDataURL('image/png');
+
+      const shiftedAnnotations = this.scene.annotations.map((anno) => {
+        const clone = JSON.parse(JSON.stringify(anno));
+        if (clone.type === 'arrow') {
+          if (clone.start) { clone.start[0] -= rx; clone.start[1] -= ry; }
+          if (clone.end) { clone.end[0] -= rx; clone.end[1] -= ry; }
+        } else if (clone.type === 'bezier-arrow') {
+          clone.start[0] -= rx; clone.start[1] -= ry;
+          clone.control[0] -= rx; clone.control[1] -= ry;
+          clone.end[0] -= rx; clone.end[1] -= ry;
+        } else if ('target' in clone && Array.isArray(clone.target)) {
+          clone.target[0] -= rx;
+          clone.target[1] -= ry;
+        }
+        return clone;
+      });
+
+      const shiftedUiElements: DetectedUiElement[] = [];
+      for (const el of this.uiElements) {
+        const ex = el.x - rx;
+        const ey = el.y - ry;
+        if (ex + el.width > 0 && ex < rw && ey + el.height > 0 && ey < rh) {
+          shiftedUiElements.push({
+            ...el,
+            x: ex,
+            y: ey,
+          });
+        }
+      }
+
+      this.isAutoCropped = true;
+      this.autoCropOffset = { x: rx, y: ry };
+      const btnAutoCrop = document.getElementById('btn-autocrop');
+      if (btnAutoCrop) btnAutoCrop.classList.add('active');
+
+      this.setBackgroundImage(
+        croppedDataUrl,
+        rw,
+        rh,
+        JSON.stringify({ canvas: { width: rw, height: rh }, shadow: this.scene.shadow, annotations: shiftedAnnotations }),
+        shiftedUiElements,
+        true
+      );
+      this.updateRevertCropButton();
+      return true;
+    }
+  }
+
+  public revertCrop(): void {
+    if (!this.baseImageState) return;
+
+    if (this.isAutoCropped) {
+      this.toggleAutoCrop();
+      return;
+    }
+
+    if (this.cropHistoryStack.length > 0) {
+      let totalOffsetX = 0;
+      let totalOffsetY = 0;
+      for (const item of this.cropHistoryStack) {
+        totalOffsetX += item.offset.x;
+        totalOffsetY += item.offset.y;
+      }
+
+      const unshiftedAnnotations = this.scene.annotations.map((anno) => {
+        const clone = JSON.parse(JSON.stringify(anno));
+        if (clone.type === 'arrow') {
+          if (clone.start) { clone.start[0] += totalOffsetX; clone.start[1] += totalOffsetY; }
+          if (clone.end) { clone.end[0] += totalOffsetX; clone.end[1] += totalOffsetY; }
+        } else if (clone.type === 'bezier-arrow') {
+          clone.start[0] += totalOffsetX; clone.start[1] += totalOffsetY;
+          clone.control[0] += totalOffsetX; clone.control[1] += totalOffsetY;
+          clone.end[0] += totalOffsetX; clone.end[1] += totalOffsetY;
+        } else if ('target' in clone && Array.isArray(clone.target)) {
+          clone.target[0] += totalOffsetX;
+          clone.target[1] += totalOffsetY;
+        }
+        return clone;
+      });
+
+      this.cropHistoryStack = [];
+      this.isAutoCropped = false;
+      this.autoCropOffset = { x: 0, y: 0 };
+      const btnAutoCrop = document.getElementById('btn-autocrop');
+      if (btnAutoCrop) btnAutoCrop.classList.remove('active');
+
+      this.setBackgroundImage(
+        this.baseImageState.dataUrl,
+        this.baseImageState.width,
+        this.baseImageState.height,
+        JSON.stringify({
+          canvas: { width: this.baseImageState.width, height: this.baseImageState.height },
+          shadow: this.scene.shadow,
+          annotations: unshiftedAnnotations,
+        }),
+        this.baseImageState.uiElements.map((el) => ({ ...el })),
+        true
+      );
+      this.updateRevertCropButton();
+    }
   }
 
   public getAnnotationBounds(): { minX: number; minY: number; maxX: number; maxY: number } | null {
@@ -2117,10 +2358,7 @@ export class AnnotationEditor {
   }
 
   public cropToAnnotations(margin: number = 32): void {
-    if (!this.hasImage()) return;
-    if (this.fitCropToAnnotations(margin)) {
-      this.applyCrop();
-    }
+    this.toggleAutoCrop(margin);
   }
 
   private handleCropMouseDown(e: MouseEvent): void {

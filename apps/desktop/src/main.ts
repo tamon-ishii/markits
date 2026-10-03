@@ -475,7 +475,10 @@ document.addEventListener('DOMContentLoaded', async () => {
     editor.toggleCropMode();
   });
   document.getElementById('btn-autocrop')?.addEventListener('click', () => {
-    editor.cropToAnnotations(32);
+    editor.toggleAutoCrop(32);
+  });
+  document.getElementById('btn-revert-crop')?.addEventListener('click', () => {
+    editor.revertCrop();
   });
 
   // --- Export Resolution Modal Flow ---

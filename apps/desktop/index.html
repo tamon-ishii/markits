@@ -32,7 +32,8 @@
           <button id="btn-toggle-snap" class="btn btn-toggle active" title="UI要素スナップ (Altで一時切替)">🧲 スナップ</button>
           <span id="ui-detection-status" class="ui-detection-status" role="status" aria-live="polite">UI 検出なし</span>
           <button id="btn-crop" class="btn btn-toggle" title="キャンバスをクロップ (切り抜き)">✂️ クロップ</button>
-          <button id="btn-autocrop" class="btn" title="マークに合わせてクロップ (余白32px)">🎯 マークでクロップ</button>
+          <button id="btn-autocrop" class="btn btn-toggle" title="マークに合わせてクロップ (トグル切替)">🎯 マークでクロップ</button>
+          <button id="btn-revert-crop" class="btn btn-sm" title="クロップを解除して元の画像に戻す" style="display: none;">↺ クロップ解除</button>
           <div class="divider-v"></div>
           <div class="zoom-controls">
             <button id="btn-zoom-out" class="btn btn-icon btn-sm" title="縮小 (Ctrl + WheelDown)">−</button>
