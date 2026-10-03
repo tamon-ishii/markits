@@ -185,6 +185,21 @@ pub fn extract_png_uimap(png_bytes: &[u8]) -> Option<Vec<UiElement>> {
     serde_json::from_str(&json_str).ok()
 }
 
+pub fn load_uimap_from_path(path: &Path) -> Result<Vec<UiElement>, Box<dyn Error>> {
+    let bytes = fs::read(path)?;
+    if bytes.starts_with(PNG_SIGNATURE) {
+        if let Some(elements) = extract_png_uimap(&bytes) {
+            return Ok(elements);
+        }
+        return Err(format!("No embedded UIMap found in PNG '{}'", path.display()).into());
+    }
+    let text = std::str::from_utf8(&bytes)
+        .map_err(|e| format!("File '{}' is neither a valid PNG nor valid UTF-8 JSON: {e}", path.display()))?;
+    let elements: Vec<UiElement> = serde_json::from_str(text)
+        .map_err(|e| format!("Failed to parse UIMap JSON from '{}': {e}", path.display()))?;
+    Ok(elements)
+}
+
 pub struct ImageInfo {
     pub width: u32,
     pub height: u32,
