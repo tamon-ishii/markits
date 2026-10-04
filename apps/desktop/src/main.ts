@@ -13,6 +13,8 @@ interface HistoryItem {
   has_annotations: boolean;
   is_cropped?: boolean;
 }
+interface ManualStudioSession { input: string; output: string }
+let manualStudioSession: ManualStudioSession | null = null;
 
 // Detect whether running inside Tauri desktop shell
 const isTauri = typeof window !== 'undefined' && ('__TAURI_INTERNALS__' in window || '__TAURI__' in window);
@@ -442,8 +444,12 @@ document.addEventListener('DOMContentLoaded', async () => {
   document.getElementById('btn-open-file')?.addEventListener('click', handleOpenFile);
   document.getElementById('btn-hero-open')?.addEventListener('click', handleOpenFile);
 
-  // Done Editing (編集終了) -> Auto-save to history and return to Home view
+  // Done Editing saves back to Manual Studio in integration mode.
   document.getElementById('btn-done-editing')?.addEventListener('click', async () => {
+    if (manualStudioSession) {
+      if (prepareExport()) await executeSaveWithResolution();
+      return;
+    }
     await switchView('home');
   });
 
@@ -597,7 +603,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     try {
       const { save } = await import('@tauri-apps/plugin-dialog');
-      const savePath = await save({
+      const savePath = manualStudioSession?.output ?? await save({
         filters: [{ name: 'PNG Image', extensions: ['png'] }],
         defaultPath: `markits_${Date.now()}.png`,
       });
@@ -612,8 +618,12 @@ document.addEventListener('DOMContentLoaded', async () => {
           uiElements: editor.getUiElements(),
           exportWidth: width,
           exportHeight: height,
-          reproductionJson: exportReproduction,
+          reproductionJson: manualStudioSession ? false : exportReproduction,
         });
+        if (manualStudioSession) {
+          await invokeTauri('cmd_manual_studio_complete');
+          return;
+        }
         await autoSaveToHistory();
         alert(exportReproduction
           ? 'PNGと同じ場所に再現用JSONを保存しました。UI名の対象は、新しい画像のUI情報を使って再現できます。'
@@ -713,7 +723,26 @@ document.addEventListener('DOMContentLoaded', async () => {
     });
   }
 
-  // Initial load
-  switchView('home');
+  // Initial load. Manual Studio launches straight into the supplied image editor.
+  if (isTauri) {
+    try {
+      manualStudioSession = await invokeTauri<ManualStudioSession | null>('cmd_manual_studio_session');
+      if (manualStudioSession) {
+        document.body.classList.add('manual-studio-integration');
+        const saveButton = document.getElementById('btn-save-file');
+        if (saveButton) { saveButton.textContent = 'Manual Studioへ注釈を返す'; saveButton.title = '注釈付きPNGを保存してManual Studioへ戻ります'; }
+        const doneButton = document.getElementById('btn-done-editing');
+        if (doneButton) { doneButton.textContent = '編集終了（Manual Studioへ返す）'; doneButton.title = '注釈付き画像を保存し、撮影AIタグへ挿入します'; }
+        const image = await invokeTauri<LoadedImageResult>('cmd_load_image', { filePath: manualStudioSession.input });
+        editor.setBackgroundImage(image.image_data_url, image.width, image.height, image.annotations_json, image.ui_elements);
+        currentHistoryId = null;
+        await switchView('editor');
+      } else {
+        switchView('home');
+      }
+    } catch (error) { switchView('home'); alert(`Manual Studio連携を開始できませんでした: ${error}`); }
+  } else {
+    switchView('home');
+  }
   await raiseAppWindow();
 });

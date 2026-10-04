@@ -1328,3 +1328,8 @@ textarea.form-control {
 .arrow-skin-option.active { box-shadow: 0 0 0 1px var(--primary) inset; }
 .arrow-skin-option:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
 .arrow-placement-hint { margin-top: 5px; color: var(--text-muted); font-size: 11px; line-height: 1.4; }
+body.manual-studio-integration #btn-trigger-capture,
+body.manual-studio-integration #btn-open-file,
+body.manual-studio-integration #btn-copy-clipboard {
+  display: none !important;
+}
