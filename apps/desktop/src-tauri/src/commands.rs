@@ -646,6 +646,7 @@ pub fn cmd_compose_and_save(
     ui_elements: Option<Vec<crate::ui_elements::DetectedUiElement>>,
     export_width: Option<u32>,
     export_height: Option<u32>,
+    reproduction_json: bool,
 ) -> Result<(), String> {
     let prefix = "data:";
     let base64_str = if background_data_url.starts_with(prefix) {
@@ -704,7 +705,93 @@ pub fn cmd_compose_and_save(
 
     fs::write(&save_path, &final_png).map_err(|e| e.to_string())?;
 
+    if reproduction_json {
+        let spec = create_reproduction_spec(&scene_json, ui_elements.as_deref())?;
+        let spec_path = std::path::Path::new(&save_path).with_extension("json");
+        let spec_bytes = serde_json::to_vec_pretty(&spec).map_err(|e| e.to_string())?;
+        fs::write(spec_path, spec_bytes).map_err(|e| e.to_string())?;
+    }
+
     Ok(())
+}
+
+fn create_reproduction_spec(
+    scene_json: &str,
+    ui_elements: Option<&[crate::ui_elements::DetectedUiElement]>,
+) -> Result<serde_json::Value, String> {
+    let mut spec: serde_json::Value =
+        serde_json::from_str(scene_json).map_err(|e| e.to_string())?;
+    let Some(elements) = ui_elements else {
+        return Ok(spec);
+    };
+    let Some(annotations) = spec
+        .get_mut("annotations")
+        .and_then(serde_json::Value::as_array_mut)
+    else {
+        return Ok(spec);
+    };
+
+    for annotation in annotations {
+        let Some(target) = annotation.get_mut("target") else {
+            continue;
+        };
+        let values = if let Some(array) = target.as_array() {
+            if array.len() != 4 {
+                continue;
+            }
+            let Some(numbers) = array
+                .iter()
+                .map(serde_json::Value::as_f64)
+                .collect::<Option<Vec<_>>>()
+            else {
+                continue;
+            };
+            numbers
+        } else if target.is_object() {
+            let fields = ["x", "y", "width", "height"];
+            let Some(numbers) = fields
+                .iter()
+                .map(|field| target.get(*field).and_then(serde_json::Value::as_f64))
+                .collect::<Option<Vec<_>>>()
+            else {
+                continue;
+            };
+            numbers
+        } else {
+            continue;
+        };
+        let matches: Vec<_> = elements
+            .iter()
+            .filter(|element| {
+                element
+                    .name
+                    .as_deref()
+                    .is_some_and(|name| !name.trim().is_empty())
+                    && [element.x, element.y, element.width, element.height]
+                        .iter()
+                        .zip(&values)
+                        .all(|(actual, expected)| actual.round() == expected.round())
+            })
+            .collect();
+        if let [element] = matches.as_slice() {
+            let name = element.name.as_deref().unwrap().trim();
+            let unique_role_name = elements
+                .iter()
+                .filter(|candidate| {
+                    candidate.role == element.role
+                        && candidate
+                            .name
+                            .as_deref()
+                            .is_some_and(|other| other.trim() == name)
+                })
+                .count()
+                == 1;
+            if unique_role_name {
+                *target = serde_json::Value::String(format!("{}:{}", element.role, name));
+            }
+        }
+    }
+    Ok(spec)
 }
 
 #[tauri::command]
@@ -782,6 +869,31 @@ mod tests {
     }
 
     #[test]
+    fn reproduction_spec_uses_unique_ui_names_for_snapped_targets() {
+        let scene = r#"{"canvas":{"width":200,"height":150},"annotations":[{"type":"rect","target":[20,20,80,40]},{"type":"circle","target":[90,90,20,20]}]}"#;
+        let elements = vec![crate::ui_elements::DetectedUiElement {
+            role: "button".into(),
+            name: Some("Save".into()),
+            window_id: None,
+            pid: None,
+            x: 20.0,
+            y: 20.0,
+            width: 80.0,
+            height: 40.0,
+        }];
+        let spec = create_reproduction_spec(scene, Some(&elements)).unwrap();
+        assert_eq!(spec["annotations"][0]["target"], "button:Save");
+        assert_eq!(
+            spec["annotations"][1]["target"],
+            serde_json::json!([90, 90, 20, 20])
+        );
+        assert!(
+            spec.get("uimap").is_none(),
+            "the sidecar should resolve names against the current image UIMap"
+        );
+    }
+
+    #[test]
     fn test_cmd_compose_and_save_with_metadata_cycle() {
         let bg_url = create_test_bg_data_url(200, 150);
         let scene_json = r#"{"canvas":{"width":200,"height":150},"annotations":[{"type":"callout","target":[20,20,80,40],"text":"Test Note","style":"primary"}]}"#;
@@ -808,11 +920,12 @@ mod tests {
             Some(elements.clone()),
             None,
             None,
+            true,
         );
         assert!(save_res.is_ok(), "compose_and_save failed: {:?}", save_res);
 
         // Verify that load_image restores image dimensions, annotations, and UI elements
-        let loaded = cmd_load_image(test_output_str).unwrap();
+        let loaded = cmd_load_image(test_output_str.clone()).unwrap();
         assert_eq!(loaded.width, 200);
         assert_eq!(loaded.height, 150);
         assert_eq!(loaded.image_data_url, create_test_bg_data_url(200, 150));
@@ -827,8 +940,14 @@ mod tests {
         assert!(restored_json.contains("Test Note"));
         assert!(restored_json.contains("callout"));
 
+        let reproduction_path = std::path::Path::new(&test_output_str).with_extension("json");
+        let reproduction: serde_json::Value =
+            serde_json::from_slice(&fs::read(&reproduction_path).unwrap()).unwrap();
+        assert_eq!(reproduction["annotations"][0]["target"], "button:OK");
+
         // Clean up
         let _ = fs::remove_file(test_output_path);
+        let _ = fs::remove_file(reproduction_path);
     }
 
     #[test]
@@ -848,6 +967,7 @@ mod tests {
             None,
             Some(800),
             Some(600),
+            false,
         );
         assert!(save_res.is_ok(), "scaled save failed: {:?}", save_res);
 
@@ -860,5 +980,4 @@ mod tests {
 
         let _ = fs::remove_file(test_output_path);
     }
-
 }

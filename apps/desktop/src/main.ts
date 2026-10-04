@@ -604,6 +604,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
       if (savePath) {
         const { width, height } = getExportDimensions();
+        const exportReproduction = (document.getElementById('save-reproduction-json') as HTMLInputElement | null)?.checked ?? false;
         await invokeTauri('cmd_compose_and_save', {
           backgroundDataUrl: bgDataUrl,
           sceneJson: editor.getSceneJson(),
@@ -611,9 +612,12 @@ document.addEventListener('DOMContentLoaded', async () => {
           uiElements: editor.getUiElements(),
           exportWidth: width,
           exportHeight: height,
+          reproductionJson: exportReproduction,
         });
         await autoSaveToHistory();
-        alert('PNGファイルとして保存しました（再編集メタデータ付き）。');
+        alert(exportReproduction
+          ? 'PNGと同じ場所に再現用JSONを保存しました。UI名の対象は、新しい画像のUI情報を使って再現できます。'
+          : 'PNGファイルとして保存しました（再編集メタデータ付き）。');
       }
     } catch (e: any) {
       alert(`保存に失敗しました: ${e?.message ?? e}`);

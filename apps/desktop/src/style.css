@@ -428,6 +428,8 @@ body.editor-view-active #btn-open-file {
 .editor-output-controls input { width: 100%; min-width: 0; box-sizing: border-box; background: var(--bg-panel); border: 1px solid var(--border-color); border-radius: 5px; color: var(--text-main); padding: 5px; font-size: 12px; }
 .editor-output-controls .btn-aspect-lock { flex: none; align-self: end; }
 .output-size-hint { color: var(--text-muted); font-size: 10px; margin-top: 7px; line-height: 1.4; }
+.reproduction-json-option { display: flex; flex-direction: row !important; align-items: center; gap: 6px !important; margin: 9px 0 0 !important; color: var(--text-main) !important; font-size: 11px !important; cursor: pointer; }
+.reproduction-json-option input { width: 13px !important; height: 13px; flex: none; margin: 0; padding: 0; border: 0; background: transparent; accent-color: #38bdf8; }
 
 .layer-section {
   min-height: 0;
