@@ -1,18 +1,44 @@
-# MarkIts — Semantic Annotation SVG Engine
+# MarkIts 
 
 <p align="center">
   <img src="markits.png" alt="MarkIts" width="400">
 </p>
 
-**MarkIts** は、スクリーンショットや画像の上に重ねる説明用アノテーションを、意味的な指示（Semantic JSON）から **SVG** または元画像と合成した **PNG** として生成する軽量な Rust ライブラリおよび CLI ツールです。
+**MarkIts** は、スクリーンショットや画像の上に説明用アノテーションを生成するCLIツールです。
 
-AI（LLM）がドキュメント作成時にスクリンショットを装飾する用途に最適です。トークン消費を抑えつつ、安定した品質のアノテーションを生成します。
+AI（LLM）と連携することに特化しており、トークン消費を抑えつつ、安定した品質のアノテーションを生成します。
 
 > **「AIは『何を説明するか』を決め、MarkItsは『どう綺麗に見せるか』を決める」**
 
 <p align="center">
   <img src="docs/images/hero_showcase.png" alt="MarkIts Hero Showcase" width="100%">
 </p>
+
+
+
+<!-- ai:task id=task-readme-screenshot-1 kind=screenshot
+撮影対象: ManualStudio
+画面の状態・表示する操作要素: トップページを撮影
+-->
+
+<!-- ai:generated id=task-readme-screenshot-1 kind=screenshot created-at=2026-10-03T17:52:28Z source-sha256=f87196e780ffeb2fdd46a671b74b229c61ca8e66c45c060df5a2840983de60ea prompt-b64=5pKu5b2x5a++6LGhOiBNYW51YWxTdHVkaW8K55S76Z2i44Gu54q25oWL44O76KGo56S644GZ44KL5pON5L2c6KaB57SgOiDjg4jjg4Pjg5fjg5rjg7zjgrjjgpLmkq7lvbE= -->
+![task-readme-screenshot-1](manual/assets/task-readme-screenshot-1.png)
+<!-- /ai:generated -->
+
+
+<!-- ai:task id=task-readme-text-1 kind=text
+対象読者と説明する操作手順を指定してください。
+-->
+
+<!-- ai:generated id=task-readme-text-1 kind=text created-at=2026-10-03T17:49:38Z source-sha256=26894114f87b1efbc80f247d06bd9388626444b7bafff055a46f280be8c8a6fa prompt-b64=5a++6LGh6Kqt6ICF44Go6Kqs5piO44GZ44KL5pON5L2c5omL6aCG44KS5oyH5a6a44GX44Gm44GP44Gg44GV44GE44CC -->
+**対象読者:** スクリーンショットを使った操作案内の作成者と、画面上の要素を指定して注釈を付ける AI エージェント。<!-- ai:fact {"claim":"UI 要素を指定して注釈を追加できる","file":"src/main.rs","contains":"Quick command to add a mark to a specific UI target without writing JSON"} -->
+
+**説明する操作手順:**
+
+1. `markits capture screen.png --detect-ui` で画面を撮影し、検出した UI 要素の情報を PNG に埋め込む。<!-- ai:fact {"claim":"capture の detect-ui は UI 要素を検出して出力 PNG に埋め込む","file":"src/main.rs","contains":"Detect desktop UI elements and embed UIMap metadata in the output PNG"} -->
+2. `markits uimap screen.png` で UI 要素の一覧を確認する。<!-- ai:fact {"claim":"uimap は画像内の UIMap を表示する","file":"src/main.rs","contains":"Present/extract UI elements map (UIMap) from an image"} -->
+3. `markits annotate screen.png --target "保存ボタン" --mark rect -o annotated.png` で対象を四角で囲み、注釈画像を保存する。<!-- ai:fact {"claim":"annotate は対象名とマーク種別を指定して PNG を出力できる","file":"src/main.rs","contains":"Output image path (.png)"} -->
+<!-- /ai:generated -->
 
 ---
 

@@ -1,0 +1,1165 @@
+
+<!doctype html>
+<html lang="ja" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+      
+      
+      
+      
+        <link rel="next" href="plans/2026-10-03-autocrop-annotation-bounds-design.html">
+      
+      
+        
+      
+      
+      <link rel="icon" href="assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
+    
+    
+      
+        <title>AI_MANUAL - ModuleLoom マニュアル</title>
+      
+    
+    
+      <link rel="stylesheet" href="assets/stylesheets/main.ec1eaa64.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+    <script>__md_scope=new URL(".",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    <body dir="ltr">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#markits-ai-manual" class="md-skip">
+          コンテンツにスキップ
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="ヘッダー">
+    <a href="." title="ModuleLoom マニュアル" class="md-header__button md-logo" aria-label="ModuleLoom マニュアル" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            ModuleLoom マニュアル
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              AI_MANUAL
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="検索" placeholder="検索" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="検索">
+        
+        <button type="reset" class="md-search__icon md-icon" title="クリア" aria-label="クリア" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            検索を初期化
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="ナビゲーション" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="." title="ModuleLoom マニュアル" class="md-nav__button md-logo" aria-label="ModuleLoom マニュアル" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    ModuleLoom マニュアル
+  </label>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    AI_MANUAL
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="AI_MANUAL.html" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    AI_MANUAL
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="目次">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      目次
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#screen-capture-image-workflow" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Screen Capture &amp; Image Workflow
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Screen Capture &amp; Image Workflow">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#1-standalone-screen-capture-markits-capture" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1. Standalone Screen Capture (markits capture)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#2-inspecting-and-reusing-uimap" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2. Inspecting and Reusing UIMap
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#uimap-named-targets" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        UIMap &amp; Named Targets
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="UIMap &amp; Named Targets">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#listing-ui-elements" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Listing UI Elements
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#smart-target-name-resolution" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Smart Target Name Resolution
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#quick-annotate-command-markits-annotate" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Quick Annotate Command (markits annotate)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Quick Annotate Command (markits annotate)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#natural-language-uimap-example" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Natural-language UIMap example
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#auto-crop-to-annotations-crop" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Auto-Crop to Annotations (--crop)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#manual-crop" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Manual Crop
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#minimal-json" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Minimal JSON
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#choose-an-annotation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Choose an annotation
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#reuse-targets" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Reuse targets
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#other-output-modes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Other output modes
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="plans/2026-10-03-autocrop-annotation-bounds-design.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    2026-10-03-autocrop-annotation-bounds-design
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="plans/2026-10-03-autocrop-annotation-bounds.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    2026-10-03-autocrop-annotation-bounds
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="plans/2026-10-03-capture-window-multiscreen-dpi-design.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    2026-10-03-capture-window-multiscreen-dpi-design
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="plans/2026-10-03-capture-window-multiscreen-dpi.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    2026-10-03-capture-window-multiscreen-dpi
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="plans/2026-10-03-desktop-rectangle-ui-snapping-design.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    2026-10-03-desktop-rectangle-ui-snapping-design
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="plans/2026-10-03-desktop-rectangle-ui-snapping.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    2026-10-03-desktop-rectangle-ui-snapping
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="plans/2026-10-03-reversible-crop-toggle-design.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    2026-10-03-reversible-crop-toggle-design
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="plans/2026-10-03-reversible-crop-toggle.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    2026-10-03-reversible-crop-toggle
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="plans/2026-10-03-standalone-capture-uimap-reuse-design.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    2026-10-03-standalone-capture-uimap-reuse-design
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="plans/2026-10-03-standalone-capture-uimap-reuse.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    2026-10-03-standalone-capture-uimap-reuse
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="plans/task.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    task
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="目次">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      目次
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#screen-capture-image-workflow" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Screen Capture &amp; Image Workflow
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Screen Capture &amp; Image Workflow">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#1-standalone-screen-capture-markits-capture" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1. Standalone Screen Capture (markits capture)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#2-inspecting-and-reusing-uimap" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2. Inspecting and Reusing UIMap
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#uimap-named-targets" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        UIMap &amp; Named Targets
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="UIMap &amp; Named Targets">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#listing-ui-elements" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Listing UI Elements
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#smart-target-name-resolution" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Smart Target Name Resolution
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#quick-annotate-command-markits-annotate" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Quick Annotate Command (markits annotate)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Quick Annotate Command (markits annotate)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#natural-language-uimap-example" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Natural-language UIMap example
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#auto-crop-to-annotations-crop" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Auto-Crop to Annotations (--crop)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#manual-crop" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Manual Crop
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#minimal-json" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Minimal JSON
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#choose-an-annotation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Choose an annotation
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#reuse-targets" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Reuse targets
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#other-output-modes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Other output modes
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+
+<h1 id="markits-ai-manual">MarkIts AI Manual</h1>
+<p>For agents that can view images and run local commands. MarkIts draws annotations at pixel coordinates or resolved UI targets supplied in JSON or extracted from image UIMap metadata.</p>
+<h2 id="screen-capture-image-workflow">Screen Capture &amp; Image Workflow</h2>
+<h3 id="1-standalone-screen-capture-markits-capture">1. Standalone Screen Capture (<code>markits capture</code>)</h3>
+<p>Take screenshots directly using MarkIts CLI:
+<div class="highlight"><pre><span></span><code><span class="c1"># Fast capture without UI detection (&lt;20ms)</span>
+markits<span class="w"> </span>capture<span class="w"> </span>screenshot.png
+
+<span class="c1"># Capture with desktop UI detection (embeds UIMap into PNG metadata)</span>
+markits<span class="w"> </span>capture<span class="w"> </span>screenshot.png<span class="w"> </span>--detect-ui
+
+<span class="c1"># List displays, then capture the second display (indices start at 0)</span>
+markits<span class="w"> </span>capture<span class="w"> </span>--list-screens
+markits<span class="w"> </span>capture<span class="w"> </span>second-display.png<span class="w"> </span>--screen<span class="w"> </span><span class="m">1</span>
+
+<span class="c1"># List windows, then capture one by a partial title, window ID, or process ID</span>
+markits<span class="w"> </span>capture<span class="w"> </span>--list-windows
+markits<span class="w"> </span>capture<span class="w"> </span>app-window.png<span class="w"> </span>--window<span class="w"> </span><span class="s2">"設定"</span>
+markits<span class="w"> </span>capture<span class="w"> </span>app-window.png<span class="w"> </span>--pid<span class="w"> </span><span class="m">1234</span>
+
+<span class="c1"># REUSE UIMAP: Fast capture carrying over UIMap metadata from a previous screenshot</span>
+markits<span class="w"> </span>capture<span class="w"> </span>screenshot2.png<span class="w"> </span>--uimap<span class="w"> </span>screenshot.png
+
+<span class="c1"># Capture and immediately box a button in one shot</span>
+markits<span class="w"> </span>capture<span class="w"> </span>annotated.png<span class="w"> </span>--uimap<span class="w"> </span>screenshot.png<span class="w"> </span>--target<span class="w"> </span><span class="s2">"保存ボタン"</span><span class="w"> </span>--mark<span class="w"> </span>rect
+
+<span class="c1"># Capture, mark target, and auto-crop tightly around it in one shot</span>
+markits<span class="w"> </span>capture<span class="w"> </span>button_crop.png<span class="w"> </span>--target<span class="w"> </span><span class="s2">"保存ボタン"</span><span class="w"> </span>--mark<span class="w"> </span>rect<span class="w"> </span>--crop<span class="w"> </span>--crop-margin<span class="w"> </span><span class="m">16</span>
+</code></pre></div></p>
+<h3 id="2-inspecting-and-reusing-uimap">2. Inspecting and Reusing UIMap</h3>
+<ol>
+<li>View source image or inspect UI elements using <code>markits uimap screenshot.png</code>.
+   Export map as JSON if needed: <code>markits uimap screenshot.png --json --output uimap.json</code>.</li>
+<li>Run <code>markits inspect screenshot.png</code> for dimensions and embedded UIMap status.
+   Output: <code>{"width":800,"height":480,"format":"png","has_uimap":true,"uimap_elements_count":5}</code>.</li>
+<li>Annotating by UI element name:</li>
+<li><strong>Quick Command</strong>:
+     <code>markits annotate screenshot.png -o annotated.png --target "保存ボタン" --mark rect</code>
+     (or <code>--mark pin --text "ここをクリック"</code>)</li>
+<li><strong>External / Carried-Over UIMap</strong>: <code>--uimap</code> accepts both <code>.json</code> files AND <code>.png</code> images containing embedded metadata!</li>
+<li>Output PNG automatically preserves UIMap metadata so further annotations can be chained.</li>
+</ol>
+<p>PNG and JPEG input are supported; image output is PNG. <code>--output</code> must end in <code>.png</code>. If JSON explicitly includes <code>canvas</code>, its dimensions must match the image. Errors go to stderr with a nonzero exit status.</p>
+<h2 id="uimap-named-targets">UIMap &amp; Named Targets</h2>
+<p>When screenshots are captured with UI metadata (or provided via <code>--uimap ui.json</code>), MarkIts automatically matches named targets.</p>
+<h3 id="listing-ui-elements">Listing UI Elements</h3>
+<div class="highlight"><pre><span></span><code><span class="c1"># Human-readable list</span>
+markits<span class="w"> </span>uimap<span class="w"> </span>screenshot.png
+
+<span class="c1"># Filter by role</span>
+markits<span class="w"> </span>uimap<span class="w"> </span>screenshot.png<span class="w"> </span>--filter<span class="w"> </span>button
+
+<span class="c1"># Machine-readable JSON output</span>
+markits<span class="w"> </span>uimap<span class="w"> </span>screenshot.png<span class="w"> </span>--json
+</code></pre></div>
+<h3 id="smart-target-name-resolution">Smart Target Name Resolution</h3>
+<p>In <code>target</code> fields (or <code>--target</code> argument):
+- <strong>Exact Name</strong>: <code>"target": "保存"</code> matches element with <code>name: "保存"</code>.
+- <strong>Fuzzy / Suffix Match</strong>: <code>"target": "保存ボタン"</code> automatically strips common Japanese suffixes like "ボタン" to match element <code>"保存"</code>.
+- <strong>Role Prefix</strong>: <code>"target": "button:保存"</code> disambiguates buttons from text labels.
+- <strong>Index Reference</strong>: <code>"target": "ui-1"</code> or <code>"target": "button:1"</code> targets the first UI element or first button.
+- <strong>Numeric Index</strong>: <code>"target": "1"</code> targets the first UIMap element. Indices are one-based and match the numbered human-readable UIMap output.
+- <strong>Explicit Rect</strong>: <code>[x, y, width, height]</code> is always supported as fallback.</p>
+<h2 id="quick-annotate-command-markits-annotate">Quick Annotate Command (<code>markits annotate</code>)</h2>
+<p>For AI and automation, add annotations in a single command without writing a JSON file:</p>
+<div class="highlight"><pre><span></span><code>markits<span class="w"> </span>annotate<span class="w"> </span>screenshot.png<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>-o<span class="w"> </span>annotated.png<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--target<span class="w"> </span><span class="s2">"保存"</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--mark<span class="w"> </span>pin<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--text<span class="w"> </span><span class="s2">"ここをクリック"</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--style<span class="w"> </span>primary
+</code></pre></div>
+<p>Arguments:
+- <code>--target &lt;TARGET&gt;</code>: UI element name (<code>"保存"</code>), role prefix (<code>"button:保存"</code>), or <code>x,y,w,h</code> (<code>100,50,80,32</code>).
+- <code>--mark &lt;TYPE&gt;</code>: <code>pin</code> (default), <code>rect</code>, <code>rounded-rect</code>, <code>callout</code>, <code>arrow</code>, <code>step-arrow</code>, <code>badge</code>, <code>spotlight</code>, <code>bullseye</code>.
+- <code>--step &lt;NUMBER&gt;</code>: Number shown by <code>badge</code> or <code>step-arrow</code> (for example, <code>--step 1</code>).
+- <code>--text &lt;STRING&gt;</code>: Optional label text.
+- <code>--style &lt;STYLE&gt;</code>: <code>primary</code> (default), <code>secondary</code>, <code>warning</code>, <code>danger</code>, <code>info</code>, <code>step</code>, <code>pink</code>.
+- <code>--uimap &lt;PATH&gt;</code>: Optional external UIMap file: accepts either a <code>.json</code> file or an existing <code>.png</code> image with embedded metadata.
+- <code>--crop</code>: Auto-crop output image to the bounding box enclosing all annotations.
+- <code>--crop-margin &lt;PIXELS&gt;</code>: Margin around annotation bounding box when cropping (default: <code>32</code>).</p>
+<h3 id="natural-language-uimap-example">Natural-language UIMap example</h3>
+<p>For a request such as “put a 1 mark on the Save button”, inspect the UIMap first, then use the matching numbered element:</p>
+<div class="highlight"><pre><span></span><code>markits<span class="w"> </span>uimap<span class="w"> </span>screenshot.png<span class="w"> </span>--json<span class="w"> </span>--output<span class="w"> </span>uimap.json
+markits<span class="w"> </span>annotate<span class="w"> </span>screenshot.png<span class="w"> </span>--uimap<span class="w"> </span>uimap.json<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--target<span class="w"> </span><span class="m">1</span><span class="w"> </span>--mark<span class="w"> </span>badge<span class="w"> </span>--step<span class="w"> </span><span class="m">1</span><span class="w"> </span>--style<span class="w"> </span>step<span class="w"> </span>--output<span class="w"> </span>annotated.png
+</code></pre></div>
+<h2 id="auto-crop-to-annotations-crop">Auto-Crop to Annotations (<code>--crop</code>)</h2>
+<p>Add <code>--crop</code> and <code>--crop-margin &lt;PX&gt;</code> (default <code>32</code>) to <code>markits annotate</code>, <code>markits render</code>, or <code>markits capture</code>.
+- MarkIts calculates the union bounding box of all annotations and expands it by <code>crop-margin</code> pixels (clamped to the image canvas).
+- Embedded UIMap metadata is preserved: elements inside the crop are shifted relative to <code>(0, 0)</code> of the cropped image.</p>
+<h2 id="manual-crop">Manual Crop</h2>
+<p>Run <code>markits crop screenshot.png --x 120 --y 80 --width 640 --height 400 --output cropped.png</code> to keep exactly that rectangle. The output is a 640 × 400 PNG; pixels outside the rectangle are removed rather than covered. Coordinates are measured from the source image's top-left corner. The rectangle must be nonempty and entirely inside the source image.</p>
+<h2 id="minimal-json">Minimal JSON</h2>
+<div class="highlight"><pre><span></span><code><span class="p">{</span>
+<span class="w">  </span><span class="nt">"annotations"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span>
+<span class="w">    </span><span class="p">{</span><span class="nt">"type"</span><span class="p">:</span><span class="w"> </span><span class="s2">"pin"</span><span class="p">,</span><span class="w"> </span><span class="nt">"target"</span><span class="p">:</span><span class="w"> </span><span class="s2">"保存ボタン"</span><span class="p">,</span><span class="w"> </span><span class="nt">"text"</span><span class="p">:</span><span class="w"> </span><span class="s2">"ここをクリック"</span><span class="p">,</span><span class="w"> </span><span class="nt">"style"</span><span class="p">:</span><span class="w"> </span><span class="s2">"primary"</span><span class="p">},</span>
+<span class="w">    </span><span class="p">{</span><span class="nt">"type"</span><span class="p">:</span><span class="w"> </span><span class="s2">"rounded-rect"</span><span class="p">,</span><span class="w"> </span><span class="nt">"target"</span><span class="p">:</span><span class="w"> </span><span class="s2">"キャンセル"</span><span class="p">,</span><span class="w"> </span><span class="nt">"style"</span><span class="p">:</span><span class="w"> </span><span class="s2">"secondary"</span><span class="p">}</span>
+<span class="w">  </span><span class="p">]</span>
+<span class="p">}</span>
+</code></pre></div>
+<p>If coordinates are used directly, <code>target</code> is <code>[x, y, width, height]</code> in image pixels.</p>
+<h2 id="choose-an-annotation">Choose an annotation</h2>
+<table>
+<thead>
+<tr>
+<th>Request</th>
+<th>Annotation JSON entry</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Box a region</td>
+<td><code>{"type":"rect","target":"保存"}</code> or <code>[x,y,w,h]</code></td>
+</tr>
+<tr>
+<td>Box with rounded corners</td>
+<td><code>{"type":"rounded-rect","target":"保存","rx":8}</code></td>
+</tr>
+<tr>
+<td>Pin tag with icon/text</td>
+<td><code>{"type":"pin","target":"保存","text":"Click here"}</code></td>
+</tr>
+<tr>
+<td>Add a callout with pointer</td>
+<td><code>{"type":"callout","target":"保存","text":"Explanation","outline":false}</code></td>
+</tr>
+<tr>
+<td>Add a label only</td>
+<td><code>{"type":"label","target":"保存","text":"Explanation","outline":false}</code></td>
+</tr>
+<tr>
+<td>Number a step</td>
+<td><code>{"type":"badge","target":"保存","step":1}</code></td>
+</tr>
+<tr>
+<td>Number with arrow</td>
+<td><code>{"type":"step-arrow","target":"保存","step":1}</code></td>
+</tr>
+<tr>
+<td>Dim outside a region</td>
+<td><code>{"type":"spotlight","target":"保存"}</code></td>
+</tr>
+<tr>
+<td>High-level click instruction</td>
+<td><code>{"type":"instruction","action":"click","target":"保存","text":"Click here"}</code></td>
+</tr>
+</tbody>
+</table>
+<p>Other supported types: <code>pin</code>, <code>arrow</code>, <code>bezier-arrow</code>, <code>bullseye</code>, <code>divider</code>. <code>arrow</code> and <code>bezier-arrow</code> support text labels (<code>"text":"Label"</code>) with <code>"text_placement": "middle"</code> (default) or <code>"end"</code>. <code>middle</code> uses the shaft center as its anchor and moves the label clear of the line according to its bounds and arrow direction. <code>end</code> places it beyond the tail, on the side without the triangular head. For Bezier arrows, <code>position</code> controls the side used for a centered label.</p>
+<h2 id="reuse-targets">Reuse targets</h2>
+<div class="highlight"><pre><span></span><code><span class="p">{</span>
+<span class="w">  </span><span class="nt">"targets"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="nt">"save-button"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="mi">240</span><span class="p">,</span><span class="w"> </span><span class="mi">180</span><span class="p">,</span><span class="w"> </span><span class="mi">180</span><span class="p">,</span><span class="w"> </span><span class="mi">50</span><span class="p">]},</span>
+<span class="w">  </span><span class="nt">"annotations"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span>
+<span class="w">    </span><span class="p">{</span><span class="nt">"type"</span><span class="p">:</span><span class="w"> </span><span class="s2">"rect"</span><span class="p">,</span><span class="w"> </span><span class="nt">"target"</span><span class="p">:</span><span class="w"> </span><span class="s2">"save-button"</span><span class="p">},</span>
+<span class="w">    </span><span class="p">{</span><span class="nt">"type"</span><span class="p">:</span><span class="w"> </span><span class="s2">"callout"</span><span class="p">,</span><span class="w"> </span><span class="nt">"target"</span><span class="p">:</span><span class="w"> </span><span class="s2">"save-button"</span><span class="p">,</span><span class="w"> </span><span class="nt">"text"</span><span class="p">:</span><span class="w"> </span><span class="s2">"Click Save"</span><span class="p">,</span><span class="w"> </span><span class="nt">"outline"</span><span class="p">:</span><span class="w"> </span><span class="kc">false</span><span class="p">}</span>
+<span class="w">  </span><span class="p">]</span>
+<span class="p">}</span>
+</code></pre></div>
+<h2 id="other-output-modes">Other output modes</h2>
+<p>For SVG output, include <code>"canvas":{"width":800,"height":480}</code> in JSON. <code>markits render annotations.json &gt; overlay.svg</code> writes a transparent SVG. <code>markits render annotations.json --layout-json &gt; layout.json</code> writes the SVG plus element IDs, bounds, and arrow paths as JSON. <code>markits manual</code> prints this document from the installed binary.</p>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": ".", "features": [], "search": "assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "\u30b3\u30d4\u30fc\u3057\u307e\u3057\u305f", "clipboard.copy": "\u30af\u30ea\u30c3\u30d7\u30dc\u30fc\u30c9\u3078\u30b3\u30d4\u30fc", "search.result.more.one": "\u3053\u306e\u30da\u30fc\u30b8\u5185\u306b\u3082\u30461\u4ef6\u898b\u3064\u304b\u308a\u307e\u3057\u305f", "search.result.more.other": "\u3053\u306e\u30da\u30fc\u30b8\u5185\u306b\u3042\u3068#\u4ef6\u898b\u3064\u304b\u308a\u307e\u3057\u305f", "search.result.none": "\u4f55\u3082\u898b\u3064\u304b\u308a\u307e\u305b\u3093\u3067\u3057\u305f", "search.result.one": "1\u4ef6\u898b\u3064\u304b\u308a\u307e\u3057\u305f", "search.result.other": "#\u4ef6\u898b\u3064\u304b\u308a\u307e\u3057\u305f", "search.result.placeholder": "\u691c\u7d22\u30ad\u30fc\u30ef\u30fc\u30c9\u3092\u5165\u529b\u3057\u3066\u304f\u3060\u3055\u3044", "search.result.term.missing": "\u691c\u7d22\u306b\u542b\u307e\u308c\u306a\u3044", "select.version": "\u30d0\u30fc\u30b8\u30e7\u30f3\u5207\u308a\u66ff\u3048"}, "version": null}</script>
+    
+    
+      <script src="assets/javascripts/bundle.d7400e89.min.js"></script>
+      
+    
+  </body>
+</html>

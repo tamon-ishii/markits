@@ -1,0 +1,17 @@
+{
+  "docs": "docs",
+  "output": "manual",
+  "targets": [
+    "docs",
+    "README.md"
+  ],
+  "format": "mkdocs",
+  "agent": "agy",
+  "model": "",
+  "mkdocs": {
+    "site_name": "ModuleLoom マニュアル",
+    "theme": "material",
+    "language": "ja",
+    "use_directory_urls": false
+  }
+}

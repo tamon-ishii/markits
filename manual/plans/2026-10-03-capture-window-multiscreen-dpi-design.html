@@ -1,0 +1,1069 @@
+
+<!doctype html>
+<html lang="ja" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+      
+      
+      
+        <link rel="prev" href="2026-10-03-autocrop-annotation-bounds.html">
+      
+      
+        <link rel="next" href="2026-10-03-capture-window-multiscreen-dpi.html">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
+    
+    
+      
+        <title>2026-10-03-capture-window-multiscreen-dpi-design - ModuleLoom マニュアル</title>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.ec1eaa64.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    <body dir="ltr">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#design-window-capture-multi-screen-selection-and-high-dpi-scaling" class="md-skip">
+          コンテンツにスキップ
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="ヘッダー">
+    <a href=".." title="ModuleLoom マニュアル" class="md-header__button md-logo" aria-label="ModuleLoom マニュアル" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            ModuleLoom マニュアル
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              2026-10-03-capture-window-multiscreen-dpi-design
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="検索" placeholder="検索" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="検索">
+        
+        <button type="reset" class="md-search__icon md-icon" title="クリア" aria-label="クリア" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            検索を初期化
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="ナビゲーション" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href=".." title="ModuleLoom マニュアル" class="md-nav__button md-logo" aria-label="ModuleLoom マニュアル" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    ModuleLoom マニュアル
+  </label>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../AI_MANUAL.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    AI_MANUAL
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="2026-10-03-autocrop-annotation-bounds-design.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    2026-10-03-autocrop-annotation-bounds-design
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="2026-10-03-autocrop-annotation-bounds.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    2026-10-03-autocrop-annotation-bounds
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    2026-10-03-capture-window-multiscreen-dpi-design
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="2026-10-03-capture-window-multiscreen-dpi-design.html" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    2026-10-03-capture-window-multiscreen-dpi-design
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="目次">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      目次
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#1-overview-context" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1. Overview &amp; Context
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#2-requirements-goals" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2. Requirements &amp; Goals
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="2. Requirements &amp; Goals">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#21-functional-requirements" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2.1 Functional Requirements
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#3-data-structures-core-api-srccapturers" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3. Data Structures &amp; Core API (src/capture.rs)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#4-high-dpi-scaling-coordinate-alignment" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4. High-DPI Scaling &amp; Coordinate Alignment
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="4. High-DPI Scaling &amp; Coordinate Alignment">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#41-problem" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4.1 Problem
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#42-normalization-algorithm" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4.2 Normalization Algorithm
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#5-cli-interface-specifications" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5. CLI Interface Specifications
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="5. CLI Interface Specifications">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#51-discovery-commands" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.1 Discovery Commands
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#52-capture-commands" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.2 Capture Commands
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#6-testing-strategy" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6. Testing Strategy
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="2026-10-03-capture-window-multiscreen-dpi.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    2026-10-03-capture-window-multiscreen-dpi
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="2026-10-03-desktop-rectangle-ui-snapping-design.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    2026-10-03-desktop-rectangle-ui-snapping-design
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="2026-10-03-desktop-rectangle-ui-snapping.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    2026-10-03-desktop-rectangle-ui-snapping
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="2026-10-03-reversible-crop-toggle-design.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    2026-10-03-reversible-crop-toggle-design
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="2026-10-03-reversible-crop-toggle.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    2026-10-03-reversible-crop-toggle
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="2026-10-03-standalone-capture-uimap-reuse-design.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    2026-10-03-standalone-capture-uimap-reuse-design
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="2026-10-03-standalone-capture-uimap-reuse.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    2026-10-03-standalone-capture-uimap-reuse
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="task.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    task
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="目次">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      目次
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#1-overview-context" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1. Overview &amp; Context
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#2-requirements-goals" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2. Requirements &amp; Goals
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="2. Requirements &amp; Goals">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#21-functional-requirements" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2.1 Functional Requirements
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#3-data-structures-core-api-srccapturers" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3. Data Structures &amp; Core API (src/capture.rs)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#4-high-dpi-scaling-coordinate-alignment" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4. High-DPI Scaling &amp; Coordinate Alignment
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="4. High-DPI Scaling &amp; Coordinate Alignment">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#41-problem" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4.1 Problem
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#42-normalization-algorithm" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4.2 Normalization Algorithm
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#5-cli-interface-specifications" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5. CLI Interface Specifications
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="5. CLI Interface Specifications">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#51-discovery-commands" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.1 Discovery Commands
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#52-capture-commands" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.2 Capture Commands
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#6-testing-strategy" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6. Testing Strategy
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+
+<h1 id="design-window-capture-multi-screen-selection-and-high-dpi-scaling">Design: Window Capture, Multi-Screen Selection, and High-DPI Scaling</h1>
+<h2 id="1-overview-context">1. Overview &amp; Context</h2>
+<p>When integrating MarkIts with desktop automation engines and automated documentation builders (<code>ModuleLoom</code>, <code>manual-core</code>, <code>desktop_scenario</code>), direct control over which screen or window is captured is essential.</p>
+<p>Currently, MarkIts defaults to capturing the primary screen and lacks:
+1. Native window/process-targeted capture without manual boundary computation.
+2. Multi-monitor enumeration and display selection (<code>--screen &lt;INDEX&gt;</code>).
+3. High-DPI / scale-factor normalization between physical image pixels and logical accessibility tree points.</p>
+<p>This document specifies the design for adding these three capabilities to the MarkIts core library and CLI.</p>
+<hr />
+<h2 id="2-requirements-goals">2. Requirements &amp; Goals</h2>
+<h3 id="21-functional-requirements">2.1 Functional Requirements</h3>
+<ul>
+<li><strong>Screen Enumeration (<code>--list-screens</code>)</strong>:</li>
+<li>List all connected displays with screen index, device name, geometry <code>(x, y, width, height)</code>, scale factor, and primary display flag.</li>
+<li>Support human-readable terminal output and machine-readable <code>--json</code> output.</li>
+<li><strong>Window Enumeration (<code>--list-windows</code>)</strong>:</li>
+<li>List capturable top-level desktop windows with window ID, process ID (PID), window title, owning application name, and geometry.</li>
+<li>Support human-readable terminal output and machine-readable <code>--json</code> output.</li>
+<li><strong>Targeted Screen Capture (<code>--screen &lt;INDEX&gt;</code>)</strong>:</li>
+<li>Capture a specified monitor by 0-indexed integer (e.g. <code>--screen 0</code>, <code>--screen 1</code>) or <code>'primary'</code>.</li>
+<li><strong>Targeted Window Capture (<code>--window &lt;QUERY&gt;</code> / <code>--pid &lt;PID&gt;</code>)</strong>:</li>
+<li>Capture a window directly by title substring (case-insensitive) or window ID.</li>
+<li>Capture the primary window associated with a given operating system PID.</li>
+<li>Filter and offset detected UI elements to align with the captured window's local coordinate space <code>(0, 0)</code>.</li>
+<li><strong>High-DPI / Scale Factor Normalization</strong>:</li>
+<li>Retrieve the target display's <code>scale_factor</code> (e.g. <code>1.0</code>, <code>1.25</code>, <code>1.5</code>, <code>2.0</code>).</li>
+<li>Scale logical accessibility bounding boxes (<code>x</code>, <code>y</code>, <code>width</code>, <code>height</code>) by <code>scale_factor</code> so that annotations align with physical pixel positions in the screenshot.</li>
+<li>Embed <code>markits:scale_factor</code> into the PNG metadata tEXt chunks.</li>
+</ul>
+<hr />
+<h2 id="3-data-structures-core-api-srccapturers">3. Data Structures &amp; Core API (<code>src/capture.rs</code>)</h2>
+<div class="highlight"><pre><span></span><code><span class="cp">#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]</span>
+<span class="k">pub</span><span class="w"> </span><span class="k">struct</span><span class="w"> </span><span class="nc">ScreenInfo</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="k">pub</span><span class="w"> </span><span class="n">index</span><span class="p">:</span><span class="w"> </span><span class="kt">usize</span><span class="p">,</span>
+<span class="w">    </span><span class="k">pub</span><span class="w"> </span><span class="n">name</span><span class="p">:</span><span class="w"> </span><span class="nb">String</span><span class="p">,</span>
+<span class="w">    </span><span class="k">pub</span><span class="w"> </span><span class="n">x</span><span class="p">:</span><span class="w"> </span><span class="kt">i32</span><span class="p">,</span>
+<span class="w">    </span><span class="k">pub</span><span class="w"> </span><span class="n">y</span><span class="p">:</span><span class="w"> </span><span class="kt">i32</span><span class="p">,</span>
+<span class="w">    </span><span class="k">pub</span><span class="w"> </span><span class="n">width</span><span class="p">:</span><span class="w"> </span><span class="kt">u32</span><span class="p">,</span>
+<span class="w">    </span><span class="k">pub</span><span class="w"> </span><span class="n">height</span><span class="p">:</span><span class="w"> </span><span class="kt">u32</span><span class="p">,</span>
+<span class="w">    </span><span class="k">pub</span><span class="w"> </span><span class="n">scale_factor</span><span class="p">:</span><span class="w"> </span><span class="kt">f64</span><span class="p">,</span>
+<span class="w">    </span><span class="k">pub</span><span class="w"> </span><span class="n">is_primary</span><span class="p">:</span><span class="w"> </span><span class="kt">bool</span><span class="p">,</span>
+<span class="p">}</span>
+
+<span class="cp">#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]</span>
+<span class="k">pub</span><span class="w"> </span><span class="k">struct</span><span class="w"> </span><span class="nc">WindowInfo</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="k">pub</span><span class="w"> </span><span class="n">id</span><span class="p">:</span><span class="w"> </span><span class="kt">u32</span><span class="p">,</span>
+<span class="w">    </span><span class="k">pub</span><span class="w"> </span><span class="n">pid</span><span class="p">:</span><span class="w"> </span><span class="nb">Option</span><span class="o">&lt;</span><span class="kt">u32</span><span class="o">&gt;</span><span class="p">,</span>
+<span class="w">    </span><span class="k">pub</span><span class="w"> </span><span class="n">title</span><span class="p">:</span><span class="w"> </span><span class="nb">String</span><span class="p">,</span>
+<span class="w">    </span><span class="k">pub</span><span class="w"> </span><span class="n">app_name</span><span class="p">:</span><span class="w"> </span><span class="nb">String</span><span class="p">,</span>
+<span class="w">    </span><span class="k">pub</span><span class="w"> </span><span class="n">x</span><span class="p">:</span><span class="w"> </span><span class="kt">i32</span><span class="p">,</span>
+<span class="w">    </span><span class="k">pub</span><span class="w"> </span><span class="n">y</span><span class="p">:</span><span class="w"> </span><span class="kt">i32</span><span class="p">,</span>
+<span class="w">    </span><span class="k">pub</span><span class="w"> </span><span class="n">width</span><span class="p">:</span><span class="w"> </span><span class="kt">u32</span><span class="p">,</span>
+<span class="w">    </span><span class="k">pub</span><span class="w"> </span><span class="n">height</span><span class="p">:</span><span class="w"> </span><span class="kt">u32</span><span class="p">,</span>
+<span class="w">    </span><span class="k">pub</span><span class="w"> </span><span class="n">is_minimized</span><span class="p">:</span><span class="w"> </span><span class="kt">bool</span><span class="p">,</span>
+<span class="p">}</span>
+
+<span class="cp">#[derive(Debug, Clone)]</span>
+<span class="k">pub</span><span class="w"> </span><span class="k">enum</span><span class="w"> </span><span class="nc">WindowQuery</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="n">TitleOrId</span><span class="p">(</span><span class="nb">String</span><span class="p">),</span>
+<span class="w">    </span><span class="n">Pid</span><span class="p">(</span><span class="kt">u32</span><span class="p">),</span>
+<span class="p">}</span>
+
+<span class="sd">/// List all connected screens.</span>
+<span class="k">pub</span><span class="w"> </span><span class="k">fn</span><span class="w"> </span><span class="nf">list_screens</span><span class="p">()</span><span class="w"> </span><span class="p">-&gt;</span><span class="w"> </span><span class="nb">Result</span><span class="o">&lt;</span><span class="nb">Vec</span><span class="o">&lt;</span><span class="n">ScreenInfo</span><span class="o">&gt;</span><span class="p">,</span><span class="w"> </span><span class="n">CaptureError</span><span class="o">&gt;</span><span class="p">;</span>
+
+<span class="sd">/// List all visible, capturable windows.</span>
+<span class="k">pub</span><span class="w"> </span><span class="k">fn</span><span class="w"> </span><span class="nf">list_windows</span><span class="p">()</span><span class="w"> </span><span class="p">-&gt;</span><span class="w"> </span><span class="nb">Result</span><span class="o">&lt;</span><span class="nb">Vec</span><span class="o">&lt;</span><span class="n">WindowInfo</span><span class="o">&gt;</span><span class="p">,</span><span class="w"> </span><span class="n">CaptureError</span><span class="o">&gt;</span><span class="p">;</span>
+
+<span class="sd">/// Capture a specific screen by index.</span>
+<span class="k">pub</span><span class="w"> </span><span class="k">fn</span><span class="w"> </span><span class="nf">capture_screen</span><span class="p">(</span><span class="n">screen_index</span><span class="p">:</span><span class="w"> </span><span class="kt">usize</span><span class="p">)</span><span class="w"> </span><span class="p">-&gt;</span><span class="w"> </span><span class="nb">Result</span><span class="o">&lt;</span><span class="n">CapturedImage</span><span class="p">,</span><span class="w"> </span><span class="n">CaptureError</span><span class="o">&gt;</span><span class="p">;</span>
+
+<span class="sd">/// Capture a window by query (title substring, ID, or PID).</span>
+<span class="sd">/// Prioritizes native window buffer capture; falls back to locating the window on its</span>
+<span class="sd">/// display and cropping the screen buffer if native capture fails.</span>
+<span class="k">pub</span><span class="w"> </span><span class="k">fn</span><span class="w"> </span><span class="nf">capture_window_by_query</span><span class="p">(</span><span class="n">query</span><span class="p">:</span><span class="w"> </span><span class="kp">&amp;</span><span class="nc">WindowQuery</span><span class="p">)</span><span class="w"> </span><span class="p">-&gt;</span><span class="w"> </span><span class="nb">Result</span><span class="o">&lt;</span><span class="n">CapturedImage</span><span class="p">,</span><span class="w"> </span><span class="n">CaptureError</span><span class="o">&gt;</span><span class="p">;</span>
+</code></pre></div>
+<hr />
+<h2 id="4-high-dpi-scaling-coordinate-alignment">4. High-DPI Scaling &amp; Coordinate Alignment</h2>
+<h3 id="41-problem">4.1 Problem</h3>
+<p>On high-DPI displays (such as 4K or Retina displays with 150% or 200% scaling):
+- Screenshot image buffer: Physical pixels (e.g. $3840 \times 2160$).
+- OS Accessibility API (AT-SPI on Linux, Accessibility APIs on macOS/Windows): Logical points (e.g. $1920 \times 1080$).</p>
+<h3 id="42-normalization-algorithm">4.2 Normalization Algorithm</h3>
+<p>When capturing a screen or window:
+1. Determine <code>scale_factor = screen.display_info.scale_factor</code> (default <code>1.0</code> if unavailable or invalid).
+2. For each detected UI element:
+   $$\text{elem.x} = (\text{logical_x} - \text{origin_x}) \times \text{scale_factor}$$
+   $$\text{elem.y} = (\text{logical_y} - \text{origin_y}) \times \text{scale_factor}$$
+   $$\text{elem.width} = \text{logical_width} \times \text{scale_factor}$$
+   $$\text{elem.height} = \text{logical_height} \times \text{scale_factor}$$
+3. Embed <code>markits:scale_factor</code> into the PNG metadata tEXt chunk.</p>
+<hr />
+<h2 id="5-cli-interface-specifications">5. CLI Interface Specifications</h2>
+<h3 id="51-discovery-commands">5.1 Discovery Commands</h3>
+<div class="highlight"><pre><span></span><code><span class="c1"># Human readable listing</span>
+markits<span class="w"> </span>capture<span class="w"> </span>--list-screens
+markits<span class="w"> </span>capture<span class="w"> </span>--list-windows
+
+<span class="c1"># Machine readable JSON output for automation</span>
+markits<span class="w"> </span>capture<span class="w"> </span>--list-screens<span class="w"> </span>--json
+markits<span class="w"> </span>capture<span class="w"> </span>--list-windows<span class="w"> </span>--json
+</code></pre></div>
+<h3 id="52-capture-commands">5.2 Capture Commands</h3>
+<div class="highlight"><pre><span></span><code><span class="c1"># Capture secondary monitor</span>
+markits<span class="w"> </span>capture<span class="w"> </span>--screen<span class="w"> </span><span class="m">1</span><span class="w"> </span>-o<span class="w"> </span>screen1.png
+
+<span class="c1"># Capture specific window by title (case-insensitive substring)</span>
+markits<span class="w"> </span>capture<span class="w"> </span>--window<span class="w"> </span><span class="s2">"Firefox"</span><span class="w"> </span>-o<span class="w"> </span>firefox.png
+
+<span class="c1"># Capture window by PID</span>
+markits<span class="w"> </span>capture<span class="w"> </span>--pid<span class="w"> </span><span class="m">12345</span><span class="w"> </span>-o<span class="w"> </span>process_window.png
+
+<span class="c1"># Combined with auto-crop and annotations</span>
+markits<span class="w"> </span>capture<span class="w"> </span>--window<span class="w"> </span><span class="s2">"Firefox"</span><span class="w"> </span>-i<span class="w"> </span><span class="s2">"検索バーをクリック"</span><span class="w"> </span>--crop<span class="w"> </span>--crop-margin<span class="w"> </span><span class="m">32</span><span class="w"> </span>-o<span class="w"> </span>annotated.png
+</code></pre></div>
+<hr />
+<h2 id="6-testing-strategy">6. Testing Strategy</h2>
+<ol>
+<li><strong>Unit Tests</strong>:</li>
+<li><code>list_screens()</code> returns at least one screen with valid dimensions and non-zero scale factor.</li>
+<li><code>WindowQuery</code> matching algorithms (case-insensitive title matching, substring matching, numeric ID parsing).</li>
+<li>High-DPI scaling calculations with fractional scaling factors (<code>1.0</code>, <code>1.25</code>, <code>1.5</code>, <code>2.0</code>).</li>
+<li><strong>Integration / CLI Tests</strong>:</li>
+<li><code>markits capture --list-screens</code> and <code>markits capture --list-screens --json</code>.</li>
+<li><code>markits capture --list-windows</code> and <code>markits capture --list-windows --json</code>.</li>
+<li>Screen index selection bounds checking (e.g. <code>--screen 999</code> returns clean error).</li>
+<li><strong>Workspace Verification</strong>:</li>
+<li><code>cargo test --workspace</code> passes cleanly.</li>
+</ol>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": [], "search": "../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "\u30b3\u30d4\u30fc\u3057\u307e\u3057\u305f", "clipboard.copy": "\u30af\u30ea\u30c3\u30d7\u30dc\u30fc\u30c9\u3078\u30b3\u30d4\u30fc", "search.result.more.one": "\u3053\u306e\u30da\u30fc\u30b8\u5185\u306b\u3082\u30461\u4ef6\u898b\u3064\u304b\u308a\u307e\u3057\u305f", "search.result.more.other": "\u3053\u306e\u30da\u30fc\u30b8\u5185\u306b\u3042\u3068#\u4ef6\u898b\u3064\u304b\u308a\u307e\u3057\u305f", "search.result.none": "\u4f55\u3082\u898b\u3064\u304b\u308a\u307e\u305b\u3093\u3067\u3057\u305f", "search.result.one": "1\u4ef6\u898b\u3064\u304b\u308a\u307e\u3057\u305f", "search.result.other": "#\u4ef6\u898b\u3064\u304b\u308a\u307e\u3057\u305f", "search.result.placeholder": "\u691c\u7d22\u30ad\u30fc\u30ef\u30fc\u30c9\u3092\u5165\u529b\u3057\u3066\u304f\u3060\u3055\u3044", "search.result.term.missing": "\u691c\u7d22\u306b\u542b\u307e\u308c\u306a\u3044", "select.version": "\u30d0\u30fc\u30b8\u30e7\u30f3\u5207\u308a\u66ff\u3048"}, "version": null}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.d7400e89.min.js"></script>
+      
+    
+  </body>
+</html>
