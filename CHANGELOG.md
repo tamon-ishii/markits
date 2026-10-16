@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.7.3 - 2026-10-16
+
+### Fixed
+
+- Respect tray-only login startup after the frontend finishes loading.
+
 ## 0.7.2 - 2026-10-16
 
 ### Added

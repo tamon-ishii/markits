@@ -744,5 +744,5 @@ document.addEventListener('DOMContentLoaded', async () => {
   } else {
     switchView('home');
   }
-  await raiseAppWindow();
+  // Initial visibility is controlled by Rust setup, including tray-only startup.
 });
