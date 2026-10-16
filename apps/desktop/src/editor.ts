@@ -734,9 +734,25 @@ export class AnnotationEditor {
     document.getElementById('btn-crop-fit-marks')?.addEventListener('click', () => this.fitCropToAnnotations(32));
     document.getElementById('btn-cancel-crop')?.addEventListener('click', () => this.cancelCropMode());
     document.getElementById('btn-reset-crop')?.addEventListener('click', () => this.resetCrop());
+    document.getElementById('crop-resolution')?.addEventListener('change', (e) => {
+      const value = (e.target as HTMLSelectElement).value;
+      if (!value || !this.isCropMode || !this.cropRect) return;
+      const [width, height] = value.split('x').map(Number);
+      const cw = this.scene.canvas.width;
+      const ch = this.scene.canvas.height;
+      if (!Number.isInteger(width) || !Number.isInteger(height)
+          || width < 10 || height < 10 || width > cw || height > ch) return;
+      this.cropRect = {
+        x: Math.max(0, Math.min(Math.round(this.cropRect.x), cw - width)),
+        y: Math.max(0, Math.min(Math.round(this.cropRect.y), ch - height)),
+        width,
+        height,
+      };
+      this.updateCropOverlayUi();
+    });
 
     window.addEventListener('keydown', (e) => {
-      if ((e.target as HTMLElement).tagName === 'INPUT' || (e.target as HTMLElement).tagName === 'TEXTAREA') {
+      if (['INPUT', 'TEXTAREA', 'SELECT'].includes((e.target as HTMLElement).tagName)) {
         return;
       }
 
@@ -2696,6 +2712,17 @@ export class AnnotationEditor {
 
     if (this.cropSizeBadgeEl) {
       this.cropSizeBadgeEl.textContent = `${Math.round(width)} × ${Math.round(height)}`;
+    }
+    const resolutionSelect = document.getElementById('crop-resolution') as HTMLSelectElement | null;
+    if (resolutionSelect) {
+      for (const option of resolutionSelect.options) {
+        if (!option.value) continue;
+        const [presetWidth, presetHeight] = option.value.split('x').map(Number);
+        option.disabled = presetWidth > cw || presetHeight > ch;
+      }
+      const value = `${width}x${height}`;
+      resolutionSelect.value = Array.from(resolutionSelect.options).some(option => option.value === value)
+        ? value : '';
     }
   }
 

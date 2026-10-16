@@ -190,6 +190,18 @@
               <div class="crop-handle w" data-crop-handle="w"></div>
               <div class="crop-size-badge" id="crop-size-badge">800 × 600</div>
               <div class="crop-toolbar">
+                <select id="crop-resolution" class="form-control" aria-label="クロップ解像度" title="クロップ枠のサイズ（ピクセル）">
+                  <option value="">カスタムサイズ</option>
+                  <option value="640x480">640 × 480 (VGA)</option>
+                  <option value="800x600">800 × 600 (SVGA)</option>
+                  <option value="1024x768">1024 × 768 (XGA)</option>
+                  <option value="1280x720">1280 × 720 (HD)</option>
+                  <option value="1280x800">1280 × 800</option>
+                  <option value="1366x768">1366 × 768</option>
+                  <option value="1920x1080">1920 × 1080 (Full HD)</option>
+                  <option value="2560x1440">2560 × 1440 (WQHD)</option>
+                  <option value="3840x2160">3840 × 2160 (4K UHD)</option>
+                </select>
                 <button id="btn-apply-crop" class="btn btn-sm btn-primary" title="クロップを適用 (Enter)">✓ 適用</button>
                 <button id="btn-crop-fit-marks" class="btn btn-sm btn-secondary" title="マークの外接矩形に合わせて選択枠を調整">🎯 マーク枠</button>
                 <button id="btn-cancel-crop" class="btn btn-sm" title="キャンセル (Esc)">✕ キャンセル</button>

@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.7.1 - 2026-10-16
+
+### Added
+
+- Select common pixel resolutions from the crop toolbar to resize the crop selection exactly. Resolutions larger than the source image are disabled.
+
 ## 0.7.0 - 2026-10-03
 
 ### Added

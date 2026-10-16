@@ -1098,6 +1098,12 @@ textarea.form-control {
   z-index: 20;
 }
 
+.crop-toolbar select.form-control {
+  width: auto;
+  min-width: 180px;
+  padding: 4px 8px;
+}
+
 /* Export Resolution Modal */
 .modal-backdrop {
   position: fixed;
