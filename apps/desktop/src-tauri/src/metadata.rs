@@ -322,23 +322,25 @@ pub fn embed_metadata(
 /// Load an image from bytes, inspect for embedded MarkIts annotations, UI elements, and crop info, and return
 /// the dimensions, Base64 data URL, and any restored metadata.
 pub fn load_image_with_metadata(bytes: &[u8]) -> Result<LoadedImageResult, MetadataError> {
-    let img = image::load_from_memory(bytes)?;
-    let mut width = img.width();
-    let mut height = img.height();
-
-    // Check if it's a PNG and has embedded annotations, UI elements, or crop info
-    let (annotations_json, ui_elements, crop_info) =
-        if bytes.len() >= 8 && &bytes[0..8] == PNG_SIGNATURE {
-            let ann = extract_annotations(bytes).unwrap_or(None);
-            let uis = extract_ui_elements(bytes).unwrap_or(None);
-            let crop = extract_crop_info(bytes).unwrap_or(None);
-            (ann, uis, crop)
-        } else {
-            (None, None, None)
-        };
+    let is_png = bytes.len() >= 8 && &bytes[0..8] == PNG_SIGNATURE;
+    let (mut width, mut height, annotations_json, ui_elements, crop_info) = if is_png {
+        // PNG dimensions and MarkIts metadata are available without inflating the
+        // full pixel buffer. This keeps opening a high-resolution capture quick.
+        let header = inspect_png_header(bytes)?;
+        (
+            header.width,
+            header.height,
+            header.annotations_json,
+            extract_ui_elements(bytes).unwrap_or(None),
+            header.crop_info,
+        )
+    } else {
+        let img = image::load_from_memory(bytes)?;
+        (img.width(), img.height(), None, None, None)
+    };
 
     let b64 = base64::engine::general_purpose::STANDARD.encode(bytes);
-    let mime = if bytes.len() >= 8 && &bytes[0..8] == PNG_SIGNATURE {
+    let mime = if is_png {
         "image/png"
     } else {
         "image/jpeg"
@@ -353,9 +355,9 @@ pub fn load_image_with_metadata(bytes: &[u8]) -> Result<LoadedImageResult, Metad
                     if let Ok(source_bytes) =
                         base64::engine::general_purpose::STANDARD.decode(payload)
                     {
-                        if let Ok(source_image) = image::load_from_memory(&source_bytes) {
-                            width = source_image.width();
-                            height = source_image.height();
+                        if let Some((source_width, source_height)) = image_dimensions(&source_bytes) {
+                            width = source_width;
+                            height = source_height;
                             image_data_url = source;
                         }
                     }
@@ -377,6 +379,16 @@ pub fn load_image_with_metadata(bytes: &[u8]) -> Result<LoadedImageResult, Metad
         base_ui_elements: None,
         crop_info,
     })
+}
+
+fn image_dimensions(bytes: &[u8]) -> Option<(u32, u32)> {
+    if bytes.len() >= 8 && &bytes[0..8] == PNG_SIGNATURE {
+        inspect_png_header(bytes).ok().map(|header| (header.width, header.height))
+    } else {
+        image::load_from_memory(bytes)
+            .ok()
+            .map(|image| (image.width(), image.height()))
+    }
 }
 
 #[cfg(test)]

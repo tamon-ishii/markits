@@ -20,6 +20,25 @@ pub struct AppState {
     pub capture_generation: AtomicU64,
     pub shortcut: Mutex<String>,
     pub shortcut_warning: Mutex<Option<String>>,
+    pub manual_studio: Mutex<Option<ManualStudioSession>>,
+}
+
+#[derive(Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ManualStudioSession { pub input: String, pub output: String, pub completion: String }
+
+#[tauri::command]
+fn cmd_manual_studio_session(app: AppHandle) -> Result<Option<ManualStudioSession>, String> {
+    Ok(app.state::<AppState>().manual_studio.lock().map_err(|e| e.to_string())?.clone())
+}
+
+#[tauri::command]
+fn cmd_manual_studio_complete(app: AppHandle) -> Result<(), String> {
+    let state = app.state::<AppState>();
+    let session = state.manual_studio.lock().map_err(|e| e.to_string())?.clone().ok_or("Manual Studio連携モードではありません")?;
+    std::fs::write(session.completion, "saved").map_err(|e| e.to_string())?;
+    app.exit(0);
+    Ok(())
 }
 
 const CAPTURE_SHORTCUTS: &[&str] = &["PrintScreen", "Alt+PrintScreen", "Control+Shift+S"];
@@ -132,9 +151,15 @@ fn register_capture_shortcuts(app: &AppHandle) -> Result<(), String> {
 }
 
 pub fn run() {
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    let input = args.windows(2).find(|pair| pair[0] == "--manual-studio-input").map(|pair| pair[1].clone());
+    let output = args.windows(2).find(|pair| pair[0] == "--manual-studio-output").map(|pair| pair[1].clone());
+    let completion = args.windows(2).find(|pair| pair[0] == "--manual-studio-completion").map(|pair| pair[1].clone());
+    let manual_studio = input.zip(output).zip(completion).map(|((input, output), completion)| ManualStudioSession { input, output, completion });
     tauri::Builder::default()
         .manage(AppState {
             shortcut: Mutex::new(read_shortcut()),
+            manual_studio: Mutex::new(manual_studio),
             ..AppState::default()
         })
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
@@ -159,7 +184,9 @@ pub fn run() {
             commands::cmd_raise_window,
             commands::cmd_fetch_detailed_ui_elements,
             cmd_get_capture_shortcut,
-            cmd_set_capture_shortcut
+            cmd_set_capture_shortcut,
+            cmd_manual_studio_session,
+            cmd_manual_studio_complete
         ])
         .on_window_event(|window, event| match event {
             tauri::WindowEvent::CloseRequested { api, .. } => {
