@@ -133,7 +133,7 @@ pub fn list_system_windows() -> Vec<crate::capture::WindowInfo> {
     let mut list = Vec::new();
     if let Ok(apps) = App::list() {
         for app in apps {
-            let app_name = app.name.clone().unwrap_or_default();
+            let app_name = app.name.clone();
             let app_pid = app.pid;
             if let Ok(windows) = app.windows() {
                 for (idx, w) in windows.into_iter().enumerate() {

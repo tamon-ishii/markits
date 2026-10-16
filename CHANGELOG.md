@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.7.2 - 2026-10-16
+
+### Added
+
+- Windows setup installer registers a per-user startup shortcut and removes it on uninstall. Login startup runs in the tray; normal launches open the editor.
+
+### Fixed
+
+- Fix Windows and macOS compilation for system window enumeration.
+- Install Linux CLI build dependencies and build ARM64 on a native runner. Linux CLI archives target GNU libc; musl builds are omitted because capture dependencies require native system libraries.
+
 ## 0.7.1 - 2026-10-16
 
 ### Added
