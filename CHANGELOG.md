@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.7.4 - 2026-10-22
+
+### Fixed
+
+- Detect Windows capture targets through native window enumeration, including PyCharm, and select the frontmost visible window under the pointer. Exclude minimized, hidden, and desktop shell windows.
+- Detect deeply nested buttons and other page controls in Chromium browsers, including Chrome and Microsoft Edge, while bounding the number of accessibility nodes visited.
+
 ## 0.7.3 - 2026-10-16
 
 ### Fixed
