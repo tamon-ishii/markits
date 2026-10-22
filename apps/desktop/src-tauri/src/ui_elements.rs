@@ -253,22 +253,12 @@ type RelativePosition = ((), f64, f64);
 
 #[cfg(not(target_os = "linux"))]
 fn element_position(
-    element: &Element,
+    _element: &Element,
     bounds: Rect,
     origin_x: i32,
     origin_y: i32,
-    relative_position: Option<&RelativePosition>,
+    _relative_position: Option<&RelativePosition>,
 ) -> (f64, f64, f64, f64) {
-    #[cfg(target_os = "linux")]
-    if let Some((connection, window_x, window_y)) = relative_position {
-        if let Some((x, y, w, h)) = linux_atspi::window_extents(connection, element) {
-            return (window_x + x as f64 - origin_x as f64,
-                    window_y + y as f64 - origin_y as f64,
-                    w as f64, h as f64);
-        }
-    }
-    #[cfg(not(target_os = "linux"))]
-    let _ = relative_position;
     (
         (bounds.x - origin_x) as f64,
         (bounds.y - origin_y) as f64,

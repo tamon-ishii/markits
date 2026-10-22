@@ -340,11 +340,7 @@ pub fn load_image_with_metadata(bytes: &[u8]) -> Result<LoadedImageResult, Metad
     };
 
     let b64 = base64::engine::general_purpose::STANDARD.encode(bytes);
-    let mime = if is_png {
-        "image/png"
-    } else {
-        "image/jpeg"
-    };
+    let mime = if is_png { "image/png" } else { "image/jpeg" };
     let mut image_data_url = format!("data:{};base64,{}", mime, b64);
     // Exported pixels already contain the marks. Restore the original background
     // before the editor draws the editable scene over it.
@@ -355,7 +351,8 @@ pub fn load_image_with_metadata(bytes: &[u8]) -> Result<LoadedImageResult, Metad
                     if let Ok(source_bytes) =
                         base64::engine::general_purpose::STANDARD.decode(payload)
                     {
-                        if let Some((source_width, source_height)) = image_dimensions(&source_bytes) {
+                        if let Some((source_width, source_height)) = image_dimensions(&source_bytes)
+                        {
                             width = source_width;
                             height = source_height;
                             image_data_url = source;
@@ -366,6 +363,23 @@ pub fn load_image_with_metadata(bytes: &[u8]) -> Result<LoadedImageResult, Metad
         }
     }
 
+    let base_image_data_url = if is_png {
+        extract_text_chunk(bytes, "markits:base_image")?
+    } else {
+        None
+    };
+    let base_bytes = base_image_data_url
+        .as_deref()
+        .and_then(|data| data.split_once(','))
+        .and_then(|(_, payload)| {
+            base64::engine::general_purpose::STANDARD
+                .decode(payload)
+                .ok()
+        });
+    let base_dimensions = base_bytes.as_deref().and_then(image_dimensions);
+    let base_ui_elements = base_bytes
+        .as_deref()
+        .and_then(|bytes| extract_ui_elements(bytes).ok().flatten());
     Ok(LoadedImageResult {
         width,
         height,
@@ -373,17 +387,19 @@ pub fn load_image_with_metadata(bytes: &[u8]) -> Result<LoadedImageResult, Metad
         annotations_json,
         history_id: None,
         ui_elements,
-        base_image_data_url: None,
-        base_width: None,
-        base_height: None,
-        base_ui_elements: None,
+        base_image_data_url,
+        base_width: base_dimensions.map(|d| d.0),
+        base_height: base_dimensions.map(|d| d.1),
+        base_ui_elements,
         crop_info,
     })
 }
 
 fn image_dimensions(bytes: &[u8]) -> Option<(u32, u32)> {
     if bytes.len() >= 8 && &bytes[0..8] == PNG_SIGNATURE {
-        inspect_png_header(bytes).ok().map(|header| (header.width, header.height))
+        inspect_png_header(bytes)
+            .ok()
+            .map(|header| (header.width, header.height))
     } else {
         image::load_from_memory(bytes)
             .ok()

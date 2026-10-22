@@ -523,7 +523,7 @@ pub async fn cmd_crop_and_load(
         capture::crop_rgba_image(&rgba, x, y, width, height).map_err(|e| e.to_string())?;
     let captured = capture::rgba_to_captured_image(&cropped).map_err(|e| e.to_string())?;
 
-    let cropped_elements = ui_elements.map(|elements| {
+    let cropped_elements = ui_elements.clone().map(|elements| {
         crate::ui_elements::filter_elements_for_crop(
             &elements,
             x as f64,
@@ -533,14 +533,21 @@ pub async fn cmd_crop_and_load(
         )
     });
 
-    // Auto-save new capture into history with cropped UI elements
+    let crop_info = metadata::CropInfo {
+        is_auto_cropped: false,
+        offset_x: x as f64,
+        offset_y: y as f64,
+        base_width: rgba.width(),
+        base_height: rgba.height(),
+    };
+    // Keep full capture pixels so a later edit can enlarge the crop.
     let item = history::save_or_update_history_item(
         None,
         &captured.raw_png,
         None,
         cropped_elements.as_deref(),
-        None,
-        None,
+        Some(&png_bytes),
+        Some(&crop_info),
     )
     .map_err(|e| e.to_string())?;
 
@@ -551,11 +558,11 @@ pub async fn cmd_crop_and_load(
         annotations_json: None,
         history_id: Some(item.id),
         ui_elements: cropped_elements,
-        base_image_data_url: None,
-        base_width: None,
-        base_height: None,
-        base_ui_elements: None,
-        crop_info: None,
+        base_image_data_url: Some(raw_data_url),
+        base_width: Some(rgba.width()),
+        base_height: Some(rgba.height()),
+        base_ui_elements: ui_elements,
+        crop_info: Some(crop_info),
     })
 }
 
@@ -647,6 +654,8 @@ pub fn cmd_compose_and_save(
     export_width: Option<u32>,
     export_height: Option<u32>,
     reproduction_json: bool,
+    base_background_data_url: Option<String>,
+    crop_info: Option<metadata::CropInfo>,
 ) -> Result<(), String> {
     let prefix = "data:";
     let base64_str = if background_data_url.starts_with(prefix) {
@@ -693,7 +702,7 @@ pub fn cmd_compose_and_save(
         &final_png_bytes,
         Some(&scene_json),
         ui_elements.as_deref(),
-        None,
+        crop_info.as_ref(),
     )
     .map_err(|e| e.to_string())?;
     let final_png = metadata::embed_text_chunk(
@@ -702,6 +711,13 @@ pub fn cmd_compose_and_save(
         &background_data_url,
     )
     .map_err(|e| e.to_string())?;
+
+    let final_png = if let Some(base) = base_background_data_url {
+        metadata::embed_text_chunk(&final_png, "markits:base_image", &base)
+            .map_err(|e| e.to_string())?
+    } else {
+        final_png
+    };
 
     fs::write(&save_path, &final_png).map_err(|e| e.to_string())?;
 
@@ -921,6 +937,8 @@ mod tests {
             None,
             None,
             true,
+            None,
+            None,
         );
         assert!(save_res.is_ok(), "compose_and_save failed: {:?}", save_res);
 
@@ -968,6 +986,8 @@ mod tests {
             Some(800),
             Some(600),
             false,
+            None,
+            None,
         );
         assert!(save_res.is_ok(), "scaled save failed: {:?}", save_res);
 

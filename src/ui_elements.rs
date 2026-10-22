@@ -133,7 +133,7 @@ pub fn list_system_windows() -> Vec<crate::capture::WindowInfo> {
     let mut list = Vec::new();
     if let Ok(apps) = App::list() {
         for app in apps {
-            let app_name = app.name.clone().unwrap_or_default();
+            let app_name = app.name.clone();
             let app_pid = app.pid;
             if let Ok(windows) = app.windows() {
                 for (idx, w) in windows.into_iter().enumerate() {
@@ -204,6 +204,45 @@ pub fn capture_desktop_detailed_elements_for_window(
     collect_detailed_elements(screen_origin_x, screen_origin_y, None, Some(target))
 }
 
+/// Hit-test only the selected application's accessible window on Linux.
+#[cfg(target_os = "linux")]
+pub fn desktop_target_at_point(target: &DetectedUiElement, x: i32, y: i32) -> Option<DetectedUiElement> {
+    linux_atspi::target_at_point(target, x, y)
+}
+
+/// A short observation for input recording/replay, without waiting on a large tree.
+pub fn observe_desktop_targets(target: &DetectedUiElement) -> Vec<DetectedUiElement> {
+    #[cfg(target_os = "linux")]
+    return linux_atspi::collect_window_elements_with_budget(0, 0, target, Some(std::time::Duration::from_secs(2)));
+    #[cfg(not(target_os = "linux"))]
+    capture_desktop_detailed_elements_for_window(0, 0, target)
+}
+
+/// Read one uniquely named input without logging its contents.
+pub fn desktop_input_value(target: &DetectedUiElement, name: &str) -> Result<Option<String>, String> {
+    #[cfg(target_os = "linux")]
+    { linux_atspi::input_value(target, name) }
+    #[cfg(not(target_os = "linux"))]
+    {
+        let pid = target.pid.ok_or("入力先のアプリを確認できません。")?;
+        let app = App::by_pid(pid, std::time::Duration::ZERO).map_err(|error| error.to_string())?;
+        let windows = app.windows().map_err(|error| error.to_string())?;
+        let mut matching = windows.into_iter().filter(|window| {
+            target_accepts_window(target,window.stable_id.as_deref(),window.pid.or(app.pid))
+                && (target.window_id.is_some() || window.name.as_deref() == target.name.as_deref())
+                && window.bounds.is_some_and(|bounds| window_overlaps_target(bounds.x as f64,bounds.y as f64,bounds.width as f64,bounds.height as f64,target))
+        });
+        let Some(window) = matching.next() else { return Ok(None); };
+        if matching.next().is_some() { return Err("入力先のウィンドウが複数あります。".into()); }
+        let inputs = xa11y::Locator::new(window.provider().clone(),Some(window.data().clone()),"text_field, text_area")
+            .elements().map_err(|error| error.to_string())?;
+        let mut inputs = inputs.into_iter().filter(|input| input.name.as_deref().map(str::trim) == Some(name));
+        let Some(input) = inputs.next() else { return Ok(None); };
+        if inputs.next().is_some() { return Err("入力先が複数あります。操作を中止しました。".into()); }
+        Ok(input.value.clone())
+    }
+}
+
 /// Identify the process behind a captured X11 window when available.
 pub fn target_process_id(target: &DetectedUiElement) -> Option<u32> {
     #[cfg(target_os = "linux")]
@@ -256,6 +295,10 @@ fn collect_detailed_elements(
                     continue;
                 }
                 if let Some(target) = target {
+                    if target.window_id.is_none() && target.name.is_some()
+                        && window.name.as_deref().map(str::trim) != target.name.as_deref().map(str::trim) {
+                        continue;
+                    }
                     if !target_accepts_window(
                         target, window.stable_id.as_deref(), window.pid.or(app.pid),
                     ) {
@@ -347,22 +390,12 @@ type RelativePosition = ((), f64, f64);
 
 #[cfg(not(target_os = "linux"))]
 fn element_position(
-    element: &Element,
+    _element: &Element,
     bounds: Rect,
     origin_x: i32,
     origin_y: i32,
-    relative_position: Option<&RelativePosition>,
+    _relative_position: Option<&RelativePosition>,
 ) -> (f64, f64, f64, f64) {
-    #[cfg(target_os = "linux")]
-    if let Some((connection, window_x, window_y)) = relative_position {
-        if let Some((x, y, w, h)) = linux_atspi::window_extents(connection, element) {
-            return (window_x + x as f64 - origin_x as f64,
-                    window_y + y as f64 - origin_y as f64,
-                    w as f64, h as f64);
-        }
-    }
-    #[cfg(not(target_os = "linux"))]
-    let _ = relative_position;
     (
         (bounds.x - origin_x) as f64,
         (bounds.y - origin_y) as f64,
@@ -382,13 +415,21 @@ mod linux_atspi {
     pub fn collect_window_elements(
         origin_x: i32, origin_y: i32, target: &super::DetectedUiElement,
     ) -> Vec<super::DetectedUiElement> {
+        collect_window_elements_with_budget(origin_x, origin_y, target, None)
+    }
+
+    pub fn collect_window_elements_with_budget(
+        origin_x: i32, origin_y: i32, target: &super::DetectedUiElement,
+        budget: Option<Duration>,
+    ) -> Vec<super::DetectedUiElement> {
+        let started = std::time::Instant::now();
         let mut elements = vec![target.clone()];
         let Some(pid) = super::target_process_id(target) else { return elements };
         let Ok(app) = App::by_pid(pid, Duration::ZERO) else { return elements };
         let root = app.as_element();
         let Some(bus_name) = root.raw.get("bus_name").and_then(|value| value.as_str()) else { return elements };
         let Some(path) = root.raw.get("object_path").and_then(|value| value.as_str()) else { return elements };
-        let Some(connection) = connect() else { return elements };
+        let Some(connection) = connect(budget) else { return elements };
         let mut queue = VecDeque::from([(bus_name.to_owned(), path.to_owned(), 0usize)]);
         let mut relative_coordinates = false;
         let mut visited = 0usize;
@@ -396,14 +437,23 @@ mod linux_atspi {
         // Read one property at a time. Some WebKitGTK accessibility bridges
         // abort when many nodes and attributes are queried concurrently.
         while let Some((bus, path, depth)) = queue.pop_front() {
-            if visited >= 500 { break; }
+            if visited >= 2000 || budget.is_some_and(|budget| started.elapsed() >= budget) {
+                // A partial tree cannot prove that a name is unique.
+                if budget.is_some() { return vec![target.clone()]; }
+                break;
+            }
             visited += 1;
             let Ok(accessible) = Proxy::new(&connection, bus.as_str(), path.as_str(), "org.a11y.atspi.Accessible") else { continue };
-            let role: u32 = accessible.call("GetRole", &()).unwrap_or_default();
             let name: Option<String> = accessible.get_property::<String>("Name")
                 .ok().map(|name| name.trim().to_owned()).filter(|name| !name.is_empty());
-            let bounds = Proxy::new(&connection, bus.as_str(), path.as_str(), "org.a11y.atspi.Component")
-                .ok().and_then(|proxy| proxy.call::<_, _, (i32, i32, i32, i32)>("GetExtents", &(0u32,)).ok());
+            // Named replay needs no role or geometry for anonymous containers.
+            // Keep traversing their children, but avoid expensive bridge calls.
+            let inspect = budget.is_none() || name.is_some() || depth <= 1;
+            let role: u32 = if inspect { accessible.call("GetRole", &()).unwrap_or_default() } else { 0 };
+            let bounds = if inspect {
+                Proxy::new(&connection, bus.as_str(), path.as_str(), "org.a11y.atspi.Component")
+                    .ok().and_then(|proxy| proxy.call::<_, _, (i32, i32, i32, i32)>("GetExtents", &(0u32,)).ok())
+            } else { None };
 
             if depth == 1 {
                 let Some((x, y, w, h)) = bounds else { continue };
@@ -414,7 +464,7 @@ mod linux_atspi {
                     && (target.x.abs() > 2.0 || target.y.abs() > 2.0);
             }
 
-            let position = if relative_coordinates && depth > 0 {
+            let position = if inspect && relative_coordinates && depth > 0 {
                 Proxy::new(&connection, bus.as_str(), path.as_str(), "org.a11y.atspi.Component")
                     .ok().and_then(|proxy| proxy.call::<_, _, (i32, i32, i32, i32)>("GetExtents", &(1u32,)).ok())
                     .map(|(x, y, w, h)| (target.x + x as f64, target.y + y as f64, w as f64, h as f64))
@@ -424,7 +474,7 @@ mod linux_atspi {
             if let Some((x, y, w, h)) = position {
                 if w <= 0.0 || h <= 0.0 || x + w <= target.x || x >= target.x + target.width
                     || y + h <= target.y || y >= target.y + target.height { continue; }
-                if let Some(mapped_role) = map_role(role) {
+                if let Some(mapped_role) = map_role(role).or_else(|| (budget.is_some() && name.is_some()).then_some("unknown")) {
                     if depth > 1 && w > 4.0 && h > 4.0 && w < 5000.0 && h < 5000.0
                         && !elements.iter().any(|item| item.role == mapped_role
                             && (item.x-x).abs() < 2.0
@@ -446,6 +496,109 @@ mod linux_atspi {
             }
         }
         elements
+    }
+
+    pub fn target_at_point(target: &super::DetectedUiElement, x: i32, y: i32) -> Option<super::DetectedUiElement> {
+        let started = std::time::Instant::now();
+        let pid = super::target_process_id(target)?;
+        let app = App::by_pid(pid, Duration::ZERO).ok()?;
+        let root = app.as_element();
+        let bus = root.raw.get("bus_name")?.as_str()?;
+        let path = root.raw.get("object_path")?.as_str()?;
+        let connection = connect(Some(Duration::from_millis(300)))?;
+        let accessible = Proxy::new(&connection, bus, path, "org.a11y.atspi.Accessible").ok()?;
+        let children: Vec<(String, OwnedObjectPath)> = accessible.call("GetChildren", &()).ok()?;
+        let mut windows = Vec::new();
+        for (bus, path) in children {
+            let proxy = Proxy::new(&connection, bus.as_str(), path.as_str(), "org.a11y.atspi.Accessible").ok()?;
+            let matched = proxy.get_property::<String>("Name").ok().as_deref() == target.name.as_deref();
+            drop(proxy);
+            if matched {
+                windows.push((bus, path));
+            }
+        }
+        if windows.len() != 1 { return None; }
+        let (mut bus, mut path) = windows.pop()?;
+        // Descend using the OS point lookup, without walking the whole document.
+        for _ in 0..16 {
+            if started.elapsed() > Duration::from_millis(300) { return None; }
+            let component = Proxy::new(&connection, bus.as_str(), path.as_str(), "org.a11y.atspi.Component").ok()?;
+            let child: Option<(String, OwnedObjectPath)> = component.call("GetAccessibleAtPoint", &(x, y, 0u32)).ok();
+            drop(component);
+            let Some((child_bus, child_path)) = child else { break };
+            if child_bus.is_empty() || child_path.as_str().ends_with("/null") || (child_bus == bus && child_path == path) { break; }
+            bus = child_bus;
+            path = child_path;
+        }
+        // Text and icons are often children of the actual interactive control.
+        for _ in 0..8 {
+            if started.elapsed() > Duration::from_millis(300) { return None; }
+            let accessible = Proxy::new(&connection, bus.as_str(), path.as_str(), "org.a11y.atspi.Accessible").ok()?;
+            let role: u32 = accessible.call("GetRole", &()).ok()?;
+            let name = accessible.get_property::<String>("Name").ok()?.trim().to_owned();
+            if let Some(role) = map_role(role).filter(|role| matches!(*role, "button" | "input" | "combobox" | "checkbox" | "radio" | "menuitem" | "tab" | "link" | "listitem"))
+                .or_else(|| name.ends_with(" フォルダー").then_some("unknown")) {
+                if !name.trim().is_empty() {
+                    let component = Proxy::new(&connection, bus.as_str(), path.as_str(), "org.a11y.atspi.Component").ok()?;
+                    let (bx, by, w, h): (i32, i32, i32, i32) = component.call("GetExtents", &(0u32,)).ok()?;
+                    if w > 0 && h > 0 && (role != "unknown" || h <= 64)
+                        && x >= bx && y >= by && x < bx + w && y < by + h {
+                        return Some(super::DetectedUiElement { role: role.into(), name: Some(name),
+                            window_id: target.window_id.clone(), pid: Some(pid), x: bx as f64, y: by as f64,
+                            width: w as f64, height: h as f64 });
+                    }
+                }
+            }
+            let parent: (String, OwnedObjectPath) = accessible.get_property("Parent").ok()?;
+            drop(accessible);
+            if parent.0.is_empty() || parent.1.as_str().ends_with("/null") { return None; }
+            bus = parent.0;
+            path = parent.1;
+        }
+        None
+    }
+
+    pub fn input_value(target: &super::DetectedUiElement, name: &str) -> Result<Option<String>, String> {
+        let started = std::time::Instant::now();
+        let pid = super::target_process_id(target).ok_or("入力先のアプリを確認できません。")?;
+        let app = App::by_pid(pid, Duration::ZERO).map_err(|error| error.to_string())?;
+        let root = app.as_element();
+        let bus = root.raw.get("bus_name").and_then(|value| value.as_str()).ok_or("AT-SPI接続先がありません。")?;
+        let path = root.raw.get("object_path").and_then(|value| value.as_str()).ok_or("AT-SPI対象がありません。")?;
+        let connection = connect(Some(Duration::from_millis(250))).ok_or("AT-SPIへ接続できません。")?;
+        let accessible = Proxy::new(&connection, bus, path, "org.a11y.atspi.Accessible").map_err(|error| error.to_string())?;
+        let windows: Vec<(String, OwnedObjectPath)> = accessible.call("GetChildren", &()).map_err(|error| error.to_string())?;
+        let mut roots = Vec::new();
+        for (bus, path) in windows {
+            let proxy = Proxy::new(&connection, bus.as_str(), path.as_str(), "org.a11y.atspi.Accessible").map_err(|error| error.to_string())?;
+            if proxy.get_property::<String>("Name").ok().as_deref() == target.name.as_deref() {
+                roots.push((bus.clone(), path.clone(), 0usize));
+            }
+        }
+        if roots.len() > 1 { return Err("入力先のウィンドウが複数あります。".into()); }
+        let mut queue = VecDeque::from(roots);
+        let mut found = None;
+        let mut visited = 0;
+        while let Some((bus, path, depth)) = queue.pop_front() {
+            if visited >= 2000 || started.elapsed() >= Duration::from_secs(2) {
+                return Err("入力先の値を時間内に確認できません。".into());
+            }
+            visited += 1;
+            let accessible = Proxy::new(&connection, bus.as_str(), path.as_str(), "org.a11y.atspi.Accessible").map_err(|error| error.to_string())?;
+            let matched = accessible.get_property::<String>("Name").map_err(|error| error.to_string())?.trim() == name;
+            if matched {
+                let role: u32 = accessible.call("GetRole", &()).map_err(|error| error.to_string())?;
+                if map_role(role) == Some("input") {
+                    if found.is_some() { return Err("入力先が複数あります。操作を中止しました。".into()); }
+                    let text = Proxy::new(&connection, bus.as_str(), path.as_str(), "org.a11y.atspi.Text").map_err(|error| error.to_string())?;
+                    found = Some(text.call::<_, _, String>("GetText", &(0i32, -1i32)).map_err(|error| error.to_string())?);
+                }
+            }
+            let children: Vec<(String, OwnedObjectPath)> = accessible.call("GetChildren", &()).map_err(|error| error.to_string())?;
+            if depth >= 32 && !children.is_empty() { return Err("入力先の階層を完全に確認できません。".into()); }
+            queue.extend(children.into_iter().map(|(bus,path)| (bus,path,depth+1)));
+        }
+        Ok(found)
     }
 
     fn map_role(role: u32) -> Option<&'static str> {
@@ -473,11 +626,13 @@ mod linux_atspi {
         }
     }
 
-    pub fn connect() -> Option<Connection> {
-        let session = Connection::session().ok()?;
+    pub fn connect(budget: Option<Duration>) -> Option<Connection> {
+        let builder = Builder::session().ok()?;
+        let session = if budget.is_some() { builder.method_timeout(Duration::from_millis(250)) } else { builder }.build().ok()?;
         let bus = Proxy::new(&session, "org.a11y.Bus", "/org/a11y/bus", "org.a11y.Bus").ok()?;
         let address: String = bus.call("GetAddress", &()).ok()?;
-        Builder::address(address.as_str()).ok()?.build().ok()
+        let builder = Builder::address(address.as_str()).ok()?;
+        if budget.is_some() { builder.method_timeout(Duration::from_millis(250)) } else { builder }.build().ok()
     }
 
 }

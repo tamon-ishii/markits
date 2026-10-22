@@ -190,6 +190,15 @@ pub fn run() {
         ])
         .on_window_event(|window, event| match event {
             tauri::WindowEvent::CloseRequested { api, .. } => {
+                if window.label() == "main" {
+                    let session = window.state::<AppState>().manual_studio.lock().ok().and_then(|session| session.clone());
+                    if let Some(session) = session {
+                        let marker = std::path::Path::new(&session.completion).with_extension("exit");
+                        let _ = std::fs::write(marker, "MarkItsの編集を中止しました。元画像は保持しています。再度編集できます。");
+                        window.app_handle().exit(0);
+                        return;
+                    }
+                }
                 api.prevent_close();
                 if window.label() == "overlay" {
                     let _ = commands::cmd_cancel_capture(window.app_handle().clone());

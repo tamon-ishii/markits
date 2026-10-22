@@ -58,6 +58,8 @@ export class AnnotationEditor {
   private cropDragStartX: number = 0;
   private cropDragStartY: number = 0;
   private initialCropRect: { x: number; y: number; width: number; height: number } | null = null;
+  private cropPresetSelectEl: HTMLSelectElement | null = null;
+  private cropPresetRatio: number | null = null;
 
   private scene: Scene = {
     canvas: { width: 800, height: 600 },
@@ -123,6 +125,7 @@ export class AnnotationEditor {
     this.cropMaskBottom = document.getElementById('crop-mask-bottom');
     this.cropMaskLeft = document.getElementById('crop-mask-left');
     this.cropMaskRight = document.getElementById('crop-mask-right');
+    this.cropPresetSelectEl = document.getElementById('crop-preset-select') as HTMLSelectElement | null;
 
     // Zoom elements
     this.zoomLabelEl = document.getElementById('zoom-label');
@@ -339,7 +342,7 @@ export class AnnotationEditor {
   } {
     return {
       isAutoCropped: this.isAutoCropped,
-      autoCropOffset: { ...this.autoCropOffset },
+      autoCropOffset: this.isAutoCropped ? { ...this.autoCropOffset } : this.cropHistoryStack.reduce((offset, item) => ({ x: offset.x + item.offset.x, y: offset.y + item.offset.y }), { x: 0, y: 0 }),
       baseImageState: this.baseImageState
         ? {
             dataUrl: this.baseImageState.dataUrl,
@@ -367,6 +370,10 @@ export class AnnotationEditor {
     if (cropInfo) {
       this.isAutoCropped = cropInfo.is_auto_cropped;
       this.autoCropOffset = { x: cropInfo.offset_x, y: cropInfo.offset_y };
+      if (baseImageState && !cropInfo.is_auto_cropped) this.cropHistoryStack = [{
+        dataUrl: baseImageState.dataUrl, width: baseImageState.width, height: baseImageState.height,
+        uiElements: baseImageState.uiElements.map(el => ({ ...el })), offset: { x: cropInfo.offset_x, y: cropInfo.offset_y }, annotations: [],
+      }];
       const btnAutoCrop = document.getElementById('btn-autocrop');
       if (btnAutoCrop) {
         btnAutoCrop.classList.toggle('active', this.isAutoCropped);
@@ -734,6 +741,10 @@ export class AnnotationEditor {
     document.getElementById('btn-crop-fit-marks')?.addEventListener('click', () => this.fitCropToAnnotations(32));
     document.getElementById('btn-cancel-crop')?.addEventListener('click', () => this.cancelCropMode());
     document.getElementById('btn-reset-crop')?.addEventListener('click', () => this.resetCrop());
+    this.cropPresetSelectEl?.addEventListener('change', () => {
+      const val = this.cropPresetSelectEl?.value;
+      if (val) this.applyCropPreset(val);
+    });
 
     window.addEventListener('keydown', (e) => {
       if ((e.target as HTMLElement).tagName === 'INPUT' || (e.target as HTMLElement).tagName === 'TEXTAREA') {
@@ -2208,6 +2219,10 @@ export class AnnotationEditor {
     const cw = this.scene.canvas.width;
     const ch = this.scene.canvas.height;
     this.cropRect = { x: 0, y: 0, width: cw, height: ch };
+    if (this.cropPresetSelectEl) {
+      this.cropPresetSelectEl.value = 'free';
+    }
+    this.cropPresetRatio = null;
     this.updateCropOverlayUi();
     if (this.editorCropOverlayEl) {
       this.editorCropOverlayEl.style.display = 'block';
@@ -2222,6 +2237,10 @@ export class AnnotationEditor {
     this.isDraggingCrop = false;
     this.activeCropHandle = null;
     this.cropRect = null;
+    if (this.cropPresetSelectEl) {
+      this.cropPresetSelectEl.value = 'free';
+    }
+    this.cropPresetRatio = null;
     if (this.editorCropOverlayEl) {
       this.editorCropOverlayEl.style.display = 'none';
     }
@@ -2235,9 +2254,66 @@ export class AnnotationEditor {
 
   public resetCrop(): void {
     if (!this.isCropMode) return;
+    if (this.cropPresetSelectEl) {
+      this.cropPresetSelectEl.value = 'free';
+    }
+    this.cropPresetRatio = null;
     const cw = this.scene.canvas.width;
     const ch = this.scene.canvas.height;
     this.cropRect = { x: 0, y: 0, width: cw, height: ch };
+    this.updateCropOverlayUi();
+  }
+
+  public getCropRect(): { x: number; y: number; width: number; height: number } | null {
+    return this.cropRect ? { ...this.cropRect } : null;
+  }
+
+  public applyCropPreset(preset: string): void {
+    if (!this.isCropMode || !this.hasImage()) return;
+    if (preset === 'free') {
+      this.cropPresetRatio = null;
+      return;
+    }
+    const parts = preset.split('x').map(Number);
+    if (parts.length !== 2 || isNaN(parts[0]) || isNaN(parts[1])) return;
+    const [targetW, targetH] = parts;
+    if (targetW <= 0 || targetH <= 0) return;
+
+    this.cropPresetRatio = targetW / targetH;
+
+    const cw = this.scene.canvas.width;
+    const ch = this.scene.canvas.height;
+
+    let w = targetW;
+    let h = targetH;
+
+    // If preset dimensions exceed canvas, fit within canvas while preserving ratio
+    if (w > cw || h > ch) {
+      const ratio = targetW / targetH;
+      if (cw / ch > ratio) {
+        h = ch;
+        w = Math.round(h * ratio);
+      } else {
+        w = cw;
+        h = Math.round(w / ratio);
+      }
+    }
+
+    // Keep current center if cropRect exists, otherwise center on canvas
+    const currentCenterX = this.cropRect ? this.cropRect.x + this.cropRect.width / 2 : cw / 2;
+    const currentCenterY = this.cropRect ? this.cropRect.y + this.cropRect.height / 2 : ch / 2;
+
+    let nx = Math.round(currentCenterX - w / 2);
+    let ny = Math.round(currentCenterY - h / 2);
+    nx = Math.max(0, Math.min(cw - w, nx));
+    ny = Math.max(0, Math.min(ch - h, ny));
+
+    this.cropRect = {
+      x: nx,
+      y: ny,
+      width: w,
+      height: h,
+    };
     this.updateCropOverlayUi();
   }
 
@@ -2302,6 +2378,10 @@ export class AnnotationEditor {
       }
     }
 
+    if (this.isAutoCropped && this.baseImageState) {
+      this.cropHistoryStack = [{ dataUrl: this.baseImageState.dataUrl, width: this.baseImageState.width, height: this.baseImageState.height, uiElements: this.baseImageState.uiElements.map(el => ({ ...el })), offset: { ...this.autoCropOffset }, annotations: [] }];
+      this.isAutoCropped = false;
+    }
     this.cropHistoryStack.push({
       dataUrl: this.bgImgEl.src,
       width: this.scene.canvas.width,
@@ -2338,7 +2418,7 @@ export class AnnotationEditor {
         } else if (clone.type === 'bezier-arrow') {
           clone.start[0] += this.autoCropOffset.x; clone.start[1] += this.autoCropOffset.y;
           clone.control[0] += this.autoCropOffset.x; clone.control[1] += this.autoCropOffset.y;
-          clone.end[0] += this.autoCropOffset.x; clone.end[0] += this.autoCropOffset.y;
+          clone.end[0] += this.autoCropOffset.x; clone.end[1] += this.autoCropOffset.y;
         } else if ('target' in clone && Array.isArray(clone.target)) {
           clone.target[0] += this.autoCropOffset.x;
           clone.target[1] += this.autoCropOffset.y;
@@ -2418,7 +2498,8 @@ export class AnnotationEditor {
       }
 
       this.isAutoCropped = true;
-      this.autoCropOffset = { x: rx, y: ry };
+      const manualOffset = this.cropHistoryStack.reduce((offset,item) => ({ x:offset.x+item.offset.x,y:offset.y+item.offset.y }), {x:0,y:0});
+      this.autoCropOffset = { x: rx + manualOffset.x, y: ry + manualOffset.y };
       const btnAutoCrop = document.getElementById('btn-autocrop');
       if (btnAutoCrop) btnAutoCrop.classList.add('active');
 
@@ -2546,6 +2627,11 @@ export class AnnotationEditor {
 
     if (rw <= 0 || rh <= 0) return false;
 
+    if (this.cropPresetSelectEl) {
+      this.cropPresetSelectEl.value = 'free';
+    }
+    this.cropPresetRatio = null;
+
     this.cropRect = { x: rx, y: ry, width: rw, height: rh };
     this.updateCropOverlayUi();
     return true;
@@ -2581,6 +2667,10 @@ export class AnnotationEditor {
     } else {
       // Clicked outside crop box: start new crop drag
       this.activeCropHandle = 'new';
+      if (this.cropPresetSelectEl) {
+        this.cropPresetSelectEl.value = 'free';
+      }
+      this.cropPresetRatio = null;
       this.cropRect = {
         x: Math.round(coords.x),
         y: Math.round(coords.y),
@@ -2631,22 +2721,71 @@ export class AnnotationEditor {
       let w = init.width;
       let h = init.height;
 
-      // Handle East / West
-      if (this.activeCropHandle.includes('e')) {
-        w = Math.max(20, Math.min(cw - x, init.width + dx));
-      } else if (this.activeCropHandle.includes('w')) {
-        const right = init.x + init.width;
-        x = Math.max(0, Math.min(right - 20, init.x + dx));
-        w = right - x;
-      }
+      const isCorner = ['nw', 'ne', 'se', 'sw'].includes(this.activeCropHandle);
+      const ratio = (e.shiftKey ? 1.0 : this.cropPresetRatio);
 
-      // Handle North / South
-      if (this.activeCropHandle.includes('s')) {
-        h = Math.max(20, Math.min(ch - y, init.height + dy));
-      } else if (this.activeCropHandle.includes('n')) {
-        const bottom = init.y + init.height;
-        y = Math.max(0, Math.min(bottom - 20, init.y + dy));
-        h = bottom - y;
+      if (ratio && isCorner) {
+        // Constrained ratio resize from corner
+        if (this.activeCropHandle === 'se') {
+          w = Math.max(20, Math.min(cw - x, init.width + dx));
+          h = Math.round(w / ratio);
+          if (y + h > ch) {
+            h = ch - y;
+            w = Math.round(h * ratio);
+          }
+        } else if (this.activeCropHandle === 'sw') {
+          const right = init.x + init.width;
+          w = Math.max(20, Math.min(right, init.width - dx));
+          h = Math.round(w / ratio);
+          if (y + h > ch) {
+            h = ch - y;
+            w = Math.round(h * ratio);
+          }
+          x = right - w;
+        } else if (this.activeCropHandle === 'ne') {
+          const bottom = init.y + init.height;
+          w = Math.max(20, Math.min(cw - init.x, init.width + dx));
+          h = Math.round(w / ratio);
+          if (bottom - h < 0) {
+            h = bottom;
+            w = Math.round(h * ratio);
+          }
+          y = bottom - h;
+        } else if (this.activeCropHandle === 'nw') {
+          const right = init.x + init.width;
+          const bottom = init.y + init.height;
+          w = Math.max(20, Math.min(right, init.width - dx));
+          h = Math.round(w / ratio);
+          if (bottom - h < 0) {
+            h = bottom;
+            w = Math.round(h * ratio);
+          }
+          x = right - w;
+          y = bottom - h;
+        }
+      } else {
+        // Free resize
+        if (this.cropPresetSelectEl && this.cropPresetSelectEl.value !== 'free') {
+          this.cropPresetSelectEl.value = 'free';
+          this.cropPresetRatio = null;
+        }
+        // Handle East / West
+        if (this.activeCropHandle.includes('e')) {
+          w = Math.max(20, Math.min(cw - x, init.width + dx));
+        } else if (this.activeCropHandle.includes('w')) {
+          const right = init.x + init.width;
+          x = Math.max(0, Math.min(right - 20, init.x + dx));
+          w = right - x;
+        }
+
+        // Handle North / South
+        if (this.activeCropHandle.includes('s')) {
+          h = Math.max(20, Math.min(ch - y, init.height + dy));
+        } else if (this.activeCropHandle.includes('n')) {
+          const bottom = init.y + init.height;
+          y = Math.max(0, Math.min(bottom - 20, init.y + dy));
+          h = bottom - y;
+        }
       }
 
       this.cropRect = {
