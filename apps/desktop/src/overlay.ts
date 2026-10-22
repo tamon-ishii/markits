@@ -1,4 +1,5 @@
 import { DetectedUiElement } from './types.ts';
+import { findWindowAt } from './window-hit-test.ts';
 
 export interface CropRect {
   x: number;
@@ -213,38 +214,7 @@ export class CaptureOverlay {
    * Scans in reverse order so the topmost window according to Z-order stacking is chosen.
    */
   private findWindowAt(imgX: number, imgY: number): DetectedUiElement | null {
-    // 1. Look for explicit role === 'window' matching cursor
-    for (let i = this.uiElements.length - 1; i >= 0; i--) {
-      const el = this.uiElements[i];
-      if (
-        el.role === 'window' &&
-        el.width >= 40 &&
-        el.height >= 40 &&
-        imgX >= el.x &&
-        imgX <= el.x + el.width &&
-        imgY >= el.y &&
-        imgY <= el.y + el.height
-      ) {
-        return el;
-      }
-    }
-
-    // 2. Fallback to any container element
-    for (let i = this.uiElements.length - 1; i >= 0; i--) {
-      const el = this.uiElements[i];
-      if (
-        el.width >= 100 &&
-        el.height >= 60 &&
-        imgX >= el.x &&
-        imgX <= el.x + el.width &&
-        imgY >= el.y &&
-        imgY <= el.y + el.height
-      ) {
-        return el;
-      }
-    }
-
-    return null;
+    return findWindowAt(this.uiElements, imgX, imgY);
   }
 
   private handleMouseDown(e: MouseEvent) {

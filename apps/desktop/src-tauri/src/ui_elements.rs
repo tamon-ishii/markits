@@ -1,4 +1,7 @@
 use serde::{Deserialize, Serialize};
+#[cfg(target_os = "windows")]
+#[path = "windows_capture.rs"]
+mod windows_capture;
 #[cfg(not(target_os = "linux"))]
 use xa11y::{App, AppExt, Element, Rect, Role};
 
@@ -17,7 +20,14 @@ pub struct DetectedUiElement {
     pub height: f64,
 }
 
+/// Collect native desktop windows in stacking order without requiring accessibility support.
+#[cfg(target_os = "windows")]
+pub fn capture_desktop_windows(screen_origin_x: i32, screen_origin_y: i32) -> Vec<DetectedUiElement> {
+    windows_capture::capture_windows(screen_origin_x, screen_origin_y)
+}
+
 /// Collect top-level windows across the desktop (super fast, ~5ms).
+#[cfg(not(target_os = "windows"))]
 pub fn capture_desktop_windows(screen_origin_x: i32, screen_origin_y: i32) -> Vec<DetectedUiElement> {
     let mut elements = Vec::new();
     let current_pid = std::process::id();
@@ -139,6 +149,7 @@ fn collect_detailed_elements(
         App::list().unwrap_or_default()
     };
 
+    let mut visited_nodes = 0;
     {
         for app in apps {
             if let Some(pid) = app.pid {
@@ -210,6 +221,7 @@ fn collect_detailed_elements(
                     &window, screen_origin_x, screen_origin_y, &mut elements, 0,
                     target.map(|target| (target.x, target.y, target.width, target.height)).or(bounds_filter),
                     relative_position.as_ref(),
+                    &mut visited_nodes,
                 );
             }
         }
@@ -417,10 +429,14 @@ fn collect_elements_recursive(
     depth: usize,
     bounds_filter: Option<(f64, f64, f64, f64)>,
     relative_position: Option<&RelativePosition>,
+    visited_nodes: &mut usize,
 ) {
-    if depth > 16 || out.len() >= 1000 {
+    // Chromium nests web content below the browser chrome and several document/group layers.
+    // Bound visited nodes as well as results: unnamed containers also cost accessibility calls.
+    if depth > 64 || *visited_nodes >= 5000 || out.len() >= 1000 {
         return;
     }
+    *visited_nodes += 1;
 
     // Minimized state is meaningful on the top-level window. Reading it for every
     // nested panel performs unnecessary accessibility calls on some applications.
@@ -500,7 +516,7 @@ fn collect_elements_recursive(
 
     if let Ok(children) = element.children() {
         for child in children {
-            collect_elements_recursive(&child, origin_x, origin_y, out, depth + 1, bounds_filter, relative_position);
+            collect_elements_recursive(&child, origin_x, origin_y, out, depth + 1, bounds_filter, relative_position, visited_nodes);
         }
     }
 }
