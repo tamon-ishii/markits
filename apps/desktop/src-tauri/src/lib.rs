@@ -156,6 +156,7 @@ pub fn run() {
     let output = args.windows(2).find(|pair| pair[0] == "--manual-studio-output").map(|pair| pair[1].clone());
     let completion = args.windows(2).find(|pair| pair[0] == "--manual-studio-completion").map(|pair| pair[1].clone());
     let manual_studio = input.zip(output).zip(completion).map(|((input, output), completion)| ManualStudioSession { input, output, completion });
+    let background = args.iter().any(|arg| arg == "--background") && manual_studio.is_none();
     tauri::Builder::default()
         .manage(AppState {
             shortcut: Mutex::new(read_shortcut()),
@@ -211,7 +212,7 @@ pub fn run() {
             }
             _ => {}
         })
-        .setup(|app| {
+        .setup(move |app| {
             // Build system tray menu
             let show_item = MenuItem::with_id(app, "show", "Show Editor", true, None::<&str>)?;
             let capture_item = MenuItem::with_id(
@@ -276,8 +277,8 @@ pub fn run() {
 
             let _ = register_capture_shortcuts(app.handle());
 
-            // Ensure main window is shown and raised on initial launch
-            if let Some(window) = app.get_webview_window("main") {
+            // Login startup stays in the tray; ordinary launches open the editor.
+            if !background && let Some(window) = app.get_webview_window("main") {
                 commands::force_raise_window(&window);
             }
 
