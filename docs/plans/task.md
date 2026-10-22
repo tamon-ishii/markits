@@ -7,4 +7,5 @@
 | 5 | Full Verification and Documentation Update | Completed |
 | 6 | Studio handoff: closing the editor cancels instead of hiding; verify actual desktop cancellation | Complete |
 
-| 7 | Merge Manual Studio integration and Windows warning fixes into upstream MarkIts for submodule use | In progress |
+| 7 | Merge Manual Studio integration and Windows warning fixes into upstream MarkIts for submodule use | Completed |
+| 8 | Verify 56 library tests, desktop frontend build, crop browser regression, and Manual Studio cargo check | Passed |
