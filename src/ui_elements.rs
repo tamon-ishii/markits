@@ -1,4 +1,18 @@
 use serde::{Deserialize, Serialize};
+pub const DEFAULT_CAPTURE_DEPTH: usize = 64;
+std::thread_local! {
+    static CAPTURE_DEPTH: std::cell::Cell<usize> = const { std::cell::Cell::new(DEFAULT_CAPTURE_DEPTH) };
+}
+pub fn capture_depth() -> usize { CAPTURE_DEPTH.with(std::cell::Cell::get) }
+pub struct CaptureDepthScope { previous: usize }
+impl Drop for CaptureDepthScope {
+    fn drop(&mut self) { CAPTURE_DEPTH.with(|value| value.set(self.previous)); }
+}
+/// Apply a request's project setting without affecting other projects/threads.
+pub fn capture_depth_scope(depth: usize) -> CaptureDepthScope {
+    let previous = CAPTURE_DEPTH.with(|value| value.replace(depth.clamp(1, 128)));
+    CaptureDepthScope { previous }
+}
 #[cfg(not(target_os = "linux"))]
 use xa11y::{App, AppExt, Element, Rect, Role};
 
@@ -488,7 +502,7 @@ mod linux_atspi {
                     }
                 }
             }
-            if depth >= 32 { continue; }
+            if depth >= super::capture_depth() { continue; }
             if let Ok(children) = accessible.call::<_, _, Vec<(String, OwnedObjectPath)>>("GetChildren", &()) {
                 for (child_bus, child_path) in children {
                     queue.push_back((child_bus, child_path.to_string(), depth + 1));
@@ -667,7 +681,9 @@ fn collect_elements_recursive(
     bounds_filter: Option<(f64, f64, f64, f64)>,
     relative_position: Option<&RelativePosition>,
 ) {
-    if depth > 16 || out.len() >= 1000 {
+    // Chromium embeds page controls below several layers of browser and DOM
+    // containers. Visible buttons commonly sit deeper than 20 levels.
+    if depth > capture_depth() || out.len() >= 4000 {
         return;
     }
 
@@ -726,7 +742,8 @@ fn collect_elements_recursive(
 
             // Avoid exact duplicate window bounds if already collected from X11
             let is_dup = out.iter().any(|existing| {
-                (existing.x - el_x).abs() < 2.0
+                existing.role == role_str && existing.name == name
+                    && (existing.x - el_x).abs() < 2.0
                     && (existing.y - el_y).abs() < 2.0
                     && (existing.width - el_w).abs() < 2.0
                     && (existing.height - el_h).abs() < 2.0
