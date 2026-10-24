@@ -131,6 +131,30 @@ document.addEventListener('DOMContentLoaded', async () => {
     });
   }
 
+  const depthInput = document.getElementById('ui-exploration-depth') as HTMLInputElement | null;
+  const depthStatus = document.getElementById('ui-exploration-depth-status');
+  if (isTauri && depthInput) {
+    let savedDepth: number;
+    invokeTauri<number>('cmd_get_ui_exploration_depth').then((depth) => {
+      savedDepth = depth;
+      depthInput.value = String(depth);
+      depthInput.disabled = false;
+    }).catch((error) => { if (depthStatus) depthStatus.textContent = String(error); });
+    depthInput.addEventListener('change', async () => {
+      if (!depthInput.reportValidity()) return;
+      depthInput.disabled = true;
+      try {
+        savedDepth = await invokeTauri<number>('cmd_set_ui_exploration_depth', { depth: depthInput.valueAsNumber });
+        if (depthStatus) depthStatus.textContent = '保存しました';
+      } catch (error) {
+        if (depthStatus) depthStatus.textContent = String(error);
+      } finally {
+        depthInput.value = String(savedDepth);
+        depthInput.disabled = false;
+      }
+    });
+  }
+
   let currentHistoryId: string | null = null;
 
   const autoSaveToHistory = async () => {

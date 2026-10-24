@@ -5,3 +5,4 @@
 | 3 | High-DPI Coordinate Scaling and Scale-Factor Normalization | Completed |
 | 4 | CLI Flags & Handlers in src/cli.rs and src/main.rs | Completed |
 | 5 | Full Verification and Documentation Update | Completed |
+| 6 | Configurable UI exploration depth: settings input, persistence, traversal limits; frontend build and 24 Rust tests passed | Completed |

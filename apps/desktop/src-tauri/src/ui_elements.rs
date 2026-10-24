@@ -1,3 +1,18 @@
+use std::sync::atomic::{AtomicUsize, Ordering};
+pub const DEFAULT_EXPLORATION_DEPTH: usize = if cfg!(target_os = "linux") { 32 } else { 64 };
+pub const MAX_EXPLORATION_DEPTH: usize = 128;
+static EXPLORATION_DEPTH: AtomicUsize = AtomicUsize::new(DEFAULT_EXPLORATION_DEPTH);
+pub fn exploration_depth() -> usize { EXPLORATION_DEPTH.load(Ordering::Relaxed) }
+pub fn validate_exploration_depth(depth: usize) -> Result<(), String> {
+    if (1..=MAX_EXPLORATION_DEPTH).contains(&depth) { Ok(()) }
+    else { Err(format!("UI探索階層の深さは1〜{MAX_EXPLORATION_DEPTH}で指定してください")) }
+}
+pub fn set_exploration_depth(depth: usize) -> Result<(), String> {
+    validate_exploration_depth(depth)?;
+    EXPLORATION_DEPTH.store(depth, Ordering::Relaxed);
+    Ok(())
+}
+
 use serde::{Deserialize, Serialize};
 #[cfg(target_os = "windows")]
 #[path = "windows_capture.rs"]
@@ -149,6 +164,7 @@ fn collect_detailed_elements(
         App::list().unwrap_or_default()
     };
 
+    let max_depth = exploration_depth();
     let mut visited_nodes = 0;
     {
         for app in apps {
@@ -221,7 +237,7 @@ fn collect_detailed_elements(
                     &window, screen_origin_x, screen_origin_y, &mut elements, 0,
                     target.map(|target| (target.x, target.y, target.width, target.height)).or(bounds_filter),
                     relative_position.as_ref(),
-                    &mut visited_nodes,
+                    &mut visited_nodes, max_depth,
                 );
             }
         }
@@ -313,6 +329,7 @@ mod linux_atspi {
 
         // Read one property at a time. Some WebKitGTK accessibility bridges
         // abort when many nodes and attributes are queried concurrently.
+        let max_depth = super::exploration_depth();
         while let Some((bus, path, depth)) = queue.pop_front() {
             if visited >= 500 { break; }
             visited += 1;
@@ -356,7 +373,7 @@ mod linux_atspi {
                     }
                 }
             }
-            if depth >= 32 { continue; }
+            if depth >= max_depth { continue; }
             if let Ok(children) = accessible.call::<_, _, Vec<(String, OwnedObjectPath)>>("GetChildren", &()) {
                 for (child_bus, child_path) in children {
                     queue.push_back((child_bus, child_path.to_string(), depth + 1));
@@ -430,10 +447,11 @@ fn collect_elements_recursive(
     bounds_filter: Option<(f64, f64, f64, f64)>,
     relative_position: Option<&RelativePosition>,
     visited_nodes: &mut usize,
+    max_depth: usize,
 ) {
     // Chromium nests web content below the browser chrome and several document/group layers.
     // Bound visited nodes as well as results: unnamed containers also cost accessibility calls.
-    if depth > 64 || *visited_nodes >= 5000 || out.len() >= 1000 {
+    if depth > max_depth || *visited_nodes >= 5000 || out.len() >= 1000 {
         return;
     }
     *visited_nodes += 1;
@@ -514,9 +532,10 @@ fn collect_elements_recursive(
         }
     }
 
+    if depth >= max_depth { return; }
     if let Ok(children) = element.children() {
         for child in children {
-            collect_elements_recursive(&child, origin_x, origin_y, out, depth + 1, bounds_filter, relative_position, visited_nodes);
+            collect_elements_recursive(&child, origin_x, origin_y, out, depth + 1, bounds_filter, relative_position, visited_nodes, max_depth);
         }
     }
 }
@@ -1087,5 +1106,14 @@ mod tests {
         }];
         let cropped = filter_elements_for_crop(&full_canvas_window, 0.0, 0.0, 1920.0, 1080.0);
         assert!(cropped.is_empty(), "Exact full canvas root window must be excluded");
+    }
+}
+
+#[cfg(test)]
+mod exploration_depth_tests {
+    #[test]
+    fn validates_depth_limits() {
+        for depth in [1, 32, 64, 128] { assert!(super::validate_exploration_depth(depth).is_ok()); }
+        for depth in [0, 129, usize::MAX] { assert!(super::validate_exploration_depth(depth).is_err()); }
     }
 }

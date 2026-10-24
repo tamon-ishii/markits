@@ -50,6 +50,30 @@ fn shortcut_config_path() -> std::path::PathBuf {
         .join("capture-shortcut.txt")
 }
 
+fn exploration_depth_config_path() -> std::path::PathBuf {
+    shortcut_config_path().with_file_name("ui-exploration-depth.txt")
+}
+fn read_exploration_depth() -> usize {
+    std::fs::read_to_string(exploration_depth_config_path()).ok()
+        .and_then(|value| value.trim().parse::<usize>().ok())
+        .filter(|depth| ui_elements::validate_exploration_depth(*depth).is_ok())
+        .unwrap_or(ui_elements::DEFAULT_EXPLORATION_DEPTH)
+}
+#[tauri::command]
+fn cmd_get_ui_exploration_depth() -> usize { ui_elements::exploration_depth() }
+#[tauri::command]
+fn cmd_set_ui_exploration_depth(depth: usize) -> Result<usize, String> {
+    ui_elements::validate_exploration_depth(depth)?;
+    let path = exploration_depth_config_path();
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+    }
+    std::fs::write(path, depth.to_string())
+        .map_err(|error| format!("UI探索階層の設定を保存できません: {error}"))?;
+    ui_elements::set_exploration_depth(depth)?;
+    Ok(depth)
+}
+
 fn read_shortcut() -> String {
     std::fs::read_to_string(shortcut_config_path())
         .ok()
@@ -151,6 +175,7 @@ fn register_capture_shortcuts(app: &AppHandle) -> Result<(), String> {
 }
 
 pub fn run() {
+    let _ = ui_elements::set_exploration_depth(read_exploration_depth());
     let args: Vec<String> = std::env::args().skip(1).collect();
     let input = args.windows(2).find(|pair| pair[0] == "--manual-studio-input").map(|pair| pair[1].clone());
     let output = args.windows(2).find(|pair| pair[0] == "--manual-studio-output").map(|pair| pair[1].clone());
@@ -184,6 +209,8 @@ pub fn run() {
             commands::cmd_save_to_history,
             commands::cmd_raise_window,
             commands::cmd_fetch_detailed_ui_elements,
+            cmd_get_ui_exploration_depth,
+            cmd_set_ui_exploration_depth,
             cmd_get_capture_shortcut,
             cmd_set_capture_shortcut,
             cmd_manual_studio_session,

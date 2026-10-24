@@ -76,6 +76,13 @@
             </button>
           </div>
           <div class="capture-shortcut-settings">
+            <label for="ui-exploration-depth">UI探索階層の深さ</label>
+            <input id="ui-exploration-depth" type="number" min="1" max="128" step="1" required disabled
+              style="width: 80px" aria-describedby="ui-exploration-depth-help ui-exploration-depth-status">
+            <span id="ui-exploration-depth-help">1〜128階層。深くすると検出範囲が広がりますが、探索に時間がかかります。変更は次の探索から反映されます。</span>
+            <span id="ui-exploration-depth-status" role="status" aria-live="polite"></span>
+          </div>
+          <div class="capture-shortcut-settings">
             <label for="capture-shortcut">撮影ショートカット</label>
             <select id="capture-shortcut" aria-label="撮影ショートカット">
               <option value="PrintScreen">PrintScreen</option>
