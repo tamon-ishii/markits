@@ -515,7 +515,7 @@ impl SvgRenderer {
         }
 
         // Layer 3: Labels, Callouts, Badges, Pins (Foremost layer)
-        for ann in &scene.annotations {
+        for (annotation_index, ann) in scene.annotations.iter().enumerate() {
             match ann {
                 ResolvedAnnotation::Label { box_rect, text, style, shadow, outline } => {
                     let tokens = self.theme.tokens_for(*style);
@@ -525,7 +525,7 @@ impl SvgRenderer {
 
                     svg.push_str(&format!(
                         r#"  <g{}>
-    <rect x="{}" y="{}" width="{}" height="{}" rx="{}" ry="{}" fill="{}" stroke="{}" stroke-width="1.5"/>
+    <rect data-label-index="{annotation_index}" x="{}" y="{}" width="{}" height="{}" rx="{}" ry="{}" fill="{}" stroke="{}" stroke-width="1.5"/>
     <text x="{}" y="{}" fill="{}" font-family="{}" font-size="{}" font-weight="600" text-anchor="middle" dominant-baseline="central">{}</text>
   </g>
 "#,
@@ -575,7 +575,7 @@ impl SvgRenderer {
 
                     svg.push_str(&format!(
                         r##"  <g{}>
-    <circle cx="{}" cy="{}" r="{}" fill="{}" stroke="#ffffff" stroke-width="2"/>
+    <circle data-badge-index="{annotation_index}" cx="{}" cy="{}" r="{}" fill="{}" stroke="#ffffff" stroke-width="2"/>
     <text x="{}" y="{}" fill="{}" font-family="{}" font-size="{}" font-weight="bold" text-anchor="middle" dominant-baseline="central">{}</text>
   </g>
 "##,
@@ -613,7 +613,7 @@ impl SvgRenderer {
                     // 2. Circular step badge
                     svg.push_str(&format!(
                         r##"  <g{}>
-    <circle cx="{}" cy="{}" r="{}" fill="{}" stroke="#ffffff" stroke-width="2"/>
+    <circle data-badge-index="{annotation_index}" cx="{}" cy="{}" r="{}" fill="{}" stroke="#ffffff" stroke-width="2"/>
     <text x="{}" y="{}" fill="{}" font-family="{}" font-size="{}" font-weight="bold" text-anchor="middle" dominant-baseline="central">{}</text>
   </g>
 "##,

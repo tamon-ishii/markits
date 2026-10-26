@@ -1008,6 +1008,20 @@ export class AnnotationEditor {
     return { snapped: false };
   }
 
+  private findSnapElementAtPoint(x: number, y: number): {
+    snapped: boolean; element?: DetectedUiElement; rect?: [number, number, number, number];
+  } {
+    if (!this.isSnapEnabled || this.isCropMode) return { snapped: false };
+    const area = this.scene.canvas.width * this.scene.canvas.height;
+    const candidates = this.uiElements.filter(el => el.width > 0 && el.height > 0
+      && el.width <= 800 && el.height <= 600 && el.width * el.height < area * 0.45
+      && x >= el.x && x <= el.x + el.width && y >= el.y && y <= el.y + el.height);
+    candidates.sort((a, b) => a.width * a.height - b.width * b.height);
+    const element = candidates[0];
+    return element ? { snapped: true, element, rect: [Math.round(element.x), Math.round(element.y), Math.round(element.width), Math.round(element.height)] }
+      : this.findSnapElementForMove(x, y, 0, 0);
+  }
+
   public clearSnapGuide(): void {
     this.renderAllSnapTargets();
   }
@@ -1246,8 +1260,15 @@ export class AnnotationEditor {
         const target = (anno as any).target;
         const initTarget = initial.target;
         if (this.activeHandle.type === 'move') {
-          target[0] = Math.max(0, Math.round(initTarget[0] + dx));
-          target[1] = Math.max(0, Math.round(initTarget[1] + dy));
+          const rawX = Math.max(0, Math.round(initTarget[0] + coords.x - this.dragStartX));
+          const rawY = Math.max(0, Math.round(initTarget[1] + coords.y - this.dragStartY));
+          const moved = !e.altKey ? this.findSnapElementForMove(rawX, rawY, initTarget[2], initTarget[3]) : { snapped: false };
+          target[0] = moved.rect?.[0] ?? rawX;
+          target[1] = moved.rect?.[1] ?? rawY;
+          if (moved.rect && ['badge', 'step-arrow', 'label', 'rect', 'rounded-rect', 'spotlight'].includes(anno.type)) {
+            target[2] = moved.rect[2]; target[3] = moved.rect[3];
+          }
+          this.renderAllSnapTargets(moved.rect ? { x: target[0], y: target[1], snapped: true, element: moved.element } : undefined);
         } else if (this.activeHandle.type === 'se') {
           let rectSnapped = false;
           if (!e.altKey && this.isSnapEnabled) {
@@ -1299,11 +1320,14 @@ export class AnnotationEditor {
         const rawY = Math.max(0, Math.round(initTarget[1] + dy));
 
         if (!e.altKey && this.isSnapEnabled) {
-          const snap = this.findSnapElementForMove(rawX, rawY, initTarget[2], initTarget[3]);
+          const isBadge = anno.type === 'badge' || anno.type === 'step-arrow' || anno.type === 'label';
+          const snap = isBadge
+            ? this.findSnapElementAtPoint(coords.x, coords.y)
+            : this.findSnapElementForMove(rawX, rawY, initTarget[2], initTarget[3]);
           if (snap.snapped && snap.element && snap.rect) {
             target[0] = snap.rect[0];
             target[1] = snap.rect[1];
-            if (anno.type === 'rect' || anno.type === 'rounded-rect' || anno.type === 'spotlight') {
+            if (isBadge || anno.type === 'rect' || anno.type === 'rounded-rect' || anno.type === 'spotlight') {
               target[2] = snap.rect[2];
               target[3] = snap.rect[3];
             }
@@ -1447,6 +1471,11 @@ export class AnnotationEditor {
 
   private createDefaultAnnotation(type: string, x: number, y: number): Annotation {
     const defaultTarget: [number, number, number, number] = [Math.round(x - 50), Math.round(y - 25), 100, 50];
+    const nextStep = () => this.scene.annotations.reduce((maximum, annotation) => {
+      if (annotation.type !== 'badge' && annotation.type !== 'step-arrow') return maximum;
+      const step = Number(annotation.step ?? 1);
+      return Number.isSafeInteger(step) && step > 0 ? Math.max(maximum, step) : maximum;
+    }, 0) + 1;
 
     switch (type) {
       case 'arrow':
@@ -1502,7 +1531,7 @@ export class AnnotationEditor {
         return {
           type: 'badge',
           target: defaultTarget,
-          step: 1,
+          step: nextStep(),
           style: 'step',
           position: 'top',
         };
@@ -1510,7 +1539,7 @@ export class AnnotationEditor {
         return {
           type: 'step-arrow',
           target: defaultTarget,
-          step: 1,
+          step: nextStep(),
           style: 'step',
           position: 'right',
         };
@@ -1732,6 +1761,31 @@ export class AnnotationEditor {
       }
     }
 
+    // Use the renderer's final badge circles: automatic placement can move a
+    // badge away from its target rectangle to avoid other annotations.
+    const visibleIndices = this.scene.annotations.map((_, index) => index)
+      .filter(index => !this.scene.hidden_annotations?.includes(index));
+    for (const badge of this.svgLayerEl.querySelectorAll<SVGElement>('circle[data-badge-index], rect[data-label-index]')) {
+      const isLabel = badge.dataset.labelIndex !== undefined;
+      const index = visibleIndices[Number(isLabel ? badge.dataset.labelIndex : badge.dataset.badgeIndex)];
+      if (index === undefined) continue;
+      const annotation = this.scene.annotations[index];
+      if (annotation.type !== 'badge' && annotation.type !== 'step-arrow' && annotation.type !== 'label') continue;
+      const hit = document.createElementNS('http://www.w3.org/2000/svg', isLabel ? 'rect' : 'circle');
+      if (isLabel) {
+        for (const attribute of ['x', 'y', 'width', 'height', 'rx', 'ry']) hit.setAttribute(attribute, badge.getAttribute(attribute)!);
+      } else {
+        hit.setAttribute('cx', badge.getAttribute('cx')!);
+        hit.setAttribute('cy', badge.getAttribute('cy')!);
+        hit.setAttribute('r', String(Number(badge.getAttribute('r')) + 3));
+      }
+      hit.setAttribute('fill', 'transparent');
+      hit.style.cursor = 'pointer';
+      hit.dataset.handleType = 'select-anno';
+      hit.dataset.annotationIndex = String(index);
+      this.handlesLayerEl.appendChild(hit);
+    }
+
     if (this.selectedIndex === null || this.selectedIndex >= this.scene.annotations.length
         || this.scene.hidden_annotations?.includes(this.selectedIndex)) {
       return;
@@ -1782,10 +1836,11 @@ export class AnnotationEditor {
       rect.dataset.annotationIndex = idx.toString();
       this.handlesLayerEl.appendChild(rect);
 
-      // Resize handle on bottom-right corner
-      this.addSvgHandle(x + w, y + h, 'se', idx, 'handle-point');
-      // Center move handle
-      this.addSvgHandle(x + w / 2, y + h / 2, 'move', idx, 'handle-point start');
+      if (anno.type !== 'badge' && anno.type !== 'step-arrow' && anno.type !== 'label') {
+        // Resize and move handles are unnecessary for numbered badges.
+        this.addSvgHandle(x + w, y + h, 'se', idx, 'handle-point');
+        this.addSvgHandle(x + w / 2, y + h / 2, 'move', idx, 'handle-point start');
+      }
     }
   }
 
@@ -1938,11 +1993,11 @@ export class AnnotationEditor {
     }
 
     // Step number (only for step-arrow and badge)
-    if ('step' in anno && anno.type !== 'arrow') {
+    if (anno.type === 'badge' || anno.type === 'step-arrow' || ('step' in anno && anno.type !== 'arrow')) {
       html += `
         <div class="form-group">
-          <label>手順番号 (Step)</label>
-          <input id="prop-step" class="form-control" type="text" value="${(anno as any).step ?? '1'}" />
+          <label for="prop-step">手順番号</label>
+          <input id="prop-step" class="form-control" type="number" min="1" step="1" value="${Number.isSafeInteger(Number((anno as any).step)) && Number((anno as any).step) > 0 ? Number((anno as any).step) : 1}" />
         </div>
       `;
     }
@@ -1976,13 +2031,13 @@ export class AnnotationEditor {
     // Position Hint affects the text around curved arrows and the placement of other anchored marks.
     const hasPositionHint = anno.type === 'bezier-arrow'
       ? Boolean((anno as any).has_text ?? ((anno as any).text && String((anno as any).text).trim().length > 0))
-      : !isArrowType && 'position' in anno;
+      : !isArrowType && ('position' in anno || anno.type === 'badge' || anno.type === 'step-arrow' || anno.type === 'label');
     if (hasPositionHint) {
       const pos = (anno as any).position ?? 'auto';
       const isBezierArrow = anno.type === 'bezier-arrow';
       html += `
         <div class="form-group">
-          <label>${isBezierArrow ? '曲線に対する文字位置' : '配置位置'}</label>
+          <label for="prop-position">${isBezierArrow ? '曲線に対する文字位置' : anno.type === 'badge' ? 'バッジの配置位置' : '配置位置'}</label>
           <select id="prop-position" class="form-control">
             <option value="auto" ${pos === 'auto' ? 'selected' : ''}>${isBezierArrow ? '曲線の外側（自動）' : '自動'}</option>
             <option value="top" ${pos === 'top' ? 'selected' : ''}>${isBezierArrow ? '曲線の上' : '上'}</option>
@@ -1994,6 +2049,16 @@ export class AnnotationEditor {
           ${isBezierArrow ? '<div class="arrow-placement-hint">文字の置き場所を変えます。矢印の向きや位置は変わりません。</div>' : ''}
         </div>
       `;
+    }
+
+    if (anno.type === 'badge' || anno.type === 'label') {
+      html += `<div class="form-group">
+        <label for="prop-badge-x">対象位置 X (px)</label>
+        <input id="prop-badge-x" class="form-control" type="number" step="1" value="${anno.target[0]}" />
+        <label for="prop-badge-y">対象位置 Y (px)</label>
+        <input id="prop-badge-y" class="form-control" type="number" step="1" value="${anno.target[1]}" />
+        <div class="arrow-placement-hint">対象位置と配置方向で位置を調整できます。表示されたマークをドラッグすると、対象のUI部品にスナップします。</div>
+      </div>`;
     }
 
     // Delete Button
@@ -2155,10 +2220,27 @@ export class AnnotationEditor {
     const stepEl = document.getElementById('prop-step') as HTMLInputElement | null;
     if (stepEl) {
       stepEl.addEventListener('input', () => {
-        (anno as any).step = parseInt(stepEl.value, 10) || 1;
+        if (!stepEl.validity.valid || !Number.isSafeInteger(stepEl.valueAsNumber)) return;
+        (anno as any).step = stepEl.valueAsNumber;
         this.scheduleRender();
       });
-      stepEl.addEventListener('change', () => this.pushState());
+      stepEl.addEventListener('change', () => {
+        stepEl.value = String((anno as any).step ?? 1);
+        this.pushState();
+      });
+    }
+
+    if (anno.type === 'badge' || anno.type === 'label') {
+      for (const [id, coordinate] of [['prop-badge-x', 0], ['prop-badge-y', 1]] as const) {
+        const input = document.getElementById(id) as HTMLInputElement;
+        input.addEventListener('input', () => {
+          if (!Number.isFinite(input.valueAsNumber)) return;
+          anno.target[coordinate] = Math.round(input.valueAsNumber);
+          this.updateHandles();
+          this.scheduleRender();
+        });
+        input.addEventListener('change', () => { input.value = String(anno.target[coordinate]); this.pushState(); });
+      }
     }
 
     const fontFamEl = document.getElementById('prop-font-family') as HTMLSelectElement | null;
