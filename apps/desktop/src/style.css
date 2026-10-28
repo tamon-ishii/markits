@@ -1373,3 +1373,16 @@ dialog {
 dialog::backdrop { background: rgba(0, 0, 0, 0.55); }
 .recording-panel { padding: 20px; overflow: auto; height: 100vh; box-sizing: border-box; }
 .recording-panel ol { padding-left: 24px; overflow-wrap: anywhere; }
+/* Each recording retains an ordered set of capture points. */
+.recording-screenshots, .history-operation-thumbnails {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  padding: 8px;
+}
+.recording-screenshots img { width: 140px; height: 90px; object-fit: contain; flex: 0 0 auto; }
+.history-operation-thumbnails { height: 160px; justify-content: flex-start; }
+.history-frame { flex: 0 0 180px; height: 100%; padding: 0; border: 1px solid var(--border-color); background: transparent; cursor: pointer; border-radius: 6px; }
+.history-frame img { width: 100%; height: 100%; object-fit: contain; }
+.history-play { margin: 0 12px 12px; }
+#btn-playback[hidden] { display: none; }

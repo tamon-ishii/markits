@@ -30,6 +30,8 @@ pub struct HistoryItem {
     pub thumbnail_data_url: String,
     pub has_annotations: bool,
     #[serde(default)]
+    pub operation_group: Option<String>,
+    #[serde(default)]
     pub is_cropped: bool,
 }
 
@@ -98,6 +100,11 @@ pub fn save_or_update_history_item(
     // Embed annotations, UI elements, and crop_info if present
     let final_bytes =
         metadata::embed_metadata(png_bytes, annotations_json, ui_elements, crop_info)?;
+    let final_bytes = if let Some(base) = base_png_bytes {
+        crate::playback::copy_metadata(&final_bytes, base)?
+    } else {
+        final_bytes
+    };
 
     fs::write(&file_path, &final_bytes)?;
 
@@ -142,6 +149,7 @@ pub fn save_or_update_history_item(
         file_path: file_path.to_string_lossy().to_string(),
         thumbnail_data_url,
         has_annotations: annotations_json.is_some(),
+        operation_group: metadata::extract_text_chunk(&final_bytes, crate::playback::GROUP_KEY).unwrap_or(None),
         is_cropped,
     })
 }
@@ -243,6 +251,7 @@ pub fn list_history() -> Result<Vec<HistoryItem>, HistoryError> {
             file_path: path.to_string_lossy().to_string(),
             thumbnail_data_url,
             has_annotations: header_info.has_annotations,
+            operation_group: metadata::extract_text_chunk(&bytes, crate::playback::GROUP_KEY).unwrap_or(None),
             is_cropped,
         });
     }

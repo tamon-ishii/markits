@@ -222,6 +222,9 @@ export class AnnotationEditor {
     isInternalCrop: boolean = false
   ) {
     this.bgImgEl.src = dataUrl;
+    window.dispatchEvent(new CustomEvent('markits-background-changed', {
+      detail: isInternalCrop ? this.baseImageState?.dataUrl ?? dataUrl : dataUrl,
+    }));
     this.scene.canvas = { width, height };
     this.outputWidth = width;
     this.outputHeight = height;

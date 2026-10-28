@@ -51,15 +51,32 @@ async function chooseRecordingWindow(invoke: Invoke) {
 export function showRecordingControls(invoke: Invoke) {
   document.body.innerHTML = `<main class="recording-panel"><h2>ウインドウ操作の記録</h2>
     <p id="record-status" role="status">記録中</p><p>Ctrl＋Shift＋F9：一時停止／再開<br>Ctrl＋Shift＋F10：入力記録を停止</p>
-    <button id="record-pause" class="btn">一時停止</button><button id="record-finish" class="btn btn-primary">終了してJSONを保存</button>
+    <button id="record-screenshot" class="btn">📷 スクリーンショットを追加</button>
+    <div id="record-screenshots" class="recording-screenshots" aria-label="撮影したスクリーンショット"></div>
+    <label><input id="record-export-json" type="checkbox"> 操作記録のJSONも保存</label>
+    <button id="record-pause" class="btn">一時停止</button><button id="record-finish" class="btn btn-primary">終了して画像を保存</button>
     <button id="record-cancel" class="btn">取消</button><ol id="record-events"></ol></main>`;
   const pause = document.getElementById('record-pause') as HTMLButtonElement;
   const finish = document.getElementById('record-finish') as HTMLButtonElement;
   const cancel = document.getElementById('record-cancel') as HTMLButtonElement;
+  const screenshot = document.getElementById('record-screenshot') as HTMLButtonElement;
+  const thumbnails = document.getElementById('record-screenshots')!;
   const status = document.getElementById('record-status')!;
   const list = document.getElementById('record-events')!;
   let paused = false, busy = false, polling = false;
   let completed: unknown;
+  screenshot.onclick = async () => {
+    if (busy || completed) return;
+    busy = true; screenshot.disabled = true; finish.disabled = true; cancel.disabled = true; pause.disabled = true;
+    try {
+      const url = await invoke<string>('cmd_recording_screenshot');
+      const image = document.createElement('img');
+      image.src = url; image.alt = `スクリーンショット ${thumbnails.children.length + 1}`;
+      thumbnails.append(image);
+      status.textContent = `${thumbnails.children.length} 枚の撮影ポイントを追加しました`;
+    } catch (error) { status.textContent = String(error); }
+    finally { busy = false; screenshot.disabled = false; finish.disabled = false; cancel.disabled = false; pause.disabled = false; }
+  };
   const poll = async () => {
     if (busy || completed || polling) return;
     polling = true;
@@ -86,18 +103,20 @@ export function showRecordingControls(invoke: Invoke) {
   };
   finish.onclick = async () => {
     if (busy) return;
-    busy = true; finish.disabled = true; pause.disabled = true; cancel.disabled = true;
+    busy = true; finish.disabled = true; pause.disabled = true; cancel.disabled = true; screenshot.disabled = true;
     try {
       completed ??= await invoke('cmd_recording_finish');
-      const { save } = await import('@tauri-apps/plugin-dialog');
-      const path = await save({ defaultPath: 'markits-operations.json', filters: [{ name: 'Operation recording', extensions: ['json'] }] });
-      if (!path) { status.textContent = '記録は停止済みです。保存先を選び直せます。'; return; }
-      const { writeFile } = await import('@tauri-apps/plugin-fs');
-      await writeFile(path, new TextEncoder().encode(JSON.stringify(completed, null, 2)));
+      if ((document.getElementById('record-export-json') as HTMLInputElement).checked) {
+        const { save } = await import('@tauri-apps/plugin-dialog');
+        const path = await save({ defaultPath: 'markits-operations.json', filters: [{ name: 'Operation recording', extensions: ['json'] }] });
+        if (!path) { status.textContent = '画像は保存済みです。JSONの保存先を選び直せます。'; return; }
+        const { writeFile } = await import('@tauri-apps/plugin-fs');
+        await writeFile(path, new TextEncoder().encode(JSON.stringify(completed, null, 2)));
+      }
       clearInterval(timer);
       await invoke('cmd_recording_cancel');
     } catch (error) { status.textContent = String(error); }
-    finally { busy = false; finish.disabled = false; cancel.disabled = false; pause.disabled = Boolean(completed); }
+    finally { busy = false; finish.disabled = false; cancel.disabled = false; pause.disabled = Boolean(completed); screenshot.disabled = Boolean(completed); }
   };
   cancel.onclick = async () => {
     if (busy) return;

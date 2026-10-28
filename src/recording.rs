@@ -13,6 +13,9 @@ use std::{
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum RecordedEvent {
+    Screenshot {
+        elapsed_ms: u64,
+    },
     Click {
         elapsed_ms: u64,
         x: f64,
@@ -159,6 +162,7 @@ pub fn run_helper(path: &Path) -> Result<(), String> {
                 if ctrl { Some("Control") } else { None },
                 if alt { Some("Alt") } else { None },
                 if meta { Some("Meta") } else { None },
+                if shift && (ctrl || alt || meta) { Some("Shift") } else { None },
             ]
             .into_iter()
             .flatten()
@@ -361,6 +365,9 @@ pub struct RecordingStatus {
 }
 
 impl RecordingSession {
+    pub fn window_id(&self) -> &str {
+        &self.window.id
+    }
     pub fn start(window_id: &str, executable: &Path) -> Result<Self, String> {
         if crate::window_capture::is_wayland_session() {
             return Err("Operation recording requires an X11 session on Linux".into());

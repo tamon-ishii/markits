@@ -2967,6 +2967,7 @@ dependencies = [
  "image 0.25.10",
  "markits",
  "png 0.18.1",
+ "rdev",
  "screenshots",
  "serde",
  "serde_json",

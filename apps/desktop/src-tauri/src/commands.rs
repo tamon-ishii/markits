@@ -521,7 +521,14 @@ pub async fn cmd_crop_and_load(
     let rgba = dynamic_img.to_rgba8();
     let cropped =
         capture::crop_rgba_image(&rgba, x, y, width, height).map_err(|e| e.to_string())?;
-    let captured = capture::rgba_to_captured_image(&cropped).map_err(|e| e.to_string())?;
+    let mut captured = capture::rgba_to_captured_image(&cropped).map_err(|e| e.to_string())?;
+    if let Some(saved) = crate::playback::extract(&png_bytes)? {
+        captured.raw_png = metadata::embed_text_chunk(&captured.raw_png, crate::playback::OPERATIONS_KEY, &serde_json::to_string(&saved).map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
+        if let Some(group) = metadata::extract_text_chunk(&png_bytes, crate::playback::GROUP_KEY).map_err(|e| e.to_string())? {
+            captured.raw_png = metadata::embed_text_chunk(&captured.raw_png, crate::playback::GROUP_KEY, &group).map_err(|e| e.to_string())?;
+        }
+        captured.data_url = format!("data:image/png;base64,{}", base64::engine::general_purpose::STANDARD.encode(&captured.raw_png));
+    }
 
     let cropped_elements = ui_elements.clone().map(|elements| {
         crate::ui_elements::filter_elements_for_crop(
@@ -712,7 +719,9 @@ pub fn cmd_compose_and_save(
     )
     .map_err(|e| e.to_string())?;
 
+    let final_png = crate::playback::copy_metadata(&final_png, &bg_bytes).map_err(|e| e.to_string())?;
     let final_png = if let Some(base) = base_background_data_url {
+        let final_png = crate::playback::copy_metadata(&final_png, &decode_data_url(&base)?).map_err(|e| e.to_string())?;
         metadata::embed_text_chunk(&final_png, "markits:base_image", &base)
             .map_err(|e| e.to_string())?
     } else {

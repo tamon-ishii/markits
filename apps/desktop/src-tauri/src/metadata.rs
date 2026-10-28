@@ -355,7 +355,8 @@ pub fn load_image_with_metadata(bytes: &[u8]) -> Result<LoadedImageResult, Metad
                         {
                             width = source_width;
                             height = source_height;
-                            image_data_url = source;
+                            let source_bytes = crate::playback::copy_metadata(&source_bytes, bytes)?;
+                            image_data_url = format!("{};base64,{}", header.trim_end_matches(";base64"), base64::engine::general_purpose::STANDARD.encode(source_bytes));
                         }
                     }
                 }

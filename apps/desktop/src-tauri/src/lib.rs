@@ -4,6 +4,7 @@ pub mod history;
 pub mod metadata;
 pub mod ui_elements;
 pub mod recording;
+pub mod playback;
 
 use std::sync::{Mutex, atomic::AtomicU64};
 use tauri::{
@@ -191,6 +192,7 @@ pub fn run() {
     let background = args.iter().any(|arg| arg == "--background") && manual_studio.is_none();
     tauri::Builder::default()
         .manage(recording::RecordingState::default())
+        .manage(playback::PlaybackState::default())
         .manage(AppState {
             shortcut: Mutex::new(read_shortcut()),
             manual_studio: Mutex::new(manual_studio),
@@ -201,6 +203,10 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
         .invoke_handler(tauri::generate_handler![
+            playback::cmd_has_operations,
+            playback::cmd_playback,
+            playback::cmd_playback_cancel,
+            recording::cmd_recording_screenshot,
             recording::cmd_recording_windows,
             recording::cmd_recording_start,
             recording::cmd_recording_status,

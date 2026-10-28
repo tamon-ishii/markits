@@ -1,5 +1,6 @@
 import { AnnotationEditor } from './editor.ts';
 import { addRecordingButton, showRecordingControls } from './recording.ts';
+import { groupHistory } from './history-groups.ts';
 import { CaptureOverlay, CropRect } from './overlay.ts';
 import { CapturedImage, LoadedImageResult, DetectedUiElement } from './types.ts';
 
@@ -12,6 +13,7 @@ interface HistoryItem {
   file_path: string;
   thumbnail_data_url: string;
   has_annotations: boolean;
+  operation_group?: string | null;
   is_cropped?: boolean;
 }
 interface ManualStudioSession { input: string; output: string }
@@ -163,6 +165,43 @@ document.addEventListener('DOMContentLoaded', async () => {
   }
 
   let currentHistoryId: string | null = null;
+  let playbackBusy = false;
+  let backgroundGeneration = 0;
+  let playbackImageDataUrl = '';
+  const playButton = document.createElement('button');
+  playButton.className = 'btn';
+  playButton.id = 'btn-playback';
+  playButton.textContent = '▶ 再生して再撮影';
+  playButton.hidden = true;
+  editorActions.prepend(playButton);
+  window.addEventListener('markits-background-changed', async (event) => {
+    playbackImageDataUrl = (event as CustomEvent<string>).detail;
+    const generation = ++backgroundGeneration;
+    playButton.hidden = true;
+    if (!isTauri) return;
+    try {
+      const available = await invokeTauri<boolean>('cmd_has_operations', { imageDataUrl: (event as CustomEvent<string>).detail });
+      if (generation === backgroundGeneration) playButton.hidden = !available;
+    } catch (error) { console.warn('Could not read operation recording', error); }
+  });
+  const replayCapture = async (imageDataUrl: string) => {
+    if (playbackBusy) return;
+    playbackBusy = true; playButton.disabled = true;
+    try {
+      await autoSaveToHistory();
+      const images = await invokeTauri<LoadedImageResult[]>('cmd_playback', { imageDataUrl });
+      const image = images.at(-1);
+      if (image) {
+        editor.setBackgroundImage(image.image_data_url, image.width, image.height, image.annotations_json, image.ui_elements);
+        currentHistoryId = image.history_id ?? null;
+        editor.markClean();
+        await switchView('editor');
+      }
+      await loadHistory();
+    } catch (error) { alert(`再生・再撮影に失敗しました: ${error}`); }
+    finally { playbackBusy = false; playButton.disabled = false; }
+  };
+  playButton.onclick = () => { void replayCapture(playbackImageDataUrl); };
 
   const autoSaveToHistory = async () => {
     if (!isTauri || !editor.hasImage()) return;
@@ -342,7 +381,9 @@ document.addEventListener('DOMContentLoaded', async () => {
       }
 
       historyGrid.innerHTML = '';
-      for (const item of items) {
+      for (const group of groupHistory(items)) {
+        const item = group[0];
+        let selectedItem = item;
         const card = document.createElement('div');
         card.className = 'history-card';
         card.innerHTML = `
@@ -361,11 +402,40 @@ document.addEventListener('DOMContentLoaded', async () => {
             <button class="btn-delete-history" title="履歴から削除">🗑️</button>
           </div>
         `;
+        if (item.operation_group) {
+          const thumbWrap = card.querySelector('.history-thumb-wrap')!;
+          thumbWrap.classList.add('history-operation-thumbnails');
+          thumbWrap.replaceChildren();
+          group.forEach((frame, index) => {
+            const button = document.createElement('button');
+            button.className = 'history-frame';
+            button.title = `スクリーンショット ${index + 1} を編集`;
+            const thumbnail = document.createElement('img');
+            thumbnail.src = frame.thumbnail_data_url; thumbnail.alt = `スクリーンショット ${index + 1}`;
+            button.append(thumbnail);
+            button.addEventListener('click', () => { selectedItem = frame; });
+            thumbWrap.append(button);
+          });
+          const replay = document.createElement('button');
+          replay.className = 'btn history-play';
+          replay.textContent = `▶ 再生して再撮影（${group.length} 枚）`;
+          replay.addEventListener('click', async (event) => {
+            event.stopPropagation();
+            if (playbackBusy) return;
+            replay.disabled = true;
+            try {
+              const loaded = await invokeTauri<LoadedImageResult>('cmd_load_history_item', { id: item.id });
+              await replayCapture(loaded.image_data_url);
+            } catch (error) { alert(`操作記録を読み込めませんでした: ${error}`); }
+            finally { replay.disabled = false; }
+          });
+          card.append(replay);
+        }
 
         // Card Click -> Open and re-edit in Editor
         card.addEventListener('click', async () => {
           try {
-            const loaded = await invokeTauri<LoadedImageResult>('cmd_load_history_item', { id: item.id });
+            const loaded = await invokeTauri<LoadedImageResult>('cmd_load_history_item', { id: selectedItem.id });
 
             editor.setBackgroundImage(
               loaded.image_data_url,
@@ -390,7 +460,7 @@ document.addEventListener('DOMContentLoaded', async () => {
               editor.restoreCropState(null, loaded.crop_info);
             }
 
-            currentHistoryId = item.id;
+            currentHistoryId = selectedItem.id;
             editor.markClean();
             await switchView('editor');
             if (loaded.ui_elements?.length) setUiStatus('ready', `保存済み UIMap ${loaded.ui_elements.length} 要素 · 位置の再確認を推奨`);
@@ -403,9 +473,9 @@ document.addEventListener('DOMContentLoaded', async () => {
         const delBtn = card.querySelector('.btn-delete-history') as HTMLButtonElement;
         delBtn.addEventListener('click', async (e) => {
           e.stopPropagation();
-          if (confirm('このキャプチャ履歴を削除しますか？')) {
+          if (confirm(`このキャプチャ履歴${group.length > 1 ? `（${group.length} 枚）` : ''}を削除しますか？`)) {
             try {
-              await invokeTauri('cmd_delete_history_item', { id: item.id });
+              for (const frame of group) await invokeTauri('cmd_delete_history_item', { id: frame.id });
               await loadHistory();
             } catch (err: any) {
               alert(`削除エラー: ${err?.message ?? err}`);
