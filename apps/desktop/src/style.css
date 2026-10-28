@@ -1088,6 +1088,7 @@ textarea.form-control {
   left: 50%;
   transform: translateX(-50%);
   display: flex;
+  align-items: center;
   gap: 8px;
   background-color: #1e1e24;
   padding: 6px 10px;
@@ -1098,10 +1099,32 @@ textarea.form-control {
   z-index: 20;
 }
 
-.crop-toolbar select.form-control {
-  width: auto;
-  min-width: 180px;
-  padding: 4px 8px;
+.crop-preset-select {
+  background-color: #2a2a32;
+  color: #e2e8f0;
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 500;
+  padding: 3px 6px;
+  cursor: pointer;
+  outline: none;
+}
+
+.crop-preset-select:focus {
+  border-color: #0284c7;
+}
+
+.crop-preset-select optgroup {
+  background-color: #1e1e24;
+  color: #94a3b8;
+  font-weight: 600;
+}
+
+.crop-preset-select option {
+  background-color: #2a2a32;
+  color: #f1f5f9;
+  font-weight: 400;
 }
 
 /* Export Resolution Modal */
@@ -1339,3 +1362,14 @@ body.manual-studio-integration #btn-open-file,
 body.manual-studio-integration #btn-copy-clipboard {
   display: none !important;
 }
+dialog {
+  color: #e5e7eb;
+  background: #1f2937;
+  border: 1px solid #4b5563;
+  border-radius: 12px;
+  padding: 24px;
+  max-width: min(560px, 90vw);
+}
+dialog::backdrop { background: rgba(0, 0, 0, 0.55); }
+.recording-panel { padding: 20px; overflow: auto; height: 100vh; box-sizing: border-box; }
+.recording-panel ol { padding-left: 24px; overflow-wrap: anywhere; }

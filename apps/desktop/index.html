@@ -197,17 +197,33 @@
               <div class="crop-handle w" data-crop-handle="w"></div>
               <div class="crop-size-badge" id="crop-size-badge">800 × 600</div>
               <div class="crop-toolbar">
-                <select id="crop-resolution" class="form-control" aria-label="クロップ解像度" title="クロップ枠のサイズ（ピクセル）">
-                  <option value="">カスタムサイズ</option>
-                  <option value="640x480">640 × 480 (VGA)</option>
-                  <option value="800x600">800 × 600 (SVGA)</option>
-                  <option value="1024x768">1024 × 768 (XGA)</option>
-                  <option value="1280x720">1280 × 720 (HD)</option>
-                  <option value="1280x800">1280 × 800</option>
-                  <option value="1366x768">1366 × 768</option>
-                  <option value="1920x1080">1920 × 1080 (Full HD)</option>
-                  <option value="2560x1440">2560 × 1440 (WQHD)</option>
-                  <option value="3840x2160">3840 × 2160 (4K UHD)</option>
+                <select id="crop-preset-select" class="crop-preset-select" aria-label="クロップ解像度・比率" title="代表的な解像度・比率でクロップ枠を指定">
+                  <option value="free">自由 (Custom)</option>
+                  <optgroup label="16:9 (横長・動画/スライド)">
+                    <option value="1920x1080">1920 × 1080 (FHD)</option>
+                    <option value="1280x720">1280 × 720 (HD)</option>
+                    <option value="800x450">800 × 450</option>
+                  </optgroup>
+                  <optgroup label="4:3 (標準・図版/文書)">
+                    <option value="1024x768">1024 × 768</option>
+                    <option value="800x600">800 × 600</option>
+                    <option value="640x480">640 × 480</option>
+                  </optgroup>
+                  <optgroup label="1:1 (正方形・アイコン/AI)">
+                    <option value="1024x1024">1024 × 1024</option>
+                    <option value="512x512">512 × 512</option>
+                    <option value="256x256">256 × 256</option>
+                  </optgroup>
+                  <optgroup label="Large displays">
+                    <option value="1366x768">1366 × 768</option>
+                    <option value="2560x1440">2560 × 1440</option>
+                    <option value="3840x2160">3840 × 2160</option>
+                  </optgroup>
+                  <optgroup label="3:2 / 16:10 / Web">
+                    <option value="1200x800">1200 × 800 (3:2)</option>
+                    <option value="1280x800">1280 × 800 (16:10)</option>
+                    <option value="1200x630">1200 × 630 (OGP/見出し)</option>
+                  </optgroup>
                 </select>
                 <button id="btn-apply-crop" class="btn btn-sm btn-primary" title="クロップを適用 (Enter)">✓ 適用</button>
                 <button id="btn-crop-fit-marks" class="btn btn-sm btn-secondary" title="マークの外接矩形に合わせて選択枠を調整">🎯 マーク枠</button>

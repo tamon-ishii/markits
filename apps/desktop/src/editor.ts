@@ -58,6 +58,8 @@ export class AnnotationEditor {
   private cropDragStartX: number = 0;
   private cropDragStartY: number = 0;
   private initialCropRect: { x: number; y: number; width: number; height: number } | null = null;
+  private cropPresetSelectEl: HTMLSelectElement | null = null;
+  private cropPresetRatio: number | null = null;
 
   private scene: Scene = {
     canvas: { width: 800, height: 600 },
@@ -74,7 +76,45 @@ export class AnnotationEditor {
   private cropHistoryStack: CropHistoryState[] = [];
 
   private activeTool: string = 'select';
-  private selectedIndex: number | null = null;
+  private selection = new Set<number>();
+  private primary: number | null = null;
+  private get selectedIndex() { return this.primary; }
+  private set selectedIndex(value: number | null) { this.primary = value; this.selection = new Set(value === null ? [] : [value]); }
+  private marquee: {x:number;y:number;endX:number;endY:number;initial:number[]} | null = null;
+  private selectMany(indices: number[]) {
+    this.selectedIndex = indices[0] ?? null;
+    this.selection = new Set(indices);
+    this.updateHandles(); this.updateInspector();
+  }
+  private toggleSelection(index: number) {
+    const selected = new Set(this.selection);
+    if (selected.has(index)) selected.delete(index); else selected.add(index);
+    this.selectMany([...selected]);
+  }
+  private bounds(index: number) {
+    const a = this.scene.annotations[index] as any;
+    const visibleIndices = this.scene.annotations.map((_, i) => i)
+      .filter(i => !this.scene.hidden_annotations?.includes(i));
+    // Badges and labels can be automatically placed outside their targets.
+    for (const element of this.svgLayerEl.querySelectorAll<SVGGraphicsElement>('circle[data-badge-index], rect[data-label-index]')) {
+      const renderedIndex = Number(element.dataset.labelIndex ?? element.dataset.badgeIndex);
+      if (visibleIndices[renderedIndex] === index) {
+        const box = element.getBBox();
+        return { x: box.x, y: box.y, width: box.width, height: box.height };
+      }
+    }
+    const points: number[][] = a.start && a.end ? [a.start, a.end, ...(a.control ? [a.control] : [])] : a.target ? [[a.target[0],a.target[1]],[a.target[0]+a.target[2],a.target[1]+a.target[3]]] : [];
+    const x = Math.min(...points.map(p=>p[0])), y = Math.min(...points.map(p=>p[1]));
+    return {x,y,width:Math.max(...points.map(p=>p[0]))-x,height:Math.max(...points.map(p=>p[1]))-y};
+  }
+  private selectionBox(x:number,y:number,width:number,height:number) {
+    const box = document.createElementNS('http://www.w3.org/2000/svg','rect');
+    for (const [key,value] of Object.entries({x,y,width,height})) box.setAttribute(key,String(value));
+    box.setAttribute('fill','rgba(59,130,246,0.08)'); box.setAttribute('stroke','#3b82f6');
+    box.setAttribute('stroke-dasharray','5 3'); box.setAttribute('pointer-events','none');
+    this.handlesLayerEl.appendChild(box);
+  }
+
   private undoStack: string[] = [];
   private redoStack: string[] = [];
   private initialSceneJson: string = '';
@@ -123,6 +163,7 @@ export class AnnotationEditor {
     this.cropMaskBottom = document.getElementById('crop-mask-bottom');
     this.cropMaskLeft = document.getElementById('crop-mask-left');
     this.cropMaskRight = document.getElementById('crop-mask-right');
+    this.cropPresetSelectEl = document.getElementById('crop-preset-select') as HTMLSelectElement | null;
 
     // Zoom elements
     this.zoomLabelEl = document.getElementById('zoom-label');
@@ -136,7 +177,7 @@ export class AnnotationEditor {
       switch (button.dataset.layerAction) {
         case 'select':
           this.setTool('select');
-          this.selectedIndex = index;
+          if ((event as MouseEvent).shiftKey) this.toggleSelection(index); else this.selectedIndex = index;
           this.updateHandles();
           this.updateInspector();
           break;
@@ -339,7 +380,7 @@ export class AnnotationEditor {
   } {
     return {
       isAutoCropped: this.isAutoCropped,
-      autoCropOffset: { ...this.autoCropOffset },
+      autoCropOffset: this.isAutoCropped ? { ...this.autoCropOffset } : this.cropHistoryStack.reduce((offset, item) => ({ x: offset.x + item.offset.x, y: offset.y + item.offset.y }), { x: 0, y: 0 }),
       baseImageState: this.baseImageState
         ? {
             dataUrl: this.baseImageState.dataUrl,
@@ -367,6 +408,10 @@ export class AnnotationEditor {
     if (cropInfo) {
       this.isAutoCropped = cropInfo.is_auto_cropped;
       this.autoCropOffset = { x: cropInfo.offset_x, y: cropInfo.offset_y };
+      if (baseImageState && !cropInfo.is_auto_cropped) this.cropHistoryStack = [{
+        dataUrl: baseImageState.dataUrl, width: baseImageState.width, height: baseImageState.height,
+        uiElements: baseImageState.uiElements.map(el => ({ ...el })), offset: { x: cropInfo.offset_x, y: cropInfo.offset_y }, annotations: [],
+      }];
       const btnAutoCrop = document.getElementById('btn-autocrop');
       if (btnAutoCrop) {
         btnAutoCrop.classList.toggle('active', this.isAutoCropped);
@@ -593,6 +638,7 @@ export class AnnotationEditor {
     if (hidden.has(index)) hidden.delete(index);
     else hidden.add(index);
     this.scene.hidden_annotations = [...hidden].sort((a, b) => a - b);
+    this.selectMany([...this.selection].filter(i => !hidden.has(i)));
     this.pushState();
     this.render();
     this.updateInspector();
@@ -605,8 +651,9 @@ export class AnnotationEditor {
       [this.scene.annotations[next], this.scene.annotations[index]];
     this.scene.hidden_annotations = (this.scene.hidden_annotations ?? []).map((hidden) =>
       hidden === index ? next : hidden === next ? index : hidden);
-    if (this.selectedIndex === index) this.selectedIndex = next;
-    else if (this.selectedIndex === next) this.selectedIndex = index;
+    const selected = [...this.selection].map(i => i === index ? next : i === next ? index : i);
+    this.selectedIndex = selected[0] ?? null;
+    this.selection = new Set(selected);
     this.pushState();
     this.render();
     this.updateInspector();
@@ -627,7 +674,7 @@ export class AnnotationEditor {
       const annotation = annotations[index];
       const hidden = this.scene.hidden_annotations?.includes(index) ?? false;
       const row = document.createElement('div');
-      row.className = `layer-row${this.selectedIndex === index ? ' active' : ''}${hidden ? ' hidden-layer' : ''}`;
+      row.className = `layer-row${this.selection.has(index) ? ' active' : ''}${hidden ? ' hidden-layer' : ''}`;
       const addButton = (action: string, label: string, title: string): HTMLButtonElement => {
         const button = document.createElement('button');
         button.type = 'button';
@@ -734,21 +781,9 @@ export class AnnotationEditor {
     document.getElementById('btn-crop-fit-marks')?.addEventListener('click', () => this.fitCropToAnnotations(32));
     document.getElementById('btn-cancel-crop')?.addEventListener('click', () => this.cancelCropMode());
     document.getElementById('btn-reset-crop')?.addEventListener('click', () => this.resetCrop());
-    document.getElementById('crop-resolution')?.addEventListener('change', (e) => {
-      const value = (e.target as HTMLSelectElement).value;
-      if (!value || !this.isCropMode || !this.cropRect) return;
-      const [width, height] = value.split('x').map(Number);
-      const cw = this.scene.canvas.width;
-      const ch = this.scene.canvas.height;
-      if (!Number.isInteger(width) || !Number.isInteger(height)
-          || width < 10 || height < 10 || width > cw || height > ch) return;
-      this.cropRect = {
-        x: Math.max(0, Math.min(Math.round(this.cropRect.x), cw - width)),
-        y: Math.max(0, Math.min(Math.round(this.cropRect.y), ch - height)),
-        width,
-        height,
-      };
-      this.updateCropOverlayUi();
+    this.cropPresetSelectEl?.addEventListener('change', () => {
+      const val = this.cropPresetSelectEl?.value;
+      if (val) this.applyCropPreset(val);
     });
 
     window.addEventListener('keydown', (e) => {
@@ -768,9 +803,21 @@ export class AnnotationEditor {
       }
 
       if (e.key === 'Delete' || e.key === 'Backspace') {
-        if (this.selectedIndex !== null) {
-          this.removeAnnotation(this.selectedIndex);
+        if (this.selection.size > 0) {
+          e.preventDefault();
+          const removed = new Set(this.selection);
+          const kept = this.scene.annotations.map((_, i) => i).filter(i => !removed.has(i));
+          this.scene.annotations = kept.map(i => this.scene.annotations[i]);
+          this.scene.hidden_annotations = kept.flatMap((oldIndex, newIndex) =>
+            this.scene.hidden_annotations?.includes(oldIndex) ? [newIndex] : []);
+          this.selectedIndex = null;
+          this.pushState();
+          this.render();
+          this.updateInspector();
         }
+      } else if (e.key === 'Escape') {
+        this.marquee = null;
+        this.selectMany([]);
       } else if (e.ctrlKey || e.metaKey) {
         if (e.key === 'z') {
           e.preventDefault();
@@ -1013,6 +1060,20 @@ export class AnnotationEditor {
     return { snapped: false };
   }
 
+  private findSnapElementAtPoint(x: number, y: number): {
+    snapped: boolean; element?: DetectedUiElement; rect?: [number, number, number, number];
+  } {
+    if (!this.isSnapEnabled || this.isCropMode) return { snapped: false };
+    const area = this.scene.canvas.width * this.scene.canvas.height;
+    const candidates = this.uiElements.filter(el => el.width > 0 && el.height > 0
+      && el.width <= 800 && el.height <= 600 && el.width * el.height < area * 0.45
+      && x >= el.x && x <= el.x + el.width && y >= el.y && y <= el.y + el.height);
+    candidates.sort((a, b) => a.width * a.height - b.width * b.height);
+    const element = candidates[0];
+    return element ? { snapped: true, element, rect: [Math.round(element.x), Math.round(element.y), Math.round(element.width), Math.round(element.height)] }
+      : this.findSnapElementForMove(x, y, 0, 0);
+  }
+
   public clearSnapGuide(): void {
     this.renderAllSnapTargets();
   }
@@ -1126,6 +1187,7 @@ export class AnnotationEditor {
     if (target.dataset.handleType && target.dataset.annotationIndex !== undefined) {
       const idx = parseInt(target.dataset.annotationIndex, 10);
       if (target.dataset.handleType === 'select-anno') {
+        if (e.shiftKey) { this.toggleSelection(idx); return; }
         this.selectedIndex = idx;
         this.isDraggingAnnotation = true;
         this.dragStartX = coords.x;
@@ -1193,6 +1255,7 @@ export class AnnotationEditor {
     // 3. Selection mode: hit-test existing annotations fallback
     const hitIdx = this.findAnnotationAt(coords.x, coords.y);
     if (hitIdx !== null) {
+      if (e.shiftKey) { this.toggleSelection(hitIdx); return; }
       this.selectedIndex = hitIdx;
       this.isDraggingAnnotation = true;
       this.dragStartX = coords.x;
@@ -1203,7 +1266,7 @@ export class AnnotationEditor {
       return;
     }
 
-    // 4. Clicked outside: deselect
+    this.marquee = {x:coords.x,y:coords.y,endX:coords.x,endY:coords.y,initial:e.shiftKey ? [...this.selection] : []};
     this.selectedIndex = null;
     this.updateHandles();
     this.updateInspector();
@@ -1218,6 +1281,7 @@ export class AnnotationEditor {
     }
     const coords = this.getCanvasCoords(e);
 
+    if (this.marquee) { this.marquee.endX = coords.x; this.marquee.endY = coords.y; this.updateHandles(); return; }
     // Dragging an interactive handle
     if (this.isDraggingHandle && this.activeHandle && this.initialAnnotationState) {
       const snap = e.altKey ? { x: coords.x, y: coords.y, snapped: false } : this.findSnapPoint(coords.x, coords.y);
@@ -1251,8 +1315,15 @@ export class AnnotationEditor {
         const target = (anno as any).target;
         const initTarget = initial.target;
         if (this.activeHandle.type === 'move') {
-          target[0] = Math.max(0, Math.round(initTarget[0] + dx));
-          target[1] = Math.max(0, Math.round(initTarget[1] + dy));
+          const rawX = Math.max(0, Math.round(initTarget[0] + coords.x - this.dragStartX));
+          const rawY = Math.max(0, Math.round(initTarget[1] + coords.y - this.dragStartY));
+          const moved = !e.altKey ? this.findSnapElementForMove(rawX, rawY, initTarget[2], initTarget[3]) : { snapped: false };
+          target[0] = moved.rect?.[0] ?? rawX;
+          target[1] = moved.rect?.[1] ?? rawY;
+          if (moved.rect && ['badge', 'step-arrow', 'label', 'rect', 'rounded-rect', 'spotlight'].includes(anno.type)) {
+            target[2] = moved.rect[2]; target[3] = moved.rect[3];
+          }
+          this.renderAllSnapTargets(moved.rect ? { x: target[0], y: target[1], snapped: true, element: moved.element } : undefined);
         } else if (this.activeHandle.type === 'se') {
           let rectSnapped = false;
           if (!e.altKey && this.isSnapEnabled) {
@@ -1304,11 +1375,14 @@ export class AnnotationEditor {
         const rawY = Math.max(0, Math.round(initTarget[1] + dy));
 
         if (!e.altKey && this.isSnapEnabled) {
-          const snap = this.findSnapElementForMove(rawX, rawY, initTarget[2], initTarget[3]);
+          const isBadge = anno.type === 'badge' || anno.type === 'step-arrow' || anno.type === 'label';
+          const snap = isBadge
+            ? this.findSnapElementAtPoint(coords.x, coords.y)
+            : this.findSnapElementForMove(rawX, rawY, initTarget[2], initTarget[3]);
           if (snap.snapped && snap.element && snap.rect) {
             target[0] = snap.rect[0];
             target[1] = snap.rect[1];
-            if (anno.type === 'rect' || anno.type === 'rounded-rect' || anno.type === 'spotlight') {
+            if (isBadge || anno.type === 'rect' || anno.type === 'rounded-rect' || anno.type === 'spotlight') {
               target[2] = snap.rect[2];
               target[3] = snap.rect[3];
             }
@@ -1392,6 +1466,16 @@ export class AnnotationEditor {
   }
 
   private handleMouseUp() {
+    if (this.marquee) {
+      const m = this.marquee; this.marquee = null;
+      const indices = new Set(m.initial);
+      if (Math.hypot(m.endX-m.x,m.endY-m.y)>3) this.scene.annotations.forEach((_,i)=>{
+        if (this.scene.hidden_annotations?.includes(i)) return;
+        const b = this.bounds(i);
+        if (b.x<=Math.max(m.x,m.endX) && b.x+b.width>=Math.min(m.x,m.endX) && b.y<=Math.max(m.y,m.endY) && b.y+b.height>=Math.min(m.y,m.endY)) indices.add(i);
+      });
+      this.selectMany([...indices]); return;
+    }
     if (this.isCropMode) {
       if (this.isDraggingCrop) {
         this.handleCropMouseUp();
@@ -1452,6 +1536,11 @@ export class AnnotationEditor {
 
   private createDefaultAnnotation(type: string, x: number, y: number): Annotation {
     const defaultTarget: [number, number, number, number] = [Math.round(x - 50), Math.round(y - 25), 100, 50];
+    const nextStep = () => this.scene.annotations.reduce((maximum, annotation) => {
+      if (annotation.type !== 'badge' && annotation.type !== 'step-arrow') return maximum;
+      const step = Number(annotation.step ?? 1);
+      return Number.isSafeInteger(step) && step > 0 ? Math.max(maximum, step) : maximum;
+    }, 0) + 1;
 
     switch (type) {
       case 'arrow':
@@ -1507,7 +1596,7 @@ export class AnnotationEditor {
         return {
           type: 'badge',
           target: defaultTarget,
-          step: 1,
+          step: nextStep(),
           style: 'step',
           position: 'top',
         };
@@ -1515,7 +1604,7 @@ export class AnnotationEditor {
         return {
           type: 'step-arrow',
           target: defaultTarget,
-          step: 1,
+          step: nextStep(),
           style: 'step',
           position: 'right',
         };
@@ -1737,6 +1826,38 @@ export class AnnotationEditor {
       }
     }
 
+    // Use the renderer's final badge circles: automatic placement can move a
+    // badge away from its target rectangle to avoid other annotations.
+    const visibleIndices = this.scene.annotations.map((_, index) => index)
+      .filter(index => !this.scene.hidden_annotations?.includes(index));
+    for (const badge of this.svgLayerEl.querySelectorAll<SVGElement>('circle[data-badge-index], rect[data-label-index]')) {
+      const isLabel = badge.dataset.labelIndex !== undefined;
+      const index = visibleIndices[Number(isLabel ? badge.dataset.labelIndex : badge.dataset.badgeIndex)];
+      if (index === undefined) continue;
+      const annotation = this.scene.annotations[index];
+      if (annotation.type !== 'badge' && annotation.type !== 'step-arrow' && annotation.type !== 'label') continue;
+      const hit = document.createElementNS('http://www.w3.org/2000/svg', isLabel ? 'rect' : 'circle');
+      if (isLabel) {
+        for (const attribute of ['x', 'y', 'width', 'height', 'rx', 'ry']) hit.setAttribute(attribute, badge.getAttribute(attribute)!);
+      } else {
+        hit.setAttribute('cx', badge.getAttribute('cx')!);
+        hit.setAttribute('cy', badge.getAttribute('cy')!);
+        hit.setAttribute('r', String(Number(badge.getAttribute('r')) + 3));
+      }
+      hit.setAttribute('fill', 'transparent');
+      hit.style.cursor = 'pointer';
+      hit.dataset.handleType = 'select-anno';
+      hit.dataset.annotationIndex = String(index);
+      this.handlesLayerEl.appendChild(hit);
+    }
+
+    if (this.marquee) {
+      const m=this.marquee; this.selectionBox(Math.min(m.x,m.endX),Math.min(m.y,m.endY),Math.abs(m.endX-m.x),Math.abs(m.endY-m.y));
+    }
+    if (this.selection.size>1) {
+      for(const i of this.selection) { const b=this.bounds(i); this.selectionBox(b.x,b.y,b.width,b.height); }
+      return;
+    }
     if (this.selectedIndex === null || this.selectedIndex >= this.scene.annotations.length
         || this.scene.hidden_annotations?.includes(this.selectedIndex)) {
       return;
@@ -1787,10 +1908,11 @@ export class AnnotationEditor {
       rect.dataset.annotationIndex = idx.toString();
       this.handlesLayerEl.appendChild(rect);
 
-      // Resize handle on bottom-right corner
-      this.addSvgHandle(x + w, y + h, 'se', idx, 'handle-point');
-      // Center move handle
-      this.addSvgHandle(x + w / 2, y + h / 2, 'move', idx, 'handle-point start');
+      if (anno.type !== 'badge' && anno.type !== 'step-arrow' && anno.type !== 'label') {
+        // Resize and move handles are unnecessary for numbered badges.
+        this.addSvgHandle(x + w, y + h, 'se', idx, 'handle-point');
+        this.addSvgHandle(x + w / 2, y + h / 2, 'move', idx, 'handle-point start');
+      }
     }
   }
 
@@ -1815,8 +1937,71 @@ export class AnnotationEditor {
     this.handlesLayerEl.appendChild(line);
   }
 
+  private updateBulkInspector() {
+    const indices=[...this.selection];
+    const annotations=indices.map(i=>this.scene.annotations[i]);
+    const types=[...new Set(annotations.map(a=>a.type))];
+    this.inspectorEl.innerHTML='<p>'+indices.length+' 個のマークを選択中</p>';
+    if (types.length>1) {
+      this.inspectorEl.insertAdjacentHTML('beforeend','<p>同じ種類を選ぶと一括変更できます。</p>');
+      for(const type of types) {
+        const button=document.createElement('button'); button.className='form-control'; button.textContent=type+' のみ選択';
+        button.onclick=()=>this.selectMany(indices.filter(i=>this.scene.annotations[i].type===type)); this.inspectorEl.appendChild(button);
+      }
+      return;
+    }
+    const fields: [string,string,string[] | null][]=[['style','スタイル',['primary','secondary','warning','danger','info','step']]];
+    if (!['spotlight', 'divider'].includes(types[0])) fields.push(['shadow','影',['true','false']]);
+    if (['arrow','bezier-arrow','callout','pin','label'].includes(types[0])) fields.push(['outline','縁取り',['true','false']]);
+    if (['badge','step-arrow'].includes(types[0])) fields.push(['step','手順番号',null]);
+    if (types[0] === 'rounded-rect') fields.push(['rx','角丸の横半径',null],['ry','角丸の縦半径',null]);
+    if (['callout','pin','badge','step-arrow','label','bezier-arrow'].includes(types[0])) fields.push(['position','配置',['auto','top','bottom','left','right','center']]);
+    if (types[0] === 'divider') fields.push(['position','配置',['top','bottom','left','right']]);
+    if (['arrow','bezier-arrow','step-arrow','rect','rounded-rect','circle','divider'].includes(types[0])) fields.push(['stroke_width','線の太さ',null]);
+    if (['arrow','bezier-arrow'].includes(types[0])) fields.push(['line_style','線種',['solid','dashed','dotted']],['arrowhead','矢印の先端',['filled','open']],['arrow_skin','矢印の形',['classic','sketch','bold']],['box','テキスト枠',['true','false']],['text_placement','テキスト位置',['middle','end']]);
+    if (['arrow','bezier-arrow','callout','pin','badge','step-arrow','label'].includes(types[0])) fields.push(['text','テキスト',null],['font_family','フォント',['sans-serif','serif','monospace']]);
+    if (['arrow','bezier-arrow','callout','label'].includes(types[0])) fields.push(['font_size','文字サイズ',null]);
+    for (const [key,title,options] of fields) {
+      const label=document.createElement('label'); label.textContent=title;
+      const input=document.createElement(options ? 'select' : 'input'); input.className='form-control';
+      input.id = `bulk-${key}`;
+      label.htmlFor = input.id;
+      const values=annotations.map(a=>(a as any)[key]); const common=values.every(v=>v===values[0]) ? values[0] : undefined;
+      if(input instanceof HTMLSelectElement) {
+        input.add(new Option('混在・未設定（変更しない）',''));
+        for(const value of options!) input.add(new Option(value,value));
+        input.value=common===undefined ? '' : String(common);
+      } else {
+        input.type=['stroke_width','font_size','step','rx','ry'].includes(key) ? 'number' : 'text';
+        if(input.type==='number') {
+          input.min=['rx','ry'].includes(key) ? '0' : '1';
+          if (key==='stroke_width') input.max='16';
+          if (key==='font_size') input.max='200';
+          input.step=key==='step' ? '1' : '0.5';
+        }
+        input.value=common===undefined ? '' : String(common); input.placeholder='混在・未設定';
+      }
+      input.addEventListener('change',()=>{
+        // Undo or a selection change can blur a pending input while replacing
+        // the inspector. Do not let its old handler rewrite the new scene.
+        if (annotations.some((a, i) => this.scene.annotations[indices[i]] !== a || !this.selection.has(indices[i]))) return;
+        if(input instanceof HTMLSelectElement && input.value==='') return;
+        if(input instanceof HTMLInputElement && input.type==='number' && (!input.validity.valid || input.value==='')) return;
+        const value=['shadow','box','outline'].includes(key) ? input.value==='true' : ['stroke_width','font_size','step','rx','ry'].includes(key) ? Number(input.value) : input.value;
+        for(const a of annotations) {
+          (a as any)[key]=value;
+          if(key==='text' && String(value).trim()) (a as any).has_text=true;
+          if(key==='text_placement') { delete (a as any).text_position; delete (a as any).t; }
+        }
+        this.pushState(); this.scheduleRender();
+      });
+      this.inspectorEl.append(label,input);
+    }
+  }
+
   private updateInspector() {
     this.updateLayerList();
+    if (this.selection.size>1) { this.updateBulkInspector(); return; }
     if (this.selectedIndex === null || this.selectedIndex >= this.scene.annotations.length) {
       this.inspectorEl.innerHTML = '<div class="empty-selection">マークを選択してください</div>';
       return;
@@ -1943,11 +2128,11 @@ export class AnnotationEditor {
     }
 
     // Step number (only for step-arrow and badge)
-    if ('step' in anno && anno.type !== 'arrow') {
+    if (anno.type === 'badge' || anno.type === 'step-arrow' || ('step' in anno && anno.type !== 'arrow')) {
       html += `
         <div class="form-group">
-          <label>手順番号 (Step)</label>
-          <input id="prop-step" class="form-control" type="text" value="${(anno as any).step ?? '1'}" />
+          <label for="prop-step">手順番号</label>
+          <input id="prop-step" class="form-control" type="number" min="1" step="1" value="${Number.isSafeInteger(Number((anno as any).step)) && Number((anno as any).step) > 0 ? Number((anno as any).step) : 1}" />
         </div>
       `;
     }
@@ -1981,13 +2166,13 @@ export class AnnotationEditor {
     // Position Hint affects the text around curved arrows and the placement of other anchored marks.
     const hasPositionHint = anno.type === 'bezier-arrow'
       ? Boolean((anno as any).has_text ?? ((anno as any).text && String((anno as any).text).trim().length > 0))
-      : !isArrowType && 'position' in anno;
+      : !isArrowType && ('position' in anno || anno.type === 'badge' || anno.type === 'step-arrow' || anno.type === 'label');
     if (hasPositionHint) {
       const pos = (anno as any).position ?? 'auto';
       const isBezierArrow = anno.type === 'bezier-arrow';
       html += `
         <div class="form-group">
-          <label>${isBezierArrow ? '曲線に対する文字位置' : '配置位置'}</label>
+          <label for="prop-position">${isBezierArrow ? '曲線に対する文字位置' : anno.type === 'badge' ? 'バッジの配置位置' : '配置位置'}</label>
           <select id="prop-position" class="form-control">
             <option value="auto" ${pos === 'auto' ? 'selected' : ''}>${isBezierArrow ? '曲線の外側（自動）' : '自動'}</option>
             <option value="top" ${pos === 'top' ? 'selected' : ''}>${isBezierArrow ? '曲線の上' : '上'}</option>
@@ -1999,6 +2184,16 @@ export class AnnotationEditor {
           ${isBezierArrow ? '<div class="arrow-placement-hint">文字の置き場所を変えます。矢印の向きや位置は変わりません。</div>' : ''}
         </div>
       `;
+    }
+
+    if (anno.type === 'badge' || anno.type === 'label') {
+      html += `<div class="form-group">
+        <label for="prop-badge-x">対象位置 X (px)</label>
+        <input id="prop-badge-x" class="form-control" type="number" step="1" value="${anno.target[0]}" />
+        <label for="prop-badge-y">対象位置 Y (px)</label>
+        <input id="prop-badge-y" class="form-control" type="number" step="1" value="${anno.target[1]}" />
+        <div class="arrow-placement-hint">対象位置と配置方向で位置を調整できます。表示されたマークをドラッグすると、対象のUI部品にスナップします。</div>
+      </div>`;
     }
 
     // Delete Button
@@ -2160,10 +2355,27 @@ export class AnnotationEditor {
     const stepEl = document.getElementById('prop-step') as HTMLInputElement | null;
     if (stepEl) {
       stepEl.addEventListener('input', () => {
-        (anno as any).step = parseInt(stepEl.value, 10) || 1;
+        if (!stepEl.validity.valid || !Number.isSafeInteger(stepEl.valueAsNumber)) return;
+        (anno as any).step = stepEl.valueAsNumber;
         this.scheduleRender();
       });
-      stepEl.addEventListener('change', () => this.pushState());
+      stepEl.addEventListener('change', () => {
+        stepEl.value = String((anno as any).step ?? 1);
+        this.pushState();
+      });
+    }
+
+    if (anno.type === 'badge' || anno.type === 'label') {
+      for (const [id, coordinate] of [['prop-badge-x', 0], ['prop-badge-y', 1]] as const) {
+        const input = document.getElementById(id) as HTMLInputElement;
+        input.addEventListener('input', () => {
+          if (!Number.isFinite(input.valueAsNumber)) return;
+          anno.target[coordinate] = Math.round(input.valueAsNumber);
+          this.updateHandles();
+          this.scheduleRender();
+        });
+        input.addEventListener('change', () => { input.value = String(anno.target[coordinate]); this.pushState(); });
+      }
     }
 
     const fontFamEl = document.getElementById('prop-font-family') as HTMLSelectElement | null;
@@ -2224,6 +2436,10 @@ export class AnnotationEditor {
     const cw = this.scene.canvas.width;
     const ch = this.scene.canvas.height;
     this.cropRect = { x: 0, y: 0, width: cw, height: ch };
+    if (this.cropPresetSelectEl) {
+      this.cropPresetSelectEl.value = 'free';
+    }
+    this.cropPresetRatio = null;
     this.updateCropOverlayUi();
     if (this.editorCropOverlayEl) {
       this.editorCropOverlayEl.style.display = 'block';
@@ -2238,6 +2454,10 @@ export class AnnotationEditor {
     this.isDraggingCrop = false;
     this.activeCropHandle = null;
     this.cropRect = null;
+    if (this.cropPresetSelectEl) {
+      this.cropPresetSelectEl.value = 'free';
+    }
+    this.cropPresetRatio = null;
     if (this.editorCropOverlayEl) {
       this.editorCropOverlayEl.style.display = 'none';
     }
@@ -2251,9 +2471,66 @@ export class AnnotationEditor {
 
   public resetCrop(): void {
     if (!this.isCropMode) return;
+    if (this.cropPresetSelectEl) {
+      this.cropPresetSelectEl.value = 'free';
+    }
+    this.cropPresetRatio = null;
     const cw = this.scene.canvas.width;
     const ch = this.scene.canvas.height;
     this.cropRect = { x: 0, y: 0, width: cw, height: ch };
+    this.updateCropOverlayUi();
+  }
+
+  public getCropRect(): { x: number; y: number; width: number; height: number } | null {
+    return this.cropRect ? { ...this.cropRect } : null;
+  }
+
+  public applyCropPreset(preset: string): void {
+    if (!this.isCropMode || !this.hasImage()) return;
+    if (preset === 'free') {
+      this.cropPresetRatio = null;
+      return;
+    }
+    const parts = preset.split('x').map(Number);
+    if (parts.length !== 2 || isNaN(parts[0]) || isNaN(parts[1])) return;
+    const [targetW, targetH] = parts;
+    if (targetW <= 0 || targetH <= 0) return;
+
+    this.cropPresetRatio = targetW / targetH;
+
+    const cw = this.scene.canvas.width;
+    const ch = this.scene.canvas.height;
+
+    let w = targetW;
+    let h = targetH;
+
+    // If preset dimensions exceed canvas, fit within canvas while preserving ratio
+    if (w > cw || h > ch) {
+      const ratio = targetW / targetH;
+      if (cw / ch > ratio) {
+        h = ch;
+        w = Math.round(h * ratio);
+      } else {
+        w = cw;
+        h = Math.round(w / ratio);
+      }
+    }
+
+    // Keep current center if cropRect exists, otherwise center on canvas
+    const currentCenterX = this.cropRect ? this.cropRect.x + this.cropRect.width / 2 : cw / 2;
+    const currentCenterY = this.cropRect ? this.cropRect.y + this.cropRect.height / 2 : ch / 2;
+
+    let nx = Math.round(currentCenterX - w / 2);
+    let ny = Math.round(currentCenterY - h / 2);
+    nx = Math.max(0, Math.min(cw - w, nx));
+    ny = Math.max(0, Math.min(ch - h, ny));
+
+    this.cropRect = {
+      x: nx,
+      y: ny,
+      width: w,
+      height: h,
+    };
     this.updateCropOverlayUi();
   }
 
@@ -2318,6 +2595,10 @@ export class AnnotationEditor {
       }
     }
 
+    if (this.isAutoCropped && this.baseImageState) {
+      this.cropHistoryStack = [{ dataUrl: this.baseImageState.dataUrl, width: this.baseImageState.width, height: this.baseImageState.height, uiElements: this.baseImageState.uiElements.map(el => ({ ...el })), offset: { ...this.autoCropOffset }, annotations: [] }];
+      this.isAutoCropped = false;
+    }
     this.cropHistoryStack.push({
       dataUrl: this.bgImgEl.src,
       width: this.scene.canvas.width,
@@ -2354,7 +2635,7 @@ export class AnnotationEditor {
         } else if (clone.type === 'bezier-arrow') {
           clone.start[0] += this.autoCropOffset.x; clone.start[1] += this.autoCropOffset.y;
           clone.control[0] += this.autoCropOffset.x; clone.control[1] += this.autoCropOffset.y;
-          clone.end[0] += this.autoCropOffset.x; clone.end[0] += this.autoCropOffset.y;
+          clone.end[0] += this.autoCropOffset.x; clone.end[1] += this.autoCropOffset.y;
         } else if ('target' in clone && Array.isArray(clone.target)) {
           clone.target[0] += this.autoCropOffset.x;
           clone.target[1] += this.autoCropOffset.y;
@@ -2434,7 +2715,8 @@ export class AnnotationEditor {
       }
 
       this.isAutoCropped = true;
-      this.autoCropOffset = { x: rx, y: ry };
+      const manualOffset = this.cropHistoryStack.reduce((offset,item) => ({ x:offset.x+item.offset.x,y:offset.y+item.offset.y }), {x:0,y:0});
+      this.autoCropOffset = { x: rx + manualOffset.x, y: ry + manualOffset.y };
       const btnAutoCrop = document.getElementById('btn-autocrop');
       if (btnAutoCrop) btnAutoCrop.classList.add('active');
 
@@ -2562,6 +2844,11 @@ export class AnnotationEditor {
 
     if (rw <= 0 || rh <= 0) return false;
 
+    if (this.cropPresetSelectEl) {
+      this.cropPresetSelectEl.value = 'free';
+    }
+    this.cropPresetRatio = null;
+
     this.cropRect = { x: rx, y: ry, width: rw, height: rh };
     this.updateCropOverlayUi();
     return true;
@@ -2597,6 +2884,10 @@ export class AnnotationEditor {
     } else {
       // Clicked outside crop box: start new crop drag
       this.activeCropHandle = 'new';
+      if (this.cropPresetSelectEl) {
+        this.cropPresetSelectEl.value = 'free';
+      }
+      this.cropPresetRatio = null;
       this.cropRect = {
         x: Math.round(coords.x),
         y: Math.round(coords.y),
@@ -2647,22 +2938,71 @@ export class AnnotationEditor {
       let w = init.width;
       let h = init.height;
 
-      // Handle East / West
-      if (this.activeCropHandle.includes('e')) {
-        w = Math.max(20, Math.min(cw - x, init.width + dx));
-      } else if (this.activeCropHandle.includes('w')) {
-        const right = init.x + init.width;
-        x = Math.max(0, Math.min(right - 20, init.x + dx));
-        w = right - x;
-      }
+      const isCorner = ['nw', 'ne', 'se', 'sw'].includes(this.activeCropHandle);
+      const ratio = (e.shiftKey ? 1.0 : this.cropPresetRatio);
 
-      // Handle North / South
-      if (this.activeCropHandle.includes('s')) {
-        h = Math.max(20, Math.min(ch - y, init.height + dy));
-      } else if (this.activeCropHandle.includes('n')) {
-        const bottom = init.y + init.height;
-        y = Math.max(0, Math.min(bottom - 20, init.y + dy));
-        h = bottom - y;
+      if (ratio && isCorner) {
+        // Constrained ratio resize from corner
+        if (this.activeCropHandle === 'se') {
+          w = Math.max(20, Math.min(cw - x, init.width + dx));
+          h = Math.round(w / ratio);
+          if (y + h > ch) {
+            h = ch - y;
+            w = Math.round(h * ratio);
+          }
+        } else if (this.activeCropHandle === 'sw') {
+          const right = init.x + init.width;
+          w = Math.max(20, Math.min(right, init.width - dx));
+          h = Math.round(w / ratio);
+          if (y + h > ch) {
+            h = ch - y;
+            w = Math.round(h * ratio);
+          }
+          x = right - w;
+        } else if (this.activeCropHandle === 'ne') {
+          const bottom = init.y + init.height;
+          w = Math.max(20, Math.min(cw - init.x, init.width + dx));
+          h = Math.round(w / ratio);
+          if (bottom - h < 0) {
+            h = bottom;
+            w = Math.round(h * ratio);
+          }
+          y = bottom - h;
+        } else if (this.activeCropHandle === 'nw') {
+          const right = init.x + init.width;
+          const bottom = init.y + init.height;
+          w = Math.max(20, Math.min(right, init.width - dx));
+          h = Math.round(w / ratio);
+          if (bottom - h < 0) {
+            h = bottom;
+            w = Math.round(h * ratio);
+          }
+          x = right - w;
+          y = bottom - h;
+        }
+      } else {
+        // Free resize
+        if (this.cropPresetSelectEl && this.cropPresetSelectEl.value !== 'free') {
+          this.cropPresetSelectEl.value = 'free';
+          this.cropPresetRatio = null;
+        }
+        // Handle East / West
+        if (this.activeCropHandle.includes('e')) {
+          w = Math.max(20, Math.min(cw - x, init.width + dx));
+        } else if (this.activeCropHandle.includes('w')) {
+          const right = init.x + init.width;
+          x = Math.max(0, Math.min(right - 20, init.x + dx));
+          w = right - x;
+        }
+
+        // Handle North / South
+        if (this.activeCropHandle.includes('s')) {
+          h = Math.max(20, Math.min(ch - y, init.height + dy));
+        } else if (this.activeCropHandle.includes('n')) {
+          const bottom = init.y + init.height;
+          y = Math.max(0, Math.min(bottom - 20, init.y + dy));
+          h = bottom - y;
+        }
       }
 
       this.cropRect = {
@@ -2712,17 +3052,6 @@ export class AnnotationEditor {
 
     if (this.cropSizeBadgeEl) {
       this.cropSizeBadgeEl.textContent = `${Math.round(width)} × ${Math.round(height)}`;
-    }
-    const resolutionSelect = document.getElementById('crop-resolution') as HTMLSelectElement | null;
-    if (resolutionSelect) {
-      for (const option of resolutionSelect.options) {
-        if (!option.value) continue;
-        const [presetWidth, presetHeight] = option.value.split('x').map(Number);
-        option.disabled = presetWidth > cw || presetHeight > ch;
-      }
-      const value = `${width}x${height}`;
-      resolutionSelect.value = Array.from(resolutionSelect.options).some(option => option.value === value)
-        ? value : '';
     }
   }
 

@@ -1,4 +1,5 @@
 import { AnnotationEditor } from './editor.ts';
+import { addRecordingButton, showRecordingControls } from './recording.ts';
 import { CaptureOverlay, CropRect } from './overlay.ts';
 import { CapturedImage, LoadedImageResult, DetectedUiElement } from './types.ts';
 
@@ -49,6 +50,12 @@ document.addEventListener('DOMContentLoaded', async () => {
       console.warn('Failed to get current window label:', e);
     }
   }
+
+  if (windowLabel === 'recording') {
+    showRecordingControls(invokeTauri);
+    return;
+  }
+  if (windowLabel === 'main') addRecordingButton(invokeTauri);
 
   // Dedicated Fullscreen Snipping Overlay Mode
   if (windowLabel === 'overlay') {
@@ -635,6 +642,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       if (savePath) {
         const { width, height } = getExportDimensions();
         const exportReproduction = (document.getElementById('save-reproduction-json') as HTMLInputElement | null)?.checked ?? false;
+        const cropState = editor.getCropState();
         await invokeTauri('cmd_compose_and_save', {
           backgroundDataUrl: bgDataUrl,
           sceneJson: editor.getSceneJson(),
@@ -643,6 +651,8 @@ document.addEventListener('DOMContentLoaded', async () => {
           exportWidth: width,
           exportHeight: height,
           reproductionJson: manualStudioSession ? false : exportReproduction,
+          baseBackgroundDataUrl: cropState.baseImageState?.dataUrl ?? null,
+          cropInfo: cropState.baseImageState && (cropState.isAutoCropped || cropState.hasCropHistory) ? { is_auto_cropped: cropState.isAutoCropped, offset_x: cropState.autoCropOffset.x, offset_y: cropState.autoCropOffset.y, base_width: cropState.baseImageState.width, base_height: cropState.baseImageState.height } : null,
         });
         if (manualStudioSession) {
           await invokeTauri('cmd_manual_studio_complete');
@@ -756,9 +766,10 @@ document.addEventListener('DOMContentLoaded', async () => {
         const saveButton = document.getElementById('btn-save-file');
         if (saveButton) { saveButton.textContent = 'Manual Studioへ注釈を返す'; saveButton.title = '注釈付きPNGを保存してManual Studioへ戻ります'; }
         const doneButton = document.getElementById('btn-done-editing');
-        if (doneButton) { doneButton.textContent = '編集終了（Manual Studioへ返す）'; doneButton.title = '注釈付き画像を保存し、撮影AIタグへ挿入します'; }
+        if (doneButton) { doneButton.textContent = '編集終了（Manual Studioへ返す）'; doneButton.title = '編集内容を保存し、スクリーンショット一覧へ返します'; }
         const image = await invokeTauri<LoadedImageResult>('cmd_load_image', { filePath: manualStudioSession.input });
         editor.setBackgroundImage(image.image_data_url, image.width, image.height, image.annotations_json, image.ui_elements);
+        if (image.base_image_data_url && image.base_width && image.base_height) editor.restoreCropState({ dataUrl: image.base_image_data_url, width: image.base_width, height: image.base_height, uiElements: image.base_ui_elements ?? [] }, image.crop_info ?? null);
         currentHistoryId = null;
         await switchView('editor');
       } else {

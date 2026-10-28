@@ -6,3 +6,6 @@
 | 4 | CLI Flags & Handlers in src/cli.rs and src/main.rs | Completed |
 | 5 | Full Verification and Documentation Update | Completed |
 | 6 | Configurable UI exploration depth: settings input, persistence, traversal limits; frontend build and 24 Rust tests passed | Completed |
+| 7 | Studio handoff: closing the editor cancels instead of hiding; verify actual desktop cancellation | Complete |
+| 8 | Merge Manual Studio integration and Windows warning fixes into upstream MarkIts for submodule use | Completed |
+| 9 | Verify 56 library tests, desktop frontend build, crop browser regression, and Manual Studio cargo check | Passed |
