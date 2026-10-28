@@ -1,4 +1,5 @@
 import { AnnotationEditor } from './editor.ts';
+import { addRecordingButton, showRecordingControls } from './recording.ts';
 import { CaptureOverlay, CropRect } from './overlay.ts';
 import { CapturedImage, LoadedImageResult, DetectedUiElement } from './types.ts';
 
@@ -49,6 +50,12 @@ document.addEventListener('DOMContentLoaded', async () => {
       console.warn('Failed to get current window label:', e);
     }
   }
+
+  if (windowLabel === 'recording') {
+    showRecordingControls(invokeTauri);
+    return;
+  }
+  if (windowLabel === 'main') addRecordingButton(invokeTauri);
 
   // Dedicated Fullscreen Snipping Overlay Mode
   if (windowLabel === 'overlay') {

@@ -76,7 +76,45 @@ export class AnnotationEditor {
   private cropHistoryStack: CropHistoryState[] = [];
 
   private activeTool: string = 'select';
-  private selectedIndex: number | null = null;
+  private selection = new Set<number>();
+  private primary: number | null = null;
+  private get selectedIndex() { return this.primary; }
+  private set selectedIndex(value: number | null) { this.primary = value; this.selection = new Set(value === null ? [] : [value]); }
+  private marquee: {x:number;y:number;endX:number;endY:number;initial:number[]} | null = null;
+  private selectMany(indices: number[]) {
+    this.selectedIndex = indices[0] ?? null;
+    this.selection = new Set(indices);
+    this.updateHandles(); this.updateInspector();
+  }
+  private toggleSelection(index: number) {
+    const selected = new Set(this.selection);
+    if (selected.has(index)) selected.delete(index); else selected.add(index);
+    this.selectMany([...selected]);
+  }
+  private bounds(index: number) {
+    const a = this.scene.annotations[index] as any;
+    const visibleIndices = this.scene.annotations.map((_, i) => i)
+      .filter(i => !this.scene.hidden_annotations?.includes(i));
+    // Badges and labels can be automatically placed outside their targets.
+    for (const element of this.svgLayerEl.querySelectorAll<SVGGraphicsElement>('circle[data-badge-index], rect[data-label-index]')) {
+      const renderedIndex = Number(element.dataset.labelIndex ?? element.dataset.badgeIndex);
+      if (visibleIndices[renderedIndex] === index) {
+        const box = element.getBBox();
+        return { x: box.x, y: box.y, width: box.width, height: box.height };
+      }
+    }
+    const points: number[][] = a.start && a.end ? [a.start, a.end, ...(a.control ? [a.control] : [])] : a.target ? [[a.target[0],a.target[1]],[a.target[0]+a.target[2],a.target[1]+a.target[3]]] : [];
+    const x = Math.min(...points.map(p=>p[0])), y = Math.min(...points.map(p=>p[1]));
+    return {x,y,width:Math.max(...points.map(p=>p[0]))-x,height:Math.max(...points.map(p=>p[1]))-y};
+  }
+  private selectionBox(x:number,y:number,width:number,height:number) {
+    const box = document.createElementNS('http://www.w3.org/2000/svg','rect');
+    for (const [key,value] of Object.entries({x,y,width,height})) box.setAttribute(key,String(value));
+    box.setAttribute('fill','rgba(59,130,246,0.08)'); box.setAttribute('stroke','#3b82f6');
+    box.setAttribute('stroke-dasharray','5 3'); box.setAttribute('pointer-events','none');
+    this.handlesLayerEl.appendChild(box);
+  }
+
   private undoStack: string[] = [];
   private redoStack: string[] = [];
   private initialSceneJson: string = '';
@@ -139,7 +177,7 @@ export class AnnotationEditor {
       switch (button.dataset.layerAction) {
         case 'select':
           this.setTool('select');
-          this.selectedIndex = index;
+          if ((event as MouseEvent).shiftKey) this.toggleSelection(index); else this.selectedIndex = index;
           this.updateHandles();
           this.updateInspector();
           break;
@@ -600,6 +638,7 @@ export class AnnotationEditor {
     if (hidden.has(index)) hidden.delete(index);
     else hidden.add(index);
     this.scene.hidden_annotations = [...hidden].sort((a, b) => a - b);
+    this.selectMany([...this.selection].filter(i => !hidden.has(i)));
     this.pushState();
     this.render();
     this.updateInspector();
@@ -612,8 +651,9 @@ export class AnnotationEditor {
       [this.scene.annotations[next], this.scene.annotations[index]];
     this.scene.hidden_annotations = (this.scene.hidden_annotations ?? []).map((hidden) =>
       hidden === index ? next : hidden === next ? index : hidden);
-    if (this.selectedIndex === index) this.selectedIndex = next;
-    else if (this.selectedIndex === next) this.selectedIndex = index;
+    const selected = [...this.selection].map(i => i === index ? next : i === next ? index : i);
+    this.selectedIndex = selected[0] ?? null;
+    this.selection = new Set(selected);
     this.pushState();
     this.render();
     this.updateInspector();
@@ -634,7 +674,7 @@ export class AnnotationEditor {
       const annotation = annotations[index];
       const hidden = this.scene.hidden_annotations?.includes(index) ?? false;
       const row = document.createElement('div');
-      row.className = `layer-row${this.selectedIndex === index ? ' active' : ''}${hidden ? ' hidden-layer' : ''}`;
+      row.className = `layer-row${this.selection.has(index) ? ' active' : ''}${hidden ? ' hidden-layer' : ''}`;
       const addButton = (action: string, label: string, title: string): HTMLButtonElement => {
         const button = document.createElement('button');
         button.type = 'button';
@@ -763,9 +803,21 @@ export class AnnotationEditor {
       }
 
       if (e.key === 'Delete' || e.key === 'Backspace') {
-        if (this.selectedIndex !== null) {
-          this.removeAnnotation(this.selectedIndex);
+        if (this.selection.size > 0) {
+          e.preventDefault();
+          const removed = new Set(this.selection);
+          const kept = this.scene.annotations.map((_, i) => i).filter(i => !removed.has(i));
+          this.scene.annotations = kept.map(i => this.scene.annotations[i]);
+          this.scene.hidden_annotations = kept.flatMap((oldIndex, newIndex) =>
+            this.scene.hidden_annotations?.includes(oldIndex) ? [newIndex] : []);
+          this.selectedIndex = null;
+          this.pushState();
+          this.render();
+          this.updateInspector();
         }
+      } else if (e.key === 'Escape') {
+        this.marquee = null;
+        this.selectMany([]);
       } else if (e.ctrlKey || e.metaKey) {
         if (e.key === 'z') {
           e.preventDefault();
@@ -1135,6 +1187,7 @@ export class AnnotationEditor {
     if (target.dataset.handleType && target.dataset.annotationIndex !== undefined) {
       const idx = parseInt(target.dataset.annotationIndex, 10);
       if (target.dataset.handleType === 'select-anno') {
+        if (e.shiftKey) { this.toggleSelection(idx); return; }
         this.selectedIndex = idx;
         this.isDraggingAnnotation = true;
         this.dragStartX = coords.x;
@@ -1202,6 +1255,7 @@ export class AnnotationEditor {
     // 3. Selection mode: hit-test existing annotations fallback
     const hitIdx = this.findAnnotationAt(coords.x, coords.y);
     if (hitIdx !== null) {
+      if (e.shiftKey) { this.toggleSelection(hitIdx); return; }
       this.selectedIndex = hitIdx;
       this.isDraggingAnnotation = true;
       this.dragStartX = coords.x;
@@ -1212,7 +1266,7 @@ export class AnnotationEditor {
       return;
     }
 
-    // 4. Clicked outside: deselect
+    this.marquee = {x:coords.x,y:coords.y,endX:coords.x,endY:coords.y,initial:e.shiftKey ? [...this.selection] : []};
     this.selectedIndex = null;
     this.updateHandles();
     this.updateInspector();
@@ -1227,6 +1281,7 @@ export class AnnotationEditor {
     }
     const coords = this.getCanvasCoords(e);
 
+    if (this.marquee) { this.marquee.endX = coords.x; this.marquee.endY = coords.y; this.updateHandles(); return; }
     // Dragging an interactive handle
     if (this.isDraggingHandle && this.activeHandle && this.initialAnnotationState) {
       const snap = e.altKey ? { x: coords.x, y: coords.y, snapped: false } : this.findSnapPoint(coords.x, coords.y);
@@ -1411,6 +1466,16 @@ export class AnnotationEditor {
   }
 
   private handleMouseUp() {
+    if (this.marquee) {
+      const m = this.marquee; this.marquee = null;
+      const indices = new Set(m.initial);
+      if (Math.hypot(m.endX-m.x,m.endY-m.y)>3) this.scene.annotations.forEach((_,i)=>{
+        if (this.scene.hidden_annotations?.includes(i)) return;
+        const b = this.bounds(i);
+        if (b.x<=Math.max(m.x,m.endX) && b.x+b.width>=Math.min(m.x,m.endX) && b.y<=Math.max(m.y,m.endY) && b.y+b.height>=Math.min(m.y,m.endY)) indices.add(i);
+      });
+      this.selectMany([...indices]); return;
+    }
     if (this.isCropMode) {
       if (this.isDraggingCrop) {
         this.handleCropMouseUp();
@@ -1786,6 +1851,13 @@ export class AnnotationEditor {
       this.handlesLayerEl.appendChild(hit);
     }
 
+    if (this.marquee) {
+      const m=this.marquee; this.selectionBox(Math.min(m.x,m.endX),Math.min(m.y,m.endY),Math.abs(m.endX-m.x),Math.abs(m.endY-m.y));
+    }
+    if (this.selection.size>1) {
+      for(const i of this.selection) { const b=this.bounds(i); this.selectionBox(b.x,b.y,b.width,b.height); }
+      return;
+    }
     if (this.selectedIndex === null || this.selectedIndex >= this.scene.annotations.length
         || this.scene.hidden_annotations?.includes(this.selectedIndex)) {
       return;
@@ -1865,8 +1937,71 @@ export class AnnotationEditor {
     this.handlesLayerEl.appendChild(line);
   }
 
+  private updateBulkInspector() {
+    const indices=[...this.selection];
+    const annotations=indices.map(i=>this.scene.annotations[i]);
+    const types=[...new Set(annotations.map(a=>a.type))];
+    this.inspectorEl.innerHTML='<p>'+indices.length+' 個のマークを選択中</p>';
+    if (types.length>1) {
+      this.inspectorEl.insertAdjacentHTML('beforeend','<p>同じ種類を選ぶと一括変更できます。</p>');
+      for(const type of types) {
+        const button=document.createElement('button'); button.className='form-control'; button.textContent=type+' のみ選択';
+        button.onclick=()=>this.selectMany(indices.filter(i=>this.scene.annotations[i].type===type)); this.inspectorEl.appendChild(button);
+      }
+      return;
+    }
+    const fields: [string,string,string[] | null][]=[['style','スタイル',['primary','secondary','warning','danger','info','step']]];
+    if (!['spotlight', 'divider'].includes(types[0])) fields.push(['shadow','影',['true','false']]);
+    if (['arrow','bezier-arrow','callout','pin','label'].includes(types[0])) fields.push(['outline','縁取り',['true','false']]);
+    if (['badge','step-arrow'].includes(types[0])) fields.push(['step','手順番号',null]);
+    if (types[0] === 'rounded-rect') fields.push(['rx','角丸の横半径',null],['ry','角丸の縦半径',null]);
+    if (['callout','pin','badge','step-arrow','label','bezier-arrow'].includes(types[0])) fields.push(['position','配置',['auto','top','bottom','left','right','center']]);
+    if (types[0] === 'divider') fields.push(['position','配置',['top','bottom','left','right']]);
+    if (['arrow','bezier-arrow','step-arrow','rect','rounded-rect','circle','divider'].includes(types[0])) fields.push(['stroke_width','線の太さ',null]);
+    if (['arrow','bezier-arrow'].includes(types[0])) fields.push(['line_style','線種',['solid','dashed','dotted']],['arrowhead','矢印の先端',['filled','open']],['arrow_skin','矢印の形',['classic','sketch','bold']],['box','テキスト枠',['true','false']],['text_placement','テキスト位置',['middle','end']]);
+    if (['arrow','bezier-arrow','callout','pin','badge','step-arrow','label'].includes(types[0])) fields.push(['text','テキスト',null],['font_family','フォント',['sans-serif','serif','monospace']]);
+    if (['arrow','bezier-arrow','callout','label'].includes(types[0])) fields.push(['font_size','文字サイズ',null]);
+    for (const [key,title,options] of fields) {
+      const label=document.createElement('label'); label.textContent=title;
+      const input=document.createElement(options ? 'select' : 'input'); input.className='form-control';
+      input.id = `bulk-${key}`;
+      label.htmlFor = input.id;
+      const values=annotations.map(a=>(a as any)[key]); const common=values.every(v=>v===values[0]) ? values[0] : undefined;
+      if(input instanceof HTMLSelectElement) {
+        input.add(new Option('混在・未設定（変更しない）',''));
+        for(const value of options!) input.add(new Option(value,value));
+        input.value=common===undefined ? '' : String(common);
+      } else {
+        input.type=['stroke_width','font_size','step','rx','ry'].includes(key) ? 'number' : 'text';
+        if(input.type==='number') {
+          input.min=['rx','ry'].includes(key) ? '0' : '1';
+          if (key==='stroke_width') input.max='16';
+          if (key==='font_size') input.max='200';
+          input.step=key==='step' ? '1' : '0.5';
+        }
+        input.value=common===undefined ? '' : String(common); input.placeholder='混在・未設定';
+      }
+      input.addEventListener('change',()=>{
+        // Undo or a selection change can blur a pending input while replacing
+        // the inspector. Do not let its old handler rewrite the new scene.
+        if (annotations.some((a, i) => this.scene.annotations[indices[i]] !== a || !this.selection.has(indices[i]))) return;
+        if(input instanceof HTMLSelectElement && input.value==='') return;
+        if(input instanceof HTMLInputElement && input.type==='number' && (!input.validity.valid || input.value==='')) return;
+        const value=['shadow','box','outline'].includes(key) ? input.value==='true' : ['stroke_width','font_size','step','rx','ry'].includes(key) ? Number(input.value) : input.value;
+        for(const a of annotations) {
+          (a as any)[key]=value;
+          if(key==='text' && String(value).trim()) (a as any).has_text=true;
+          if(key==='text_placement') { delete (a as any).text_position; delete (a as any).t; }
+        }
+        this.pushState(); this.scheduleRender();
+      });
+      this.inspectorEl.append(label,input);
+    }
+  }
+
   private updateInspector() {
     this.updateLayerList();
+    if (this.selection.size>1) { this.updateBulkInspector(); return; }
     if (this.selectedIndex === null || this.selectedIndex >= this.scene.annotations.length) {
       this.inspectorEl.innerHTML = '<div class="empty-selection">マークを選択してください</div>';
       return;

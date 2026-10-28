@@ -3,6 +3,7 @@ pub mod commands;
 pub mod history;
 pub mod metadata;
 pub mod ui_elements;
+pub mod recording;
 
 use std::sync::{Mutex, atomic::AtomicU64};
 use tauri::{
@@ -152,12 +153,19 @@ fn register_capture_shortcuts(app: &AppHandle) -> Result<(), String> {
 
 pub fn run() {
     let args: Vec<String> = std::env::args().skip(1).collect();
+    if args.first().is_some_and(|arg| arg == "--manual-studio-record-input") {
+        let result = args.get(1).ok_or_else(|| "Recorder output path is required".to_string())
+            .and_then(|path| markits::recording::run_helper(std::path::Path::new(path)));
+        if let Err(error) = result { eprintln!("{error}"); std::process::exit(2); }
+        return;
+    }
     let input = args.windows(2).find(|pair| pair[0] == "--manual-studio-input").map(|pair| pair[1].clone());
     let output = args.windows(2).find(|pair| pair[0] == "--manual-studio-output").map(|pair| pair[1].clone());
     let completion = args.windows(2).find(|pair| pair[0] == "--manual-studio-completion").map(|pair| pair[1].clone());
     let manual_studio = input.zip(output).zip(completion).map(|((input, output), completion)| ManualStudioSession { input, output, completion });
     let background = args.iter().any(|arg| arg == "--background") && manual_studio.is_none();
     tauri::Builder::default()
+        .manage(recording::RecordingState::default())
         .manage(AppState {
             shortcut: Mutex::new(read_shortcut()),
             manual_studio: Mutex::new(manual_studio),
@@ -168,6 +176,12 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
         .invoke_handler(tauri::generate_handler![
+            recording::cmd_recording_windows,
+            recording::cmd_recording_start,
+            recording::cmd_recording_status,
+            recording::cmd_recording_pause,
+            recording::cmd_recording_finish,
+            recording::cmd_recording_cancel,
             commands::cmd_capture_screen,
             commands::cmd_start_capture,
             commands::cmd_overlay_ready,
@@ -191,6 +205,11 @@ pub fn run() {
         ])
         .on_window_event(|window, event| match event {
             tauri::WindowEvent::CloseRequested { api, .. } => {
+                if window.label() == "recording" {
+                    api.prevent_close();
+                    recording::cancel(window.app_handle());
+                    return;
+                }
                 if window.label() == "main" {
                     let session = window.state::<AppState>().manual_studio.lock().ok().and_then(|session| session.clone());
                     if let Some(session) = session {
@@ -259,6 +278,7 @@ pub fn run() {
                         }
                     }
                     "quit" => {
+                        recording::cancel(app);
                         app.exit(0);
                     }
                     _ => {}
@@ -284,6 +304,9 @@ pub fn run() {
 
             Ok(())
         })
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|app, event| {
+            if matches!(event, tauri::RunEvent::Exit) { recording::shutdown(app); }
+        });
 }

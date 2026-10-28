@@ -1362,3 +1362,14 @@ body.manual-studio-integration #btn-open-file,
 body.manual-studio-integration #btn-copy-clipboard {
   display: none !important;
 }
+dialog {
+  color: #e5e7eb;
+  background: #1f2937;
+  border: 1px solid #4b5563;
+  border-radius: 12px;
+  padding: 24px;
+  max-width: min(560px, 90vw);
+}
+dialog::backdrop { background: rgba(0, 0, 0, 0.55); }
+.recording-panel { padding: 20px; overflow: auto; height: 100vh; box-sizing: border-box; }
+.recording-panel ol { padding-left: 24px; overflow-wrap: anywhere; }

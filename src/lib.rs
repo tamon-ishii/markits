@@ -19,3 +19,9 @@ pub use model::{Annotation, Canvas, PositionHint, Scene, SemanticStyle, TargetRe
 pub use raster::{render_composed_png_bytes, render_png};
 pub use renderer::{render_debug_from_json, render_from_json, render_with_layout_from_json, LayoutElement, RenderResult, SvgRenderer};
 pub use theme::Theme;
+
+pub mod semantic_target;
+pub mod visual_target;
+pub mod window_capture;
+pub mod capture_lifecycle;
+pub mod recording;
