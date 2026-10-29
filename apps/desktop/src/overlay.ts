@@ -29,6 +29,31 @@ export class CaptureOverlay {
   private hoveredElement: DetectedUiElement | null = null;
   private onCompleteCallback?: (rect: CropRect | null, elements: DetectedUiElement[]) => void;
   private onCancelCallback?: () => void;
+  private onRecordCallback?: (window: DetectedUiElement) => void;
+  private recordingMode = false;
+
+  private setRecordingMode(recording: boolean) {
+    this.recordingMode = recording;
+    for (const [id, active] of [['btn-mode-capture', !recording], ['btn-mode-record', recording]] as const) {
+      const button = document.getElementById(id);
+      button?.classList.toggle('btn-primary', active);
+      button?.setAttribute('aria-pressed', String(active));
+    }
+    document.getElementById('ui-element-action-hint')!.textContent = recording ? 'クリックで操作録画を開始' : 'クリックでキャプチャ';
+    document.querySelector('.overlay-hint')!.textContent = recording
+      ? '録画するウィンドウをクリックしてください。撮影は録画中のキャプチャボタンで行います。'
+      : 'ウィンドウをクリックしてキャプチャ / ドラッグで範囲指定';
+    (document.getElementById('btn-capture-fullscreen') as HTMLButtonElement).disabled = recording;
+  }
+
+  private recordWindow(win: DetectedUiElement | null) {
+    if (!win?.window_id) {
+      alert('このウィンドウは操作録画に対応していません。別のウィンドウを選択してください。');
+      return;
+    }
+    this.hide();
+    this.onRecordCallback?.(win);
+  }
 
   constructor() {
     this.overlayEl = document.getElementById('capture-overlay')!;
@@ -44,6 +69,9 @@ export class CaptureOverlay {
   }
 
   private bindEvents() {
+    document.getElementById('btn-mode-capture')?.addEventListener('click', () => this.setRecordingMode(false));
+    document.getElementById('btn-mode-record')?.addEventListener('click', () => this.setRecordingMode(true));
+    document.getElementById('btn-record-hovered-window')?.addEventListener('click', () => this.recordWindow(this.hoveredElement));
     this.overlayEl.addEventListener('mousedown', (e) => this.handleMouseDown(e));
     window.addEventListener('mousemove', (e) => this.handleMouseMove(e));
     window.addEventListener('mouseup', (e) => this.handleMouseUp(e));
@@ -73,6 +101,7 @@ export class CaptureOverlay {
         e.preventDefault();
         this.cancel();
       } else if (e.key === 'Enter') {
+        if (this.recordingMode) { this.recordWindow(this.hoveredElement); return; }
         if (this.hoveredElement && this.hoveredElement.width > 20 && this.hoveredElement.height > 20) {
           const rect: CropRect = {
             x: this.hoveredElement.x,
@@ -96,7 +125,8 @@ export class CaptureOverlay {
 
     // Also handle double-click as confirmation
     this.overlayEl.addEventListener('dblclick', (e) => {
-      if ((e.target as HTMLElement).closest('.overlay-toolbar')) return;
+      if ((e.target as HTMLElement).closest('.overlay-toolbar, .ui-element-header')) return;
+      if (this.recordingMode) return;
 
       if (this.hoveredElement && this.hoveredElement.width > 20 && this.hoveredElement.height > 20) {
         const rect: CropRect = {
@@ -117,12 +147,15 @@ export class CaptureOverlay {
     fullDataUrl: string,
     uiElements: DetectedUiElement[] = [],
     onComplete: (rect: CropRect | null, elements: DetectedUiElement[]) => void,
-    onCancel?: () => void
+    onCancel?: () => void,
+    onRecord?: (window: DetectedUiElement) => void
   ) {
     this.bgImgEl.src = fullDataUrl;
     this.uiElements = uiElements;
     this.onCompleteCallback = onComplete;
     this.onCancelCallback = onCancel;
+    this.onRecordCallback = onRecord;
+    this.setRecordingMode(false);
     this.currentRect = null;
     this.hoveredElement = null;
     this.isMouseDown = false;
@@ -220,7 +253,7 @@ export class CaptureOverlay {
   private handleMouseDown(e: MouseEvent) {
     if (this.overlayEl.classList.contains('hidden')) return;
     if (e.button !== 0) return;
-    if ((e.target as HTMLElement).closest('.overlay-toolbar')) return;
+    if ((e.target as HTMLElement).closest('.overlay-toolbar, .ui-element-header')) return;
 
     this.isMouseDown = true;
     this.hasDragged = false;
@@ -236,12 +269,13 @@ export class CaptureOverlay {
 
   private handleMouseMove(e: MouseEvent) {
     if (this.overlayEl.classList.contains('hidden')) return;
+    if ((e.target as HTMLElement).closest('.overlay-toolbar, .ui-element-header')) return;
 
     const imgPt = this.screenToImage(e.clientX, e.clientY);
 
     if (this.isMouseDown) {
       const moveDist = Math.hypot(e.clientX - this.startScreenX, e.clientY - this.startScreenY);
-      if (moveDist > 6) {
+      if (!this.recordingMode && moveDist > 6) {
         this.hasDragged = true;
       }
 
@@ -300,12 +334,13 @@ export class CaptureOverlay {
     if (!this.isMouseDown) return;
     this.isMouseDown = false;
 
-    if ((e.target as HTMLElement).closest('.overlay-toolbar')) return;
+    if ((e.target as HTMLElement).closest('.overlay-toolbar, .ui-element-header')) return;
 
     if (!this.hasDragged) {
       // Single Click: capture the window directly!
       const imgPt = this.screenToImage(e.clientX, e.clientY);
       const win = this.hoveredElement || this.findWindowAt(imgPt.x, imgPt.y);
+      if (this.recordingMode) { this.recordWindow(win); return; }
 
       if (win && win.width >= 30 && win.height >= 30) {
         const rect: CropRect = {

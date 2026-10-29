@@ -100,6 +100,23 @@ document.addEventListener('DOMContentLoaded', async () => {
             } catch (err) {
               console.warn('Failed to cancel capture:', err);
             }
+          },
+          async (win: DetectedUiElement) => {
+            try {
+              const windows = await invokeTauri<Array<{ id: string }>>('cmd_recording_windows');
+              const identity = win.window_id!;
+              const nativeId = identity.startsWith('hwnd:')
+                ? `0x${BigInt.asUintN(32, BigInt(identity.slice(5))).toString(16)}`
+                : `0x${BigInt(identity).toString(16)}`;
+              const target = windows.find(window => window.id === nativeId);
+              if (!target) throw new Error('対象ウィンドウが見つかりません。もう一度選択してください。');
+              await invokeTauri('cmd_cancel_capture');
+              await invokeTauri('cmd_recording_start', { windowId: target.id });
+            } catch (error) {
+              await invokeTauri('cmd_cancel_capture').catch(() => {});
+              const { emitTo } = await import('@tauri-apps/api/event');
+              await emitTo('main', 'capture-error', `操作録画を開始できませんでした: ${error}`);
+            }
           }
         );
       });
@@ -399,7 +416,10 @@ document.addEventListener('DOMContentLoaded', async () => {
               <span class="history-date">${item.date_formatted}</span>
               <span class="history-dims">${item.width} × ${item.height}${item.has_annotations ? ' · 注釈あり' : ''}${item.is_cropped ? ' · クロップ' : ''}</span>
             </div>
-            <button class="btn-delete-history" title="履歴から削除">🗑️</button>
+            <div class="history-actions">
+              <button class="btn-copy-history" title="画像をクリップボードにコピー">コピー</button>
+              <button class="btn-delete-history" title="履歴から削除">🗑️</button>
+            </div>
           </div>
         `;
         if (item.operation_group) {
@@ -466,6 +486,32 @@ document.addEventListener('DOMContentLoaded', async () => {
             if (loaded.ui_elements?.length) setUiStatus('ready', `保存済み UIMap ${loaded.ui_elements.length} 要素 · 位置の再確認を推奨`);
           } catch (e: any) {
             alert(`キャプチャの読み込みに失敗しました: ${e?.message ?? e}`);
+          }
+        });
+
+        const copyBtn = card.querySelector('.btn-copy-history') as HTMLButtonElement;
+        copyBtn.addEventListener('click', async (event) => {
+          event.stopPropagation();
+          if (copyBtn.disabled) return;
+          copyBtn.disabled = true;
+          copyBtn.textContent = 'コピー中…';
+          try {
+            const loaded = await invokeTauri<LoadedImageResult>('cmd_load_history_item', { id: selectedItem.id });
+            await invokeTauri('cmd_copy_to_clipboard', {
+              backgroundDataUrl: loaded.image_data_url,
+              sceneJson: loaded.annotations_json ?? JSON.stringify({
+                canvas: { width: loaded.width, height: loaded.height },
+                annotations: [],
+              }),
+              exportWidth: null,
+              exportHeight: null,
+            });
+            copyBtn.textContent = 'コピー済み';
+          } catch (error: any) {
+            copyBtn.textContent = 'コピー';
+            alert(`クリップボードへのコピーに失敗しました: ${error?.message ?? error}`);
+          } finally {
+            copyBtn.disabled = false;
           }
         });
 

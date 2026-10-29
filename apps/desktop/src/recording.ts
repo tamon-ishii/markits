@@ -49,13 +49,14 @@ async function chooseRecordingWindow(invoke: Invoke) {
 }
 
 export function showRecordingControls(invoke: Invoke) {
-  document.body.innerHTML = `<main class="recording-panel"><h2>ウインドウ操作の記録</h2>
+  document.body.innerHTML = `<main class="recording-panel"><h2>操作を録画</h2>
+    <p>操作は下のリストに順次追加されます。画像を残したいタイミングで「キャプチャ」を押してください。</p>
     <p id="record-status" role="status">記録中</p><p>Ctrl＋Shift＋F9：一時停止／再開<br>Ctrl＋Shift＋F10：入力記録を停止</p>
-    <button id="record-screenshot" class="btn">📷 スクリーンショットを追加</button>
+    <button id="record-screenshot" class="btn btn-primary">📷 キャプチャ</button>
     <div id="record-screenshots" class="recording-screenshots" aria-label="撮影したスクリーンショット"></div>
     <label><input id="record-export-json" type="checkbox"> 操作記録のJSONも保存</label>
     <button id="record-pause" class="btn">一時停止</button><button id="record-finish" class="btn btn-primary">終了して画像を保存</button>
-    <button id="record-cancel" class="btn">取消</button><ol id="record-events"></ol></main>`;
+    <button id="record-cancel" class="btn">取消</button><h3>操作リスト</h3><ol id="record-events" aria-label="録画した操作"></ol></main>`;
   const pause = document.getElementById('record-pause') as HTMLButtonElement;
   const finish = document.getElementById('record-finish') as HTMLButtonElement;
   const cancel = document.getElementById('record-cancel') as HTMLButtonElement;
@@ -87,11 +88,16 @@ export function showRecordingControls(invoke: Invoke) {
       pause.textContent = paused ? '再開' : '一時停止';
       pause.disabled = !result.running;
       status.textContent = `${result.running ? paused ? '一時停止中' : '記録中' : '入力記録は停止済み・保存できます'}：${result.events.length} 件`;
-      list.replaceChildren(...result.events.slice(-100).map(event => {
-        const item = document.createElement('li');
-        item.textContent = `${(event.elapsed_ms / 1000).toFixed(1)}秒 ${event.kind} ${event.value ?? (event.x === undefined ? '' : `(${Math.round(event.x)}, ${Math.round(event.y ?? 0)})`)}`;
-        return item;
-      }));
+      const labels: Record<string, string> = { click: 'クリック', text: '文字入力', key: 'キー', scroll: 'スクロール', screenshot: '📷 キャプチャ' };
+      result.events.forEach((event, index) => {
+        const item = list.children[index] ?? list.appendChild(document.createElement('li'));
+        const detail = event.kind === 'scroll'
+          ? `横 ${event.dx ?? 0} / 縦 ${event.dy ?? 0}`
+          : event.value ?? (event.x === undefined ? '' : `(${Math.round(event.x)}, ${Math.round(event.y ?? 0)})`);
+        const text = `${(event.elapsed_ms / 1000).toFixed(1)}秒 ${labels[event.kind] ?? event.kind} ${detail}`;
+        if (item.textContent !== text) item.textContent = text;
+      });
+      while (list.children.length > result.events.length) list.lastElementChild?.remove();
     } catch (error) { if (!busy && !completed) status.textContent = String(error); }
     finally { polling = false; }
   };
@@ -103,6 +109,10 @@ export function showRecordingControls(invoke: Invoke) {
   };
   finish.onclick = async () => {
     if (busy) return;
+    if (!thumbnails.children.length) {
+      status.textContent = '保存する画像を「キャプチャ」ボタンで撮影してください。';
+      return;
+    }
     busy = true; finish.disabled = true; pause.disabled = true; cancel.disabled = true; screenshot.disabled = true;
     try {
       completed ??= await invoke('cmd_recording_finish');

@@ -277,6 +277,7 @@
           <div class="ui-element-header">
             <span id="ui-element-badge" class="ui-element-badge"></span>
             <span id="ui-element-action-hint" class="ui-element-action-hint">クリックでキャプチャ</span>
+            <button id="btn-record-hovered-window" class="ui-element-action-hint" type="button">操作を録画</button>
           </div>
         </div>
         <div id="selection-box" class="selection-box">
@@ -284,6 +285,8 @@
         </div>
       </div>
       <div class="overlay-toolbar">
+        <button id="btn-mode-capture" class="btn btn-sm btn-primary" aria-pressed="true">クリックでキャプチャ</button>
+        <button id="btn-mode-record" class="btn btn-sm" aria-pressed="false">操作を録画</button>
         <span class="overlay-hint">ウィンドウをクリックしてキャプチャ / ドラッグで範囲指定</span>
         <button id="btn-capture-fullscreen" class="btn btn-sm btn-primary">🖥️ 全画面キャプチャ</button>
         <button id="btn-cancel-capture" class="btn btn-sm btn-danger">✕ キャンセル (Esc)</button>
