@@ -206,6 +206,7 @@ pub fn run() {
             playback::cmd_has_operations,
             playback::cmd_playback,
             playback::cmd_playback_cancel,
+            playback::cmd_playback_status,
             recording::cmd_recording_screenshot,
             recording::cmd_recording_windows,
             recording::cmd_recording_start,
@@ -238,6 +239,10 @@ pub fn run() {
         ])
         .on_window_event(|window, event| match event {
             tauri::WindowEvent::CloseRequested { api, .. } => {
+                if window.label() == "playback" {
+                    window.state::<playback::PlaybackState>().1.store(true, std::sync::atomic::Ordering::SeqCst);
+                    return;
+                }
                 if window.label() == "recording" {
                     api.prevent_close();
                     recording::cancel(window.app_handle());

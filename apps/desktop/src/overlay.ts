@@ -101,6 +101,8 @@ export class CaptureOverlay {
         e.preventDefault();
         this.cancel();
       } else if (e.key === 'Enter') {
+        // Let focused buttons handle Enter without capturing the window first.
+        if ((e.target as HTMLElement).closest('.overlay-toolbar, .ui-element-header')) return;
         if (this.recordingMode) { this.recordWindow(this.hoveredElement); return; }
         if (this.hoveredElement && this.hoveredElement.width > 20 && this.hoveredElement.height > 20) {
           const rect: CropRect = {

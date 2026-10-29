@@ -1,5 +1,6 @@
 import { AnnotationEditor } from './editor.ts';
 import { addRecordingButton, showRecordingControls } from './recording.ts';
+import { showPlaybackControls } from './playback.ts';
 import { groupHistory } from './history-groups.ts';
 import { CaptureOverlay, CropRect } from './overlay.ts';
 import { CapturedImage, LoadedImageResult, DetectedUiElement } from './types.ts';
@@ -53,6 +54,10 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
   }
 
+  if (windowLabel === 'playback') {
+    showPlaybackControls(invokeTauri);
+    return;
+  }
   if (windowLabel === 'recording') {
     showRecordingControls(invokeTauri);
     return;

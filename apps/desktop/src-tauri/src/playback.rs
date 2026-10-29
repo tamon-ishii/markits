@@ -4,7 +4,10 @@ use markits::recording::{OperationRecording, RecordedEvent};
 use serde::{Deserialize, Serialize};
 use std::{
     io::Cursor,
-    sync::atomic::{AtomicBool, Ordering},
+    sync::{
+        Mutex,
+        atomic::{AtomicBool, Ordering},
+    },
     thread,
     time::Duration,
 };
@@ -33,7 +36,68 @@ pub struct SavedRecording {
 }
 
 #[derive(Default)]
-pub struct PlaybackState(pub AtomicBool, pub AtomicBool);
+pub struct PlaybackState(pub AtomicBool, pub AtomicBool, pub Mutex<PlaybackProgress>);
+
+#[derive(Default, Clone, Serialize)]
+pub struct PlaybackProgress {
+    running: bool,
+    step: usize,
+    total: usize,
+    message: String,
+    completed: Vec<String>,
+    captures: usize,
+    error: Option<String>,
+}
+
+#[tauri::command]
+pub fn cmd_playback_status(
+    state: tauri::State<'_, PlaybackState>,
+) -> Result<PlaybackProgress, String> {
+    state
+        .2
+        .lock()
+        .map(|value| value.clone())
+        .map_err(|e| e.to_string())
+}
+
+fn progress(app: &tauri::AppHandle, update: impl FnOnce(&mut PlaybackProgress)) {
+    if let Ok(mut value) = app.state::<PlaybackState>().2.lock() {
+        update(&mut value);
+    }
+}
+
+fn describe(event: &RecordedEvent) -> String {
+    match event {
+        RecordedEvent::Click { x, y, target, .. } => target
+            .as_ref()
+            .map(|target| format!("クリック：{}", target.name))
+            .unwrap_or_else(|| format!("クリック：({x:.0}, {y:.0})")),
+        RecordedEvent::Text { value, .. } => {
+            format!("文字入力：{}", value.chars().take(60).collect::<String>())
+        }
+        RecordedEvent::Key { value, .. } => format!("キー：{value}"),
+        RecordedEvent::Scroll { dx, dy, .. } => format!("スクロール：横 {dx} / 縦 {dy}"),
+        RecordedEvent::Screenshot { .. } => "キャプチャ：現在のウィンドウを新しく撮影".into(),
+    }
+}
+
+// Hide the progress window while sending pointer input or taking a screenshot,
+// so it neither intercepts the click nor appears in the captured pixels.
+fn without_popup<T>(
+    app: &tauri::AppHandle,
+    action: impl FnOnce() -> Result<T, String>,
+) -> Result<T, String> {
+    let popup = app.get_webview_window("playback");
+    if let Some(popup) = &popup {
+        popup.hide().map_err(|e| e.to_string())?;
+        thread::sleep(Duration::from_millis(80));
+    }
+    let result = action();
+    if let Some(popup) = popup {
+        let _ = popup.show();
+    }
+    result
+}
 
 pub fn extract(bytes: &[u8]) -> Result<Option<SavedRecording>, String> {
     if !bytes.starts_with(b"\x89PNG\r\n\x1a\n") {
@@ -123,6 +187,38 @@ pub async fn cmd_playback(
     app.state::<PlaybackState>()
         .1
         .store(false, Ordering::SeqCst);
+    progress(&app, |value| {
+        *value = PlaybackProgress {
+            running: true,
+            total: saved.recording.events.len(),
+            message: "対象ウィンドウを確認中…".into(),
+            ..Default::default()
+        }
+    });
+    if let Some(old) = app.get_webview_window("playback") {
+        let _ = old.destroy();
+    }
+    let popup = tauri::WebviewWindowBuilder::new(
+        &app,
+        "playback",
+        tauri::WebviewUrl::App("index.html".into()),
+    )
+    .title("MarkIts — 再生・再撮影")
+    .inner_size(420.0, 320.0)
+    .always_on_top(true)
+    .focused(false)
+    .focusable(false)
+    .build();
+    if let Err(error) = popup {
+        app.state::<PlaybackState>()
+            .0
+            .store(false, Ordering::SeqCst);
+        progress(&app, |value| {
+            value.running = false;
+            value.error = Some(error.to_string());
+        });
+        return Err(error.to_string());
+    }
     let host = app.clone();
     let result = tauri::async_runtime::spawn_blocking(move || replay(&host, saved))
         .await
@@ -131,6 +227,22 @@ pub async fn cmd_playback(
     app.state::<PlaybackState>()
         .0
         .store(false, Ordering::SeqCst);
+    progress(&app, |value| {
+        value.running = false;
+        match &result {
+            Ok(images) => {
+                value.captures = images.len();
+                value.message = format!("完了：新しく {} 枚を撮影しました", images.len());
+            }
+            Err(error) => {
+                value.message = "再生を停止しました".into();
+                value.error = Some(error.clone());
+            }
+        }
+    });
+    if let Some(popup) = app.get_webview_window("playback") {
+        let _ = popup.set_focusable(true);
+    }
     if let Some(main) = app.get_webview_window("main") {
         crate::commands::force_raise_window(&main);
     }
@@ -189,6 +301,18 @@ fn replay(
     play_events(
         &saved.recording.events,
         |mut delay, index| {
+            progress(app, |value| {
+                value.step = index + 1;
+                value.message = if delay > 0 {
+                    format!(
+                        "待機中（{:.1} 秒）：{}",
+                        delay as f64 / 1000.0,
+                        describe(&saved.recording.events[index])
+                    )
+                } else {
+                    describe(&saved.recording.events[index])
+                };
+            });
             while delay > 0 {
                 check()?;
                 let chunk = delay.min(50);
@@ -200,8 +324,13 @@ fn replay(
             Ok(())
         },
         |event| {
+            progress(app, |value| {
+                value.message = format!("実行中：{}", describe(event))
+            });
             match event {
-                RecordedEvent::Screenshot { .. } => pictures.push(snapshot(&window.id)?),
+                RecordedEvent::Screenshot { .. } => {
+                    pictures.push(without_popup(app, || snapshot(&window.id))?)
+                }
                 RecordedEvent::Click {
                     x,
                     y,
@@ -223,7 +352,9 @@ fn replay(
                             element.y + element.height / 2.0,
                         )
                     } else if let Some(visual) = visual {
-                        let pixels = markits::window_capture::read_window_pixels(&window.id, None)?;
+                        let pixels = without_popup(app, || {
+                            markits::window_capture::read_window_pixels(&window.id, None)
+                        })?;
                         let (x, y) = markits::visual_target::locate(visual, &pixels, check)?
                             .ok_or("操作対象の画像が見つかりません")?;
                         (current.x as f64 + x, current.y as f64 + y)
@@ -231,12 +362,15 @@ fn replay(
                         relative_point(*x, *y, &saved.recording, &current)?
                     };
                     check()?;
-                    send(rdev::EventType::MouseMove {
-                        x: point.0,
-                        y: point.1,
+                    without_popup(app, || {
+                        send(rdev::EventType::MouseMove {
+                            x: point.0,
+                            y: point.1,
+                        })?;
+                        send(rdev::EventType::ButtonPress(rdev::Button::Left))?;
+                        send(rdev::EventType::ButtonRelease(rdev::Button::Left))?;
+                        Ok(())
                     })?;
-                    send(rdev::EventType::ButtonPress(rdev::Button::Left))?;
-                    send(rdev::EventType::ButtonRelease(rdev::Button::Left))?;
                 }
                 RecordedEvent::Text { value, .. } => paste(value)?,
                 RecordedEvent::Key { value, .. } => chord(&parse_chord(value)?)?,
@@ -246,20 +380,32 @@ fn replay(
                         .find(|w| w.id == window.id)
                         .ok_or("対象ウインドウが閉じられました")?;
                     let (x, y) = relative_point(*x, *y, &saved.recording, &current)?;
-                    send(rdev::EventType::MouseMove { x, y })?;
-                    send(rdev::EventType::Wheel {
-                        delta_x: *dx,
-                        delta_y: *dy,
+                    without_popup(app, || {
+                        send(rdev::EventType::MouseMove { x, y })?;
+                        send(rdev::EventType::Wheel {
+                            delta_x: *dx,
+                            delta_y: *dy,
+                        })?;
+                        Ok(())
                     })?;
                 }
             }
+            progress(app, |value| {
+                value.completed.push(describe(event));
+                if matches!(event, RecordedEvent::Screenshot { .. }) {
+                    value.captures += 1;
+                }
+            });
             Ok(())
         },
     )?;
     if pictures.is_empty() {
         check()?;
         thread::sleep(Duration::from_millis(250));
-        pictures.push(snapshot(&window.id)?);
+        progress(app, |value| {
+            value.message = "キャプチャ：現在のウィンドウを新しく撮影".into()
+        });
+        pictures.push(without_popup(app, || snapshot(&window.id))?);
     }
     save_snapshots(&saved, pictures)
 }
