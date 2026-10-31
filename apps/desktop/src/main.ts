@@ -691,9 +691,6 @@ document.addEventListener('DOMContentLoaded', async () => {
   document.getElementById('btn-crop')?.addEventListener('click', () => {
     editor.toggleCropMode();
   });
-  document.getElementById('btn-revert-crop')?.addEventListener('click', () => {
-    editor.revertCrop();
-  });
 
   window.addEventListener('markits-crop-changed', async () => {
     await autoSaveToHistory();

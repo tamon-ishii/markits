@@ -258,7 +258,6 @@ export class AnnotationEditor {
       this.cropHistoryStack = [];
       const btnAutoCrop = document.getElementById('btn-autocrop');
       if (btnAutoCrop) btnAutoCrop.classList.remove('active');
-      this.updateRevertCropButton();
     }
 
     this.canvasContainerEl.style.width = `${width}px`;
@@ -311,14 +310,6 @@ export class AnnotationEditor {
     window.dispatchEvent(new CustomEvent('markits-image-loaded', { detail: { width, height } }));
   }
 
-  public updateRevertCropButton(): void {
-    const btnRevert = document.getElementById('btn-revert-crop') as HTMLButtonElement | null;
-    if (btnRevert) {
-      const isCropped = this.isAutoCropped || this.cropHistoryStack.length > 0;
-      btnRevert.disabled = !isCropped;
-      btnRevert.style.display = isCropped ? 'inline-flex' : 'none';
-    }
-  }
 
   public toggleSnap(): boolean {
     this.isSnapEnabled = !this.isSnapEnabled;
@@ -434,7 +425,6 @@ export class AnnotationEditor {
         btnAutoCrop.classList.toggle('active', this.isAutoCropped);
       }
     }
-    this.updateRevertCropButton();
   }
 
   public getScene(): Scene {
@@ -735,7 +725,6 @@ export class AnnotationEditor {
           this.snapGuideLayerEl.setAttribute('viewBox', `0 0 ${lastCrop.width} ${lastCrop.height}`);
         }
         this.uiElements = lastCrop.uiElements;
-        this.updateRevertCropButton();
       }
 
       this.render();
@@ -2540,6 +2529,12 @@ export class AnnotationEditor {
 
   public startCropMode(): void {
     if (!this.hasImage()) return;
+    const cropState = this.getCropState();
+    const previousCrop = cropState.baseImageState && (cropState.isAutoCropped || cropState.hasCropHistory)
+      ? { x: cropState.autoCropOffset.x, y: cropState.autoCropOffset.y,
+          width: this.scene.canvas.width, height: this.scene.canvas.height }
+      : null;
+    this.revertCrop();
     this.isCropMode = true;
     this.selectedIndex = null;
     this.updateHandles();
@@ -2548,7 +2543,7 @@ export class AnnotationEditor {
 
     const cw = this.scene.canvas.width;
     const ch = this.scene.canvas.height;
-    this.cropRect = { x: 0, y: 0, width: cw, height: ch };
+    this.cropRect = previousCrop ?? { x: 0, y: 0, width: cw, height: ch };
     if (this.cropPresetSelectEl) {
       this.cropPresetSelectEl.value = 'free';
     }
@@ -2734,7 +2729,6 @@ export class AnnotationEditor {
       shiftedUiElements,
       true
     );
-    this.updateRevertCropButton();
     window.dispatchEvent(new CustomEvent('markits-crop-changed'));
   }
 
@@ -2777,7 +2771,6 @@ export class AnnotationEditor {
         this.baseImageState.uiElements.map((el) => ({ ...el })),
         true
       );
-      this.updateRevertCropButton();
       window.dispatchEvent(new CustomEvent('markits-crop-changed'));
       return false;
     } else {
@@ -2845,7 +2838,6 @@ export class AnnotationEditor {
         shiftedUiElements,
         true
       );
-      this.updateRevertCropButton();
       window.dispatchEvent(new CustomEvent('markits-crop-changed'));
       return true;
     }
@@ -2901,7 +2893,6 @@ export class AnnotationEditor {
         this.baseImageState.uiElements.map((el) => ({ ...el })),
         true
       );
-      this.updateRevertCropButton();
       window.dispatchEvent(new CustomEvent('markits-crop-changed'));
     }
   }
