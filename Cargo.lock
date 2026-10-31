@@ -2933,7 +2933,7 @@ dependencies = [
 
 [[package]]
 name = "markits"
-version = "0.7.4"
+version = "0.7.5"
 dependencies = [
  "ashpd",
  "base64 0.22.1",
@@ -2958,7 +2958,7 @@ dependencies = [
 
 [[package]]
 name = "markits-desktop"
-version = "0.7.4"
+version = "0.7.5"
 dependencies = [
  "arboard",
  "base64 0.22.1",
