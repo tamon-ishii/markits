@@ -60,6 +60,7 @@ pub fn generate_thumbnail_data_url(
 }
 
 use std::sync::atomic::{AtomicU64, Ordering};
+static HISTORY_WRITE_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 static HISTORY_COUNTER: AtomicU64 = AtomicU64::new(0);
 
@@ -79,6 +80,7 @@ pub fn save_or_update_history_item(
     base_png_bytes: Option<&[u8]>,
     crop_info: Option<&metadata::CropInfo>,
 ) -> Result<HistoryItem, HistoryError> {
+    let _write = HISTORY_WRITE_LOCK.lock().unwrap_or_else(|error| error.into_inner());
     let history_dir = get_history_dir();
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -152,6 +154,18 @@ pub fn save_or_update_history_item(
         operation_group: metadata::extract_text_chunk(&final_bytes, crate::playback::GROUP_KEY).unwrap_or(None),
         is_cropped,
     })
+}
+
+/// Merge asynchronously discovered snap metadata without replacing annotations,
+/// crop state, recording metadata, thumbnails, or the captured image.
+pub fn update_history_ui_elements(id: &str, elements: &[crate::ui_elements::DetectedUiElement], dimensions: (u32, u32)) -> Result<bool, HistoryError> {
+    let _write = HISTORY_WRITE_LOCK.lock().unwrap_or_else(|error| error.into_inner());
+    let path = get_history_dir().join(format!("{id}.png"));
+    let bytes = fs::read(&path)?;
+    let header = metadata::inspect_png_header(&bytes)?;
+    if (header.width, header.height) != dimensions { return Ok(false); }
+    fs::write(path, metadata::embed_ui_elements(&bytes, elements)?)?;
+    Ok(true)
 }
 
 pub fn list_history() -> Result<Vec<HistoryItem>, HistoryError> {
@@ -287,6 +301,7 @@ pub fn load_history_item(id: &str) -> Result<LoadedImageResult, HistoryError> {
 }
 
 pub fn delete_history_item(id: &str) -> Result<(), HistoryError> {
+    let _write = HISTORY_WRITE_LOCK.lock().unwrap_or_else(|error| error.into_inner());
     let history_dir = get_history_dir();
     let file_path = history_dir.join(format!("{}.png", id));
     let thumb_path = history_dir.join(format!("{}.thumb.png", id));
@@ -318,6 +333,27 @@ fn format_timestamp(secs: u64) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn late_snap_metadata_preserves_pixels_annotations_and_capture_identity() {
+        let target_json = r#"{"window_id":"hwnd:0x123","pid":42}"#;
+        let original = create_dummy_png();
+        let tagged = metadata::embed_text_chunk(&original, metadata::MARKITS_CAPTURE_TARGET_KEYWORD, target_json).unwrap();
+        let annotations = r#"{"canvas":{"width":16,"height":16},"annotations":[]}"#;
+        let item = save_capture_to_history(&tagged, Some(annotations), None).unwrap();
+        let elements = vec![crate::ui_elements::DetectedUiElement { role: "button".into(), name: Some("Save".into()),
+            x: 2.0, y: 3.0, width: 10.0, height: 8.0, pid: None, window_id: None }];
+        assert!(update_history_ui_elements(&item.id, &elements, (16, 16)).unwrap());
+        let loaded = load_history_item(&item.id).unwrap();
+        assert_eq!(loaded.annotations_json.as_deref(), Some(annotations));
+        assert_eq!(loaded.ui_elements.as_deref(), Some(elements.as_slice()));
+        let bytes = fs::read(&item.file_path).unwrap();
+        assert_eq!(metadata::extract_text_chunk(&bytes, metadata::MARKITS_CAPTURE_TARGET_KEYWORD).unwrap().as_deref(), Some(target_json));
+        assert_eq!(image::load_from_memory(&bytes).unwrap().to_rgba8(), image::load_from_memory(&original).unwrap().to_rgba8());
+        assert!(!update_history_ui_elements(&item.id, &[], (8, 8)).unwrap());
+        assert_eq!(load_history_item(&item.id).unwrap().ui_elements.unwrap(), elements);
+        delete_history_item(&item.id).unwrap();
+    }
     use image::{ImageBuffer, Rgba};
 
     fn create_dummy_png() -> Vec<u8> {

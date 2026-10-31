@@ -564,7 +564,13 @@
             "type": "object",
             "properties": {
               "type": {
-                "const": "spotlight"
+                "enum": ["spotlight", "mosaic"]
+              },
+              "block_size": {
+                "type": "integer",
+                "minimum": 2,
+                "maximum": 64,
+                "default": 12
               },
               "id": {
                 "type": "string",

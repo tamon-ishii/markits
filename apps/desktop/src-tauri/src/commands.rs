@@ -51,6 +51,16 @@ pub async fn cmd_capture_screen(app: tauri::AppHandle) -> Result<capture::Captur
 
 #[tauri::command]
 pub async fn cmd_start_capture(app: tauri::AppHandle) -> Result<(), String> {
+    start_window_selection(app, false).await
+}
+
+#[tauri::command]
+pub async fn cmd_select_recording_window(app: tauri::AppHandle) -> Result<(), String> {
+    start_window_selection(app, true).await
+}
+
+async fn start_window_selection(app: tauri::AppHandle, recording_mode: bool) -> Result<(), String> {
+    crate::cursor_capture::cancel(&app);
     let generation = app
         .state::<crate::AppState>()
         .capture_generation
@@ -82,7 +92,7 @@ pub async fn cmd_start_capture(app: tauri::AppHandle) -> Result<(), String> {
         return Ok(());
     }
 
-    let captured = match res {
+    let mut captured = match res {
         Ok(Ok(captured)) => captured,
         Ok(Err(err)) => {
             if let Some(ref w) = main_win {
@@ -98,9 +108,15 @@ pub async fn cmd_start_capture(app: tauri::AppHandle) -> Result<(), String> {
         }
     };
 
+    captured.recording_mode = recording_mode;
+    captured.capture_shortcut = Some(app.state::<crate::AppState>().shortcut.lock().map_err(|e| e.to_string())?.clone());
     if let Some(overlay_win) = app.get_webview_window("overlay") {
         let state = app.state::<crate::AppState>();
         *state.pending_capture.lock().map_err(|e| e.to_string())? = Some(captured);
+        // WebView2 can suspend JavaScript/image decoding in a hidden window.
+        // Present it before sending the payload instead of waiting for a hidden
+        // webview to acknowledge decoding before it is allowed to become visible.
+        overlay_win.set_ignore_cursor_events(false).map_err(|e| e.to_string())?;
         show_overlay_window(&overlay_win);
         if *state.overlay_ready.lock().map_err(|e| e.to_string())? {
             if let Some(capture) = state
@@ -144,6 +160,44 @@ pub fn cmd_overlay_ready(app: tauri::AppHandle) -> Result<(), String> {
     Ok(())
 }
 
+type ScanCrop = (f64, f64, f64, f64);
+
+fn capture_scan_context(
+    png: &[u8], elements: &[crate::ui_elements::DetectedUiElement], crop: Option<&CropRectInput>,
+) -> Result<(Option<crate::ui_elements::DetectedUiElement>, Option<ScanCrop>), String> {
+    let crop = crop.map(|c| (c.x, c.y, c.width, c.height));
+    if let Some(window) = crate::ui_elements::select_window_for_capture(elements, crop) {
+        return Ok((Some(window), crop));
+    }
+    // Pointer captures already contain just the target window. Their source
+    // identity is embedded in the PNG rather than supplied by the selection UI.
+    if crop.is_none() {
+        if let Some(json) = metadata::extract_text_chunk(png, metadata::MARKITS_CAPTURE_TARGET_KEYWORD).map_err(|e| e.to_string())? {
+            let target: crate::ui_elements::DetectedUiElement = serde_json::from_str(&json).map_err(|e| e.to_string())?;
+            if !target.x.is_finite() || !target.y.is_finite() || !target.width.is_finite()
+                || !target.height.is_finite() || target.width <= 0.0 || target.height <= 0.0 {
+                return Err("撮影元ウィンドウの範囲が不正です".into());
+            }
+            let bounds = (target.x, target.y, target.width, target.height);
+            return Ok((Some(target), Some(bounds)));
+        }
+    }
+    Ok((None, crop))
+}
+
+fn local_snap_elements(elements: Vec<crate::ui_elements::DetectedUiElement>, crop: Option<ScanCrop>, dimensions: (u32, u32)) -> Vec<crate::ui_elements::DetectedUiElement> {
+    if let Some((x, y, width, height)) = crop {
+        let mut elements = crate::ui_elements::filter_elements_for_crop(&elements, x, y, width, height);
+        let sx = dimensions.0 as f64 / width;
+        let sy = dimensions.1 as f64 / height;
+        for element in &mut elements {
+            element.x *= sx; element.width *= sx;
+            element.y *= sy; element.height *= sy;
+        }
+        elements
+    } else { elements }
+}
+
 #[tauri::command]
 pub async fn cmd_finish_capture(
     app: tauri::AppHandle,
@@ -158,18 +212,21 @@ pub async fn cmd_finish_capture(
     if let Some(overlay_win) = app.get_webview_window("overlay") {
         let _ = overlay_win.hide();
     }
-    if let Some(main_win) = app.get_webview_window("main") {
-        force_raise_window(&main_win);
-    }
 
-    let selected_window = crate::ui_elements::select_window_for_capture(
-        &ui_elements,
-        crop_rect.as_ref().map(|c| (c.x, c.y, c.width, c.height)),
-    );
-    let capture_elements = selected_window
-        .as_ref()
-        .map(|window| vec![window.clone()])
-        .unwrap_or(ui_elements);
+    let png_bytes = decode_data_url(&raw_data_url)?;
+    let (selected_window, scan_crop) = capture_scan_context(&png_bytes, &ui_elements, crop_rect.as_ref())?;
+    let capture_elements = if crop_rect.is_some() {
+        selected_window.as_ref().map(|window| vec![window.clone()]).unwrap_or(ui_elements)
+    } else if ui_elements.is_empty() {
+        metadata::extract_ui_elements(&png_bytes).map_err(|e| e.to_string())?.unwrap_or_default()
+    } else { ui_elements };
+    let tag_target = |bytes: &[u8]| -> Result<Vec<u8>, String> {
+        if let Some(target) = &selected_window {
+            metadata::embed_text_chunk(bytes, metadata::MARKITS_CAPTURE_TARGET_KEYWORD,
+                &serde_json::to_string(target).map_err(|e| e.to_string())?)
+                .map_err(|e| e.to_string())
+        } else { Ok(bytes.to_vec()) }
+    };
     if app
         .state::<crate::AppState>()
         .capture_generation
@@ -178,7 +235,6 @@ pub async fn cmd_finish_capture(
     {
         return Ok(());
     }
-    let scan_crop = crop_rect.as_ref().map(|c| (c.x, c.y, c.width, c.height));
 
     let loaded_res = if let Some(crop) = crop_rect {
         let x = crop.x.max(0.0) as u32;
@@ -186,23 +242,12 @@ pub async fn cmd_finish_capture(
         let w = crop.width.max(1.0) as u32;
         let h = crop.height.max(1.0) as u32;
 
-        let prefix = "data:image/png;base64,";
-        let base64_str = if raw_data_url.starts_with(prefix) {
-            &raw_data_url[prefix.len()..]
-        } else if let Some(pos) = raw_data_url.find(',') {
-            &raw_data_url[pos + 1..]
-        } else {
-            &raw_data_url
-        };
-
-        let png_bytes = base64::engine::general_purpose::STANDARD
-            .decode(base64_str)
-            .map_err(|e| format!("Base64 decode error: {}", e))?;
-
         let dynamic_img = image::load_from_memory(&png_bytes).map_err(|e| e.to_string())?;
         let rgba = dynamic_img.to_rgba8();
         let cropped = capture::crop_rgba_image(&rgba, x, y, w, h).map_err(|e| e.to_string())?;
-        let captured = capture::rgba_to_captured_image(&cropped).map_err(|e| e.to_string())?;
+        let mut captured = capture::rgba_to_captured_image(&cropped).map_err(|e| e.to_string())?;
+        captured.raw_png = tag_target(&captured.raw_png)?;
+        captured.data_url = format!("data:image/png;base64,{}", base64::engine::general_purpose::STANDARD.encode(&captured.raw_png));
 
         let cropped_elements = crate::ui_elements::filter_elements_for_crop(
             &capture_elements,
@@ -239,16 +284,7 @@ pub async fn cmd_finish_capture(
 
         res
     } else {
-        let prefix = "data:image/png;base64,";
-        let base64_str = if raw_data_url.starts_with(prefix) {
-            &raw_data_url[prefix.len()..]
-        } else {
-            &raw_data_url
-        };
-        let png_bytes = base64::engine::general_purpose::STANDARD
-            .decode(base64_str)
-            .map_err(|e| e.to_string())?;
-
+        let png_bytes = tag_target(&png_bytes)?;
         let item = history::save_or_update_history_item(
             None,
             &png_bytes,
@@ -263,7 +299,7 @@ pub async fn cmd_finish_capture(
         let res = metadata::LoadedImageResult {
             width: img.width(),
             height: img.height(),
-            image_data_url: raw_data_url,
+            image_data_url: format!("data:image/png;base64,{}", base64::engine::general_purpose::STANDARD.encode(&png_bytes)),
             annotations_json: None,
             history_id: Some(item.id.clone()),
             ui_elements: Some(capture_elements),
@@ -275,6 +311,7 @@ pub async fn cmd_finish_capture(
         };
         res
     };
+    let scan_dimensions = (loaded_res.width, loaded_res.height);
 
     // Instantly notify frontend and raise main window! Zero lag!
     if let Some(main_win) = app.get_webview_window("main") {
@@ -376,17 +413,16 @@ pub async fn cmd_finish_capture(
                     });
                     let scan_result = tokio::time::timeout(Duration::from_secs(3), scan).await;
                     if let Ok(Ok(elements)) = scan_result {
-                        let elements = if let Some((x, y, w, h)) = scan_crop {
-                            crate::ui_elements::filter_elements_for_crop(&elements, x, y, w, h)
-                        } else {
-                            elements
-                        };
+                        let elements = local_snap_elements(elements, scan_crop, scan_dimensions);
                         if app_for_scan
                             .state::<crate::AppState>()
                             .capture_generation
                             .load(Ordering::SeqCst)
                             == generation
                         {
+                            if let Err(error) = history::update_history_ui_elements(&history_id, &elements, scan_dimensions) {
+                                eprintln!("Could not persist captured UI elements: {error}");
+                            }
                             if let Some(main) = app_for_scan.get_webview_window("main") {
                                 let _ = main.emit(
                                     "capture-ui-elements",
@@ -435,6 +471,7 @@ pub async fn cmd_finish_capture(
 
 #[tauri::command]
 pub fn cmd_cancel_capture(app: tauri::AppHandle) -> Result<(), String> {
+    crate::cursor_capture::cancel(&app);
     app.state::<crate::AppState>()
         .capture_generation
         .fetch_add(1, Ordering::SeqCst);
@@ -473,16 +510,47 @@ pub async fn cmd_fetch_detailed_ui_elements(
 }
 
 pub fn force_raise_window(window: &tauri::WebviewWindow) {
+    // Capture hides the editor; hiding is not minimizing. Preserve its actual
+    // geometry when showing it again rather than restoring a normal placement.
+    let was_minimized = window.is_minimized().unwrap_or(false);
+    let was_maximized = window.is_maximized().ok();
+    let size = window.inner_size().ok();
+    let position = window.outer_position().ok();
     let _ = window.show();
-    let _ = window.unminimize();
+    if was_minimized {
+        let _ = window.unminimize();
+    } else if let Some(maximized) = was_maximized {
+        if window.is_maximized().ok() != Some(maximized) {
+            if maximized {
+                let _ = window.maximize();
+            } else {
+                let _ = window.unmaximize();
+            }
+        }
+        if !maximized {
+            if let Some(size) = size {
+                if window.inner_size().ok() != Some(size) {
+                    let _ = window.set_size(tauri::Size::Physical(size));
+                }
+            }
+            if let Some(position) = position {
+                if window.outer_position().ok() != Some(position) {
+                    let _ = window.set_position(tauri::Position::Physical(position));
+                }
+            }
+        }
+    }
     let _ = window.set_focus();
 
     crate::ui_elements::activate_x11_window(Some("MarkIts Editor"));
 }
 
 pub fn show_overlay_window(window: &tauri::WebviewWindow) {
+    let was_minimized = window.is_minimized().unwrap_or(false);
     let _ = window.show();
-    let _ = window.unminimize();
+    if was_minimized {
+        let _ = window.unminimize();
+    }
     let _ = window.set_always_on_top(true);
     let _ = window.set_focus();
 
@@ -872,6 +940,27 @@ pub fn cmd_copy_to_clipboard(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn cursor_capture_recovers_scan_target_and_translates_scaled_snap_positions() {
+        let target = crate::ui_elements::DetectedUiElement { role: "window".into(), name: Some("Target".into()),
+            window_id: Some("hwnd:0x123".into()), pid: Some(42), x: 100.0, y: 200.0, width: 320.0, height: 240.0 };
+        let png = decode_data_url(&create_test_bg_data_url(640, 480)).unwrap();
+        let png = metadata::embed_text_chunk(&png, metadata::MARKITS_CAPTURE_TARGET_KEYWORD, &serde_json::to_string(&target).unwrap()).unwrap();
+        let (restored, crop) = capture_scan_context(&png, &[], None).unwrap();
+        assert_eq!(restored, Some(target.clone()));
+        assert_eq!(crop, Some((100.0, 200.0, 320.0, 240.0)));
+        let button = crate::ui_elements::DetectedUiElement { role: "button".into(), name: Some("Save".into()),
+            window_id: None, pid: None, x: 140.0, y: 260.0, width: 80.0, height: 30.0 };
+        let local = local_snap_elements(vec![target, button], crop, (640, 480));
+        assert_eq!(local.len(), 1);
+        assert_eq!((local[0].x, local[0].y, local[0].width, local[0].height), (80.0, 120.0, 160.0, 60.0));
+        assert_eq!(local[0].name.as_deref(), Some("Save"));
+        let plain = decode_data_url(&create_test_bg_data_url(640, 480)).unwrap();
+        assert_eq!(capture_scan_context(&plain, &[], None).unwrap(), (None, None));
+        let manual_crop = CropRectInput { x: 10.0, y: 20.0, width: 50.0, height: 60.0 };
+        assert_eq!(capture_scan_context(&png, &[], Some(&manual_crop)).unwrap().0, None);
+    }
     use image::{ImageBuffer, Rgba};
     use std::io::Cursor;
 

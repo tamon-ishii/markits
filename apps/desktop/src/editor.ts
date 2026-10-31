@@ -1,5 +1,10 @@
 import { Annotation, BezierArrowAnnotation, ArrowAnnotation, Scene, SemanticStyle, PositionHint, DetectedUiElement } from './types.ts';
 
+const STYLE_LABELS: Record<SemanticStyle, string> = {
+  primary: '標準', secondary: '補助', warning: '注意', danger: '危険',
+  info: '情報', step: '手順', pink: '強調',
+};
+
 function escapeXml(str: string): string {
   return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;').replace(/'/g, '&apos;');
@@ -129,6 +134,7 @@ export class AnnotationEditor {
   private dragStartX: number = 0;
   private dragStartY: number = 0;
   private initialAnnotationState: any = null;
+  private stepBadgeClick: { index: number; x: number; y: number; position: PositionHint } | null = null;
 
   // New element drag state
   private isCreating: boolean = false;
@@ -167,6 +173,14 @@ export class AnnotationEditor {
 
     // Zoom elements
     this.zoomLabelEl = document.getElementById('zoom-label');
+    this.bgImgEl.addEventListener('load', () => this.scheduleRender());
+
+    // Refit when the available editor area changes, including window resizing.
+    // The fit calculation caps automatic enlargement at 100%.
+    const viewportResizeObserver = new ResizeObserver(() => {
+      this.zoomFit();
+    });
+    viewportResizeObserver.observe(this.viewportEl, { box: 'border-box' });
 
     this.bindEvents();
     this.layerListEl.addEventListener('click', (event) => {
@@ -584,9 +598,11 @@ export class AnnotationEditor {
         if (anno.outline !== undefined) res.outline = Boolean(anno.outline);
         return res;
       }
+      case 'mosaic':
       case 'spotlight':
       case 'bullseye': {
         const res: any = { ...base };
+        if (anno.type === 'mosaic') res.block_size = Math.max(2, Math.min(64, Math.round(anno.block_size ?? 12)));
         res.target = [
           Math.round(anno.target[0]),
           Math.round(anno.target[1]),
@@ -743,7 +759,7 @@ export class AnnotationEditor {
     this.handlesLayerEl.addEventListener('mouseleave', () => this.clearSnapGuide());
     this.viewportEl.addEventListener('mouseleave', () => this.clearSnapGuide());
     window.addEventListener('mousemove', (e) => this.handleMouseMove(e));
-    window.addEventListener('mouseup', () => this.handleMouseUp());
+    window.addEventListener('mouseup', (e) => this.handleMouseUp(e));
     window.addEventListener('blur', () => this.handleMouseUp());
 
     // Prevent text / element drag selection artifacts in WebKitGTK
@@ -1191,6 +1207,9 @@ export class AnnotationEditor {
       const idx = parseInt(target.dataset.annotationIndex, 10);
       if (target.dataset.handleType === 'select-anno') {
         if (e.shiftKey) { this.toggleSelection(idx); return; }
+        if (target.dataset.stepPosition) {
+          this.stepBadgeClick = { index: idx, x: e.clientX, y: e.clientY, position: target.dataset.stepPosition as PositionHint };
+        }
         this.selectedIndex = idx;
         this.isDraggingAnnotation = true;
         this.dragStartX = coords.x;
@@ -1276,6 +1295,10 @@ export class AnnotationEditor {
   }
 
   private handleMouseMove(e: MouseEvent) {
+    if (this.stepBadgeClick) {
+      if (Math.hypot(e.clientX - this.stepBadgeClick.x, e.clientY - this.stepBadgeClick.y) < 4) return;
+      this.stepBadgeClick = null;
+    }
     if (this.isCropMode) {
       if (this.isDraggingCrop) {
         this.handleCropMouseMove(e);
@@ -1323,7 +1346,7 @@ export class AnnotationEditor {
           const moved = !e.altKey ? this.findSnapElementForMove(rawX, rawY, initTarget[2], initTarget[3]) : { snapped: false };
           target[0] = moved.rect?.[0] ?? rawX;
           target[1] = moved.rect?.[1] ?? rawY;
-          if (moved.rect && ['badge', 'step-arrow', 'label', 'rect', 'rounded-rect', 'spotlight'].includes(anno.type)) {
+          if (moved.rect && ['badge', 'step-arrow', 'label', 'rect', 'rounded-rect', 'spotlight', 'mosaic'].includes(anno.type)) {
             target[2] = moved.rect[2]; target[3] = moved.rect[3];
           }
           this.renderAllSnapTargets(moved.rect ? { x: target[0], y: target[1], snapped: true, element: moved.element } : undefined);
@@ -1385,7 +1408,7 @@ export class AnnotationEditor {
           if (snap.snapped && snap.element && snap.rect) {
             target[0] = snap.rect[0];
             target[1] = snap.rect[1];
-            if (isBadge || anno.type === 'rect' || anno.type === 'rounded-rect' || anno.type === 'spotlight') {
+            if (isBadge || anno.type === 'rect' || anno.type === 'rounded-rect' || anno.type === 'spotlight' || anno.type === 'mosaic') {
               target[2] = snap.rect[2];
               target[3] = snap.rect[3];
             }
@@ -1468,7 +1491,17 @@ export class AnnotationEditor {
     }
   }
 
-  private handleMouseUp() {
+  private handleMouseUp(event?: MouseEvent) {
+    const badgeClick = this.stepBadgeClick;
+    this.stepBadgeClick = null;
+    if (badgeClick && event && Math.hypot(event.clientX - badgeClick.x, event.clientY - badgeClick.y) < 4) {
+      const annotation = this.scene.annotations[badgeClick.index];
+      if (annotation?.type === 'step-arrow') {
+        const positions: PositionHint[] = ['top', 'right', 'bottom', 'left'];
+        annotation.position = positions[(positions.indexOf(badgeClick.position) + 1) % positions.length];
+        this.scheduleRender();
+      }
+    }
     if (this.marquee) {
       const m = this.marquee; this.marquee = null;
       const indices = new Set(m.initial);
@@ -1631,6 +1664,8 @@ export class AnnotationEditor {
           target: defaultTarget,
           style: 'primary',
         };
+      case 'mosaic':
+        return { type: 'mosaic', target: defaultTarget };
       case 'spotlight':
         return {
           type: 'spotlight',
@@ -1689,6 +1724,7 @@ export class AnnotationEditor {
       const cleanScene = this.getCleanScene();
       const svg = await this.renderCallback(JSON.stringify(cleanScene));
       this.svgLayerEl.innerHTML = svg;
+      this.renderMosaicPreview(cleanScene);
     } catch (e) {
       console.warn('SVG render warning:', e);
     } finally {
@@ -1704,6 +1740,46 @@ export class AnnotationEditor {
     if (!this.isDraggingHandle && !this.isDraggingAnnotation && !this.isCreating && !this.isCropMode) {
       this.updateHandles();
     }
+  }
+
+  private renderMosaicPreview(scene: Scene): void {
+    const marks = scene.annotations.filter((annotation, index) =>
+      annotation.type === 'mosaic' && !scene.hidden_annotations?.includes(index));
+    if (!marks.length || !this.bgImgEl.complete || !this.bgImgEl.naturalWidth) return;
+    const canvas = document.createElement('canvas');
+    canvas.width = scene.canvas.width;
+    canvas.height = scene.canvas.height;
+    const context = canvas.getContext('2d');
+    const svg = this.svgLayerEl.querySelector('svg');
+    if (!context || !svg) return;
+    context.drawImage(this.bgImgEl, 0, 0, canvas.width, canvas.height);
+    const pixels = context.getImageData(0, 0, canvas.width, canvas.height).data;
+    const blocks: string[] = [];
+    for (const mark of marks) {
+      if (mark.type !== 'mosaic') continue;
+      const [x, y, width, height] = mark.target;
+      const left = Math.max(0, Math.min(canvas.width, Math.floor(x)));
+      const top = Math.max(0, Math.min(canvas.height, Math.floor(y)));
+      const right = Math.max(0, Math.min(canvas.width, Math.ceil(x + width)));
+      const bottom = Math.max(0, Math.min(canvas.height, Math.ceil(y + height)));
+      const blockSize = Math.max(2, Math.min(64, Math.round(mark.block_size ?? 12)));
+      for (let by = top; by < bottom; by += blockSize) {
+        for (let bx = left; bx < right; bx += blockSize) {
+          const bw = Math.min(blockSize, right - bx);
+          const bh = Math.min(blockSize, bottom - by);
+          const sums = [0, 0, 0, 0];
+          for (let py = by; py < by + bh; py++) {
+            for (let px = bx; px < bx + bw; px++) {
+              const offset = (py * canvas.width + px) * 4;
+              for (let channel = 0; channel < 4; channel++) sums[channel] += pixels[offset + channel];
+            }
+          }
+          const [r, g, b, a] = sums.map(sum => Math.floor(sum / (bw * bh)));
+          blocks.push(`<rect x="${bx}" y="${by}" width="${bw}" height="${bh}" fill="rgb(${r},${g},${b})" fill-opacity="${a / 255}"/>`);
+        }
+      }
+    }
+    svg.insertAdjacentHTML('afterbegin', `<g shape-rendering="crispEdges">${blocks.join('')}</g>`);
   }
 
   private updateHandles() {
@@ -1851,6 +1927,18 @@ export class AnnotationEditor {
       hit.style.cursor = 'pointer';
       hit.dataset.handleType = 'select-anno';
       hit.dataset.annotationIndex = String(index);
+      if (annotation.type === 'step-arrow') {
+        const [x, y, width, height] = annotation.target;
+        const dx = Number(badge.getAttribute('cx')) - (x + width / 2);
+        const dy = Number(badge.getAttribute('cy')) - (y + height / 2);
+        const position = annotation.position;
+        hit.dataset.stepPosition = position && ['top', 'right', 'bottom', 'left'].includes(position)
+          ? position : Math.abs(dx) / Math.max(1, width) > Math.abs(dy) / Math.max(1, height)
+            ? (dx > 0 ? 'right' : 'left') : (dy > 0 ? 'bottom' : 'top');
+        const title = document.createElementNS('http://www.w3.org/2000/svg', 'title');
+        title.textContent = 'クリックで位置を切替（上 → 右 → 下 → 左）、ドラッグで移動';
+        hit.appendChild(title);
+      }
       this.handlesLayerEl.appendChild(hit);
     }
 
@@ -1953,8 +2041,8 @@ export class AnnotationEditor {
       }
       return;
     }
-    const fields: [string,string,string[] | null][]=[['style','スタイル',['primary','secondary','warning','danger','info','step']]];
-    if (!['spotlight', 'divider'].includes(types[0])) fields.push(['shadow','影',['true','false']]);
+    const fields: [string,string,string[] | null][]=types[0] === 'mosaic' ? [] : [['style','スタイル',Object.keys(STYLE_LABELS)]];
+    if (!['spotlight', 'divider', 'mosaic'].includes(types[0])) fields.push(['shadow','影',['true','false']]);
     if (['arrow','bezier-arrow','callout','pin','label'].includes(types[0])) fields.push(['outline','縁取り',['true','false']]);
     if (['badge','step-arrow'].includes(types[0])) fields.push(['step','手順番号',null]);
     if (types[0] === 'rounded-rect') fields.push(['rx','角丸の横半径',null],['ry','角丸の縦半径',null]);
@@ -1972,7 +2060,7 @@ export class AnnotationEditor {
       const values=annotations.map(a=>(a as any)[key]); const common=values.every(v=>v===values[0]) ? values[0] : undefined;
       if(input instanceof HTMLSelectElement) {
         input.add(new Option('混在・未設定（変更しない）',''));
-        for(const value of options!) input.add(new Option(value,value));
+        for(const value of options!) input.add(new Option(key === 'style' ? STYLE_LABELS[value as SemanticStyle] : value,value));
         input.value=common===undefined ? '' : String(common);
       } else {
         input.type=['stroke_width','font_size','step','rx','ry'].includes(key) ? 'number' : 'text';
@@ -2022,10 +2110,10 @@ export class AnnotationEditor {
       <div class="form-group">
         <label>スタイル (テーマカラー)</label>
         <div class="style-palette">
-          ${['primary', 'secondary', 'warning', 'danger', 'info', 'step']
+          ${(Object.keys(STYLE_LABELS) as SemanticStyle[])
             .map(
               (st) =>
-                `<div class="style-chip ${st} ${anno.style === st ? 'selected' : ''}" data-style="${st}">${st}</div>`
+                `<div class="style-chip ${st} ${anno.style === st ? 'selected' : ''}" data-style="${st}" title="${st}">${STYLE_LABELS[st]}</div>`
             )
             .join('')}
         </div>
@@ -2199,6 +2287,14 @@ export class AnnotationEditor {
       </div>`;
     }
 
+    if (anno.type === 'mosaic') {
+      html += `<div class="form-group">
+        <label for="prop-mosaic-strength">モザイクの強さ: <span id="mosaic-strength-value">${anno.block_size ?? 12}</span></label>
+        <input id="prop-mosaic-strength" class="form-control" type="range" min="2" max="64" step="1" value="${anno.block_size ?? 12}" />
+        <div class="arrow-placement-hint">値を大きくするとモザイクが粗くなります。</div>
+      </div>`;
+    }
+
     // Delete Button
     html += `
       <div style="margin-top: 16px;">
@@ -2209,8 +2305,22 @@ export class AnnotationEditor {
     `;
 
     this.inspectorEl.innerHTML = html;
+    if (anno.type === 'mosaic') {
+      this.inspectorEl.querySelector('.style-palette')?.closest('.form-group')?.remove();
+      this.inspectorEl.querySelector('[data-mark-style]')?.closest('.form-group')?.remove();
+    }
 
     // Bind inspector events
+    const mosaicStrength = document.getElementById('prop-mosaic-strength') as HTMLInputElement | null;
+    if (mosaicStrength && anno.type === 'mosaic') {
+      mosaicStrength.addEventListener('input', () => {
+        anno.block_size = Math.max(2, Math.min(64, Math.round(Number(mosaicStrength.value))));
+        const value = document.getElementById('mosaic-strength-value');
+        if (value) value.textContent = String(anno.block_size);
+        this.scheduleRender();
+      });
+      mosaicStrength.addEventListener('change', () => this.pushState());
+    }
     this.inspectorEl.querySelectorAll('.style-chip').forEach((chip) => {
       chip.addEventListener('click', () => {
         const style = chip.getAttribute('data-style') as SemanticStyle;
@@ -2537,6 +2647,10 @@ export class AnnotationEditor {
     this.updateCropOverlayUi();
   }
 
+  public commitPendingCrop(): void {
+    if (this.isCropMode) this.applyCrop();
+  }
+
   public applyCrop(): void {
     if (!this.cropRect || this.cropRect.width < 10 || this.cropRect.height < 10) {
       this.cancelCropMode();
@@ -2805,7 +2919,8 @@ export class AnnotationEditor {
       maxY = Math.max(maxY, point[1] + padding);
     };
 
-    for (const anno of this.scene.annotations) {
+    for (const [index, anno] of this.scene.annotations.entries()) {
+      if (this.scene.hidden_annotations?.includes(index)) continue;
       if (anno.type === 'arrow') {
         const length = anno.start && anno.end ? Math.hypot(anno.end[0] - anno.start[0], anno.end[1] - anno.start[1]) : 0;
         const strokeWidth = (anno as any).stroke_width ?? 4;
@@ -2826,6 +2941,14 @@ export class AnnotationEditor {
         maxX = Math.max(maxX, x + w);
         maxY = Math.max(maxY, y + h);
       }
+    }
+
+    // Number badges are laid out outside their target rectangles. Use their
+    // rendered canvas coordinates, which remain independent of editor zoom.
+    for (const element of this.svgLayerEl.querySelectorAll<SVGGraphicsElement>('circle[data-badge-index], rect[data-label-index]')) {
+      const box = element.getBBox();
+      includePoint([box.x, box.y], 2);
+      includePoint([box.x + box.width, box.y + box.height], 2);
     }
 
     if (!isFinite(minX) || !isFinite(minY) || !isFinite(maxX) || !isFinite(maxY)) {
@@ -3077,6 +3200,8 @@ export class AnnotationEditor {
     this.zoomLevel = Math.max(0.2, Math.min(5.0, Math.round(level * 100) / 100));
     const sx = this.zoomLevel * this.outputWidth / Math.max(1, this.scene.canvas.width);
     const sy = this.zoomLevel * this.outputHeight / Math.max(1, this.scene.canvas.height);
+    this.canvasContainerEl.style.setProperty('--crop-ui-inverse-x', `${1 / sx}`);
+    this.canvasContainerEl.style.setProperty('--crop-ui-inverse-y', `${1 / sy}`);
     this.canvasContainerEl.style.transform = `scale(${sx}, ${sy})`;
     this.canvasContainerEl.style.transformOrigin = 'center center';
     if (this.zoomLabelEl) {

@@ -1,6 +1,7 @@
 import { AnnotationEditor } from './editor.ts';
 import { addRecordingButton, showRecordingControls } from './recording.ts';
 import { showPlaybackControls } from './playback.ts';
+import { showCursorGuide } from './cursor-guide.ts';
 import { groupHistory } from './history-groups.ts';
 import { CaptureOverlay, CropRect } from './overlay.ts';
 import { CapturedImage, LoadedImageResult, DetectedUiElement } from './types.ts';
@@ -54,6 +55,10 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
   }
 
+  if (windowLabel === 'cursor-guide') {
+    showCursorGuide(invokeTauri);
+    return;
+  }
   if (windowLabel === 'playback') {
     showPlaybackControls(invokeTauri);
     return;
@@ -62,7 +67,6 @@ document.addEventListener('DOMContentLoaded', async () => {
     showRecordingControls(invokeTauri);
     return;
   }
-  if (windowLabel === 'main') addRecordingButton(invokeTauri);
 
   // Dedicated Fullscreen Snipping Overlay Mode
   if (windowLabel === 'overlay') {
@@ -71,6 +75,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     if (isTauri) {
       const { listen } = await import('@tauri-apps/api/event');
+      overlay.setCursorSupported(await invokeTauri<boolean>('cmd_cursor_capture_supported'));
       await listen<CapturedImage>('show-capture-overlay', (event) => {
         const captured = event.payload;
         overlay.show(
@@ -106,23 +111,36 @@ document.addEventListener('DOMContentLoaded', async () => {
               console.warn('Failed to cancel capture:', err);
             }
           },
-          async (win: DetectedUiElement) => {
+          async (win: DetectedUiElement, includeCursor: boolean) => {
             try {
-              const windows = await invokeTauri<Array<{ id: string }>>('cmd_recording_windows');
               const identity = win.window_id!;
               const nativeId = identity.startsWith('hwnd:')
                 ? `0x${BigInt.asUintN(32, BigInt(identity.slice(5))).toString(16)}`
                 : `0x${BigInt(identity).toString(16)}`;
-              const target = windows.find(window => window.id === nativeId);
-              if (!target) throw new Error('対象ウィンドウが見つかりません。もう一度選択してください。');
               await invokeTauri('cmd_cancel_capture');
-              await invokeTauri('cmd_recording_start', { windowId: target.id });
+              await invokeTauri('cmd_recording_start', { windowId: nativeId, includeCursor });
             } catch (error) {
               await invokeTauri('cmd_cancel_capture').catch(() => {});
               const { emitTo } = await import('@tauri-apps/api/event');
-              await emitTo('main', 'capture-error', `操作録画を開始できませんでした: ${error}`);
+              await emitTo('main', 'capture-error', `操作記録を開始できませんでした: ${error}`);
             }
-          }
+          },
+          async selection => {
+            try {
+              const target = selection.kind === 'window'
+                ? { kind: 'window', window_id: selection.window.window_id!.startsWith('hwnd:')
+                    ? `0x${BigInt.asUintN(32, BigInt(selection.window.window_id!.slice(5))).toString(16)}`
+                    : `0x${BigInt(selection.window.window_id!).toString(16)}` }
+                : { kind: 'fullscreen' };
+              await invokeTauri('cmd_arm_cursor_capture', { target });
+            } catch (error) {
+              await invokeTauri('cmd_cancel_capture').catch(() => {});
+              const { emitTo } = await import('@tauri-apps/api/event');
+              await emitTo('main', 'capture-error', `カーソル付き撮影を準備できませんでした: ${error}`);
+            }
+          },
+          captured.recording_mode ?? false,
+          captured.capture_shortcut ?? 'PrintScreen'
         );
       });
       await invokeTauri('cmd_overlay_ready');
@@ -143,6 +161,17 @@ document.addEventListener('DOMContentLoaded', async () => {
   const historyCount = document.getElementById('history-count')!;
   const shortcutSelect = document.getElementById('capture-shortcut') as HTMLSelectElement | null;
   const shortcutStatus = document.getElementById('capture-shortcut-status');
+  const toolbarSettings = document.getElementById('toolbar-settings') as HTMLDetailsElement;
+  document.addEventListener('click', event => {
+    if (!toolbarSettings.contains(event.target as Node)) toolbarSettings.open = false;
+  });
+  toolbarSettings.addEventListener('keydown', event => {
+    if (event.key === 'Escape') {
+      toolbarSettings.open = false;
+      toolbarSettings.querySelector('summary')?.focus();
+      event.stopPropagation();
+    }
+  });
   type ShortcutStatus = { shortcut: string; warning: string | null };
   if (isTauri && shortcutSelect) {
     const showShortcutStatus = (status: ShortcutStatus) => {
@@ -193,7 +222,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   const playButton = document.createElement('button');
   playButton.className = 'btn';
   playButton.id = 'btn-playback';
-  playButton.textContent = '▶ 再生して再撮影';
+  playButton.textContent = '▶ 再撮影';
   playButton.hidden = true;
   editorActions.prepend(playButton);
   window.addEventListener('markits-background-changed', async (event) => {
@@ -267,6 +296,9 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   const switchView = async (view: 'home' | 'editor') => {
     if (view === 'home') {
+      // Persist the final editor state before exposing history cards; otherwise
+      // stale cards remain clickable while their thumbnails are refreshed.
+      if (editor.hasImage()) await autoSaveToHistory();
       document.body.classList.remove('editor-view-active');
       // Switch view and tabs immediately for responsive UI
       tabHome.classList.add('active');
@@ -278,9 +310,6 @@ document.addEventListener('DOMContentLoaded', async () => {
       openButton.style.display = '';
       tabEditor.style.display = '';
 
-      if (editor.hasImage()) {
-        await autoSaveToHistory();
-      }
       await loadHistory();
     } else {
       document.body.classList.add('editor-view-active');
@@ -307,6 +336,8 @@ document.addEventListener('DOMContentLoaded', async () => {
       return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 600"><text x="20" y="40" fill="#3b82f6" font-size="20">MarkIts Preview</text></svg>`;
     }
   });
+  addRecordingButton(invokeTauri, () => document.body.classList.contains('editor-view-active')
+    ? playbackImageDataUrl || editor.getBackgroundImageDataUrl() : null);
 
   const uiStatusEl = document.getElementById('ui-detection-status');
   const setUiStatus = (state: 'idle' | 'scanning' | 'ready' | 'failed', label: string) => {
@@ -329,52 +360,14 @@ document.addEventListener('DOMContentLoaded', async () => {
     });
   });
 
-  const recentToolsEl = document.getElementById('recent-tools')!;
-  const recentToolListEl = document.getElementById('recent-tool-list')!;
-  const toolTemplates = new Map<string, { label: string; title: string }>();
-  document.querySelectorAll<HTMLButtonElement>('.palette-panel > .tool-list > .tool-btn').forEach((button) => {
-    const type = button.dataset.type;
-    if (type && type !== 'select') toolTemplates.set(type, { label: button.textContent?.trim() ?? type, title: button.title });
-  });
-  let recentTools: string[] = [];
-  let activeRecentTool = 'select';
-  try {
-    const saved = JSON.parse(localStorage.getItem('markits-recent-tools') ?? '[]');
-    if (Array.isArray(saved)) recentTools = saved.filter((tool): tool is string => typeof tool === 'string' && toolTemplates.has(tool)).slice(0, 3);
-  } catch { /* Storage is optional. */ }
-  const renderRecentTools = () => {
-    recentToolListEl.replaceChildren();
-    recentToolsEl.hidden = recentTools.length === 0;
-    for (const tool of recentTools) {
-      const template = toolTemplates.get(tool)!;
-      const button = document.createElement('button');
-      button.type = 'button';
-      button.className = 'tool-btn';
-      button.classList.toggle('active', tool === activeRecentTool);
-      button.dataset.type = tool;
-      button.title = template.title;
-      button.textContent = template.label;
-      button.addEventListener('click', () => editor.setTool(tool));
-      recentToolListEl.appendChild(button);
-    }
-  };
-  renderRecentTools();
-  window.addEventListener('markits-tool-changed', (event) => {
-    const tool = (event as CustomEvent<string>).detail;
-    activeRecentTool = tool;
-    if (tool === 'select') { renderRecentTools(); return; }
-    if (!toolTemplates.has(tool)) return;
-    recentTools = [tool, ...recentTools.filter((item) => item !== tool)].slice(0, 3);
-    try { localStorage.setItem('markits-recent-tools', JSON.stringify(recentTools)); } catch { /* Storage is optional. */ }
-    renderRecentTools();
-  });
-
   // Undo / Redo
   document.getElementById('btn-undo')?.addEventListener('click', () => editor.undo());
   document.getElementById('btn-redo')?.addEventListener('click', () => editor.redo());
 
   // Load and Render History in Home View
+  let historyLoadGeneration = 0;
   const loadHistory = async () => {
+    const generation = ++historyLoadGeneration;
     if (!isTauri) {
       historyGrid.innerHTML = `
         <div class="history-empty">
@@ -389,6 +382,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     try {
       historyGrid.innerHTML = '<div class="history-loading">履歴を読み込んでいます...</div>';
       const items = await invokeTauri<HistoryItem[]>('cmd_get_history');
+      if (generation !== historyLoadGeneration) return;
       historyCount.textContent = `${items.length} 件`;
 
       if (items.length === 0) {
@@ -443,7 +437,7 @@ document.addEventListener('DOMContentLoaded', async () => {
           });
           const replay = document.createElement('button');
           replay.className = 'btn history-play';
-          replay.textContent = `▶ 再生して再撮影（${group.length} 枚）`;
+          replay.textContent = `▶ 再撮影（${group.length} 枚）`;
           replay.addEventListener('click', async (event) => {
             event.stopPropagation();
             if (playbackBusy) return;
@@ -558,7 +552,6 @@ document.addEventListener('DOMContentLoaded', async () => {
   };
 
   document.getElementById('btn-trigger-capture')?.addEventListener('click', handleCaptureTrigger);
-  document.getElementById('btn-hero-capture')?.addEventListener('click', handleCaptureTrigger);
   document.getElementById('btn-empty-capture')?.addEventListener('click', handleCaptureTrigger);
 
   // File Open Flow
@@ -594,10 +587,10 @@ document.addEventListener('DOMContentLoaded', async () => {
   };
 
   document.getElementById('btn-open-file')?.addEventListener('click', handleOpenFile);
-  document.getElementById('btn-hero-open')?.addEventListener('click', handleOpenFile);
 
   // Done Editing saves back to Manual Studio in integration mode.
   document.getElementById('btn-done-editing')?.addEventListener('click', async () => {
+    editor.commitPendingCrop();
     if (manualStudioSession) {
       if (prepareExport()) await executeSaveWithResolution();
       return;
@@ -702,9 +695,6 @@ document.addEventListener('DOMContentLoaded', async () => {
   document.getElementById('btn-crop')?.addEventListener('click', () => {
     editor.toggleCropMode();
   });
-  document.getElementById('btn-autocrop')?.addEventListener('click', () => {
-    editor.toggleAutoCrop(32);
-  });
   document.getElementById('btn-revert-crop')?.addEventListener('click', () => {
     editor.revertCrop();
   });
@@ -721,6 +711,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   let originalHeight = 1080;
 
   const prepareExport = () => {
+    editor.commitPendingCrop();
     const bgDataUrl = editor.getBackgroundImageDataUrl();
     if (!bgDataUrl || bgDataUrl.length === 0) {
       alert('保存またはコピーする画像がありません。まずはキャプチャまたは画像を開いてください。');

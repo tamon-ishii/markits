@@ -5,6 +5,7 @@ pub mod metadata;
 pub mod ui_elements;
 pub mod recording;
 pub mod playback;
+mod cursor_capture;
 
 use std::sync::{Mutex, atomic::AtomicU64};
 use tauri::{
@@ -16,6 +17,9 @@ use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut};
 
 #[derive(Default)]
 pub struct AppState {
+    pub cursor_target: Mutex<Option<cursor_capture::CursorCaptureTarget>>,
+    pub cursor_guide: Mutex<Option<cursor_capture::CursorGuideStatus>>,
+    pub cursor_capture_busy: std::sync::atomic::AtomicBool,
     pub last_capture_data_url: Mutex<Option<String>>,
     pub overlay_ready: Mutex<bool>,
     pub pending_capture: Mutex<Option<capture::CapturedImage>>,
@@ -140,7 +144,20 @@ fn cmd_set_capture_shortcut(app: AppHandle, shortcut: String) -> Result<Shortcut
 fn trigger_capture(app: &AppHandle) {
     let app_handle = app.clone();
     tauri::async_runtime::spawn(async move {
-        if let Err(err) = commands::cmd_start_capture(app_handle.clone()).await {
+        let result = if app_handle.state::<recording::RecordingState>().is_active() {
+            recording::cmd_recording_screenshot(app_handle.clone(), app_handle.state()).await.map(|_| ())
+        } else {
+            match cursor_capture::capture_pending(&app_handle).await {
+                Ok(true) => Ok(()),
+                Ok(false) => commands::cmd_start_capture(app_handle.clone()).await,
+                Err(error) => Err(error),
+            }
+        };
+        if let Err(err) = result {
+            if app_handle.state::<recording::RecordingState>().is_active() {
+                let _ = app_handle.emit_to("recording", "recording-capture-error", err);
+                return;
+            }
             if let Some(window) = app_handle.get_webview_window("main") {
                 commands::force_raise_window(&window);
                 let _ = window.emit("capture-error", err);
@@ -206,16 +223,25 @@ pub fn run() {
             playback::cmd_has_operations,
             playback::cmd_playback,
             playback::cmd_playback_cancel,
+            playback::cmd_playback_control,
+            playback::cmd_playback_capture_wait,
             playback::cmd_playback_status,
+            playback::cmd_playback_ready,
             recording::cmd_recording_screenshot,
+            recording::cmd_recording_cursor_mode,
             recording::cmd_recording_windows,
             recording::cmd_recording_start,
+            recording::cmd_recording_start_from_image,
             recording::cmd_recording_status,
             recording::cmd_recording_pause,
             recording::cmd_recording_finish,
             recording::cmd_recording_cancel,
             commands::cmd_capture_screen,
             commands::cmd_start_capture,
+            commands::cmd_select_recording_window,
+            cursor_capture::cmd_cursor_capture_supported,
+            cursor_capture::cmd_arm_cursor_capture,
+            cursor_capture::cmd_cursor_guide_status,
             commands::cmd_overlay_ready,
             commands::cmd_finish_capture,
             commands::cmd_cancel_capture,
@@ -239,6 +265,11 @@ pub fn run() {
         ])
         .on_window_event(|window, event| match event {
             tauri::WindowEvent::CloseRequested { api, .. } => {
+                if window.label() == "cursor-guide" {
+                    api.prevent_close();
+                    let _ = commands::cmd_cancel_capture(window.app_handle().clone());
+                    return;
+                }
                 if window.label() == "playback" {
                     window.state::<playback::PlaybackState>().1.store(true, std::sync::atomic::Ordering::SeqCst);
                     return;

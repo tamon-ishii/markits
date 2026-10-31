@@ -1039,6 +1039,30 @@ mod native {
 #[cfg(any(target_os = "macos", target_os = "windows"))]
 pub use native::{is_window_active, read_window_pixels, activate_window, capture_window as platform_capture_window, close_window, list_windows, window_process_ids};
 
+/// Test the actual window under the pointer, including occlusion by recorder controls.
+pub fn pointer_targets_window(window_id: &str, x: f64, y: f64) -> Result<bool, String> {
+    #[cfg(target_os = "windows")]
+    {
+        #[repr(C)]
+        struct Point { x: i32, y: i32 }
+        #[link(name = "user32")]
+        unsafe extern "system" {
+            fn WindowFromPoint(point: Point) -> isize;
+            fn GetAncestor(window: isize, flags: u32) -> isize;
+        }
+        let id = u32::from_str_radix(window_id.trim_start_matches("0x"), 16)
+            .map_err(|e| e.to_string())?;
+        let hit = unsafe { WindowFromPoint(Point { x: x as i32, y: y as i32 }) };
+        return Ok(hit != 0 && unsafe { GetAncestor(hit, 2) } as u32 == id);
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        Ok(is_window_active(window_id)? && list_windows()?.iter().any(|w|
+            w.id == window_id && x >= w.x as f64 && y >= w.y as f64
+                && x < w.x as f64 + w.width as f64 && y < w.y as f64 + w.height as f64))
+    }
+}
+
 #[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
 pub fn list_windows() -> Result<Vec<WindowInfo>, String> {
     Err("Window capture is unsupported on this platform".into())

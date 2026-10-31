@@ -1,4 +1,6 @@
 //! Shared window operation recording engine.
+#[cfg(target_os = "windows")]
+mod windows_target;
 use rdev::{Button, Event, EventType, Key, listen};
 use serde::{Deserialize, Serialize};
 use std::{
@@ -15,6 +17,10 @@ use std::{
 pub enum RecordedEvent {
     Screenshot {
         elapsed_ms: u64,
+        #[serde(default)]
+        include_cursor: bool,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        pointer: Option<RecordedPointer>,
     },
     Click {
         elapsed_ms: u64,
@@ -42,8 +48,25 @@ pub enum RecordedEvent {
     },
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RecordedPointer {
+    pub x: f64,
+    pub y: f64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub target: Option<crate::semantic_target::Target>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub target_offset: Option<[f64; 2]>,
+}
+
+#[cfg(target_os = "windows")]
+pub fn named_target_at_point(x: i32, y: i32) -> Option<(crate::semantic_target::Target, [f64; 4])> {
+    windows_target::probe_point(x, y)
+}
+
 pub fn run_helper(path: &Path) -> Result<(), String> {
     let pause_file = path.with_extension("pause");
+    let capture_shortcut = std::env::var("MARKITS_RECORDING_CAPTURE_SHORTCUT")
+        .unwrap_or_else(|_| "PrintScreen".into());
     let file = File::create(path).map_err(|error| error.to_string())?;
     let output = Arc::new(Mutex::new(BufWriter::new(file)));
     #[cfg(target_os = "linux")]
@@ -72,44 +95,24 @@ pub fn run_helper(path: &Path) -> Result<(), String> {
                     }
                 })
         });
-    // Keep a pre-click image. Capturing after ButtonPress can record a changed
-    // label or a newly opened menu instead of the control that was clicked.
-    let visual_snapshot = Arc::new(Mutex::new(None));
     let semantic_window = visual_window.clone();
-    let target_window = visual_window.clone();
+    let target_window = visual_window;
     let target_only = std::env::var_os("MARKITS_RECORDING_TARGET_ONLY").is_some();
-    if let Some(id) = visual_window {
-        let cache = Arc::clone(&visual_snapshot);
-        thread::spawn(move || {
-            loop {
-                let observed_at = Instant::now();
-                if let Ok(windows) = crate::window_capture::list_windows() {
-                    if let Some(window) = windows.into_iter().find(|window| window.id == id) {
-                        if let Ok(picture) = crate::window_capture::read_window_pixels(&id, None) {
-                            if let Ok(mut cache) = cache.lock() {
-                                *cache = Some((observed_at, window, picture));
-                            }
-                        }
-                    }
-                }
-                thread::sleep(Duration::from_millis(200));
-            }
-        });
-    }
+    #[cfg(target_os = "windows")]
+    let point_target = windows_target::start(target_window.clone());
     let snapshot = Arc::new(Mutex::new((Instant::now(), Vec::new())));
     if let Some(id) = semantic_window {
         let snapshot = Arc::clone(&snapshot);
         let depth = std::env::var("MUNIN_UI_CAPTURE_DEPTH")
             .ok()
             .and_then(|value| value.parse().ok())
-            .unwrap_or(crate::ui_elements::DEFAULT_CAPTURE_DEPTH);
+            .unwrap_or(128).clamp(1, 128);
         thread::spawn(move || {
             let _depth = crate::ui_elements::capture_depth_scope(depth);
             loop {
-                let observed_at = Instant::now();
                 let elements = crate::semantic_target::observe_window(&id).unwrap_or_default();
                 if let Ok(mut cache) = snapshot.lock() {
-                    *cache = (observed_at, elements);
+                    *cache = (Instant::now(), elements);
                 }
                 thread::sleep(Duration::from_millis(200));
             }
@@ -146,6 +149,9 @@ pub fn run_helper(path: &Path) -> Result<(), String> {
                 } else {
                     let _ = std::fs::write(&pause_file, "paused");
                 }
+                return;
+            }
+            if is_capture_shortcut(&capture_shortcut, key, ctrl, shift, alt, meta) {
                 return;
             }
             if !down || pause_file.exists() || is_modifier(key) {
@@ -205,24 +211,9 @@ pub fn run_helper(path: &Path) -> Result<(), String> {
             return;
         }
         if target_only {
-            let inside = visual_snapshot
-                .lock()
-                .ok()
-                .and_then(|cache| {
-                    let (_, window, _) = cache.as_ref()?;
-                    Some(event_in_window(
-                        &RecordedEvent::Click {
-                            elapsed_ms,
-                            x: pointer.0,
-                            y: pointer.1,
-                            target: None,
-                            visual: None,
-                        },
-                        window,
-                        None,
-                    ))
-                })
-                .unwrap_or(false);
+            let inside = target_window.as_ref().is_some_and(|id| {
+                crate::window_capture::pointer_targets_window(id, pointer.0, pointer.1).unwrap_or(false)
+            });
             if !inside {
                 return;
             }
@@ -236,15 +227,15 @@ pub fn run_helper(path: &Path) -> Result<(), String> {
                 elapsed_ms,
                 x: pointer.0,
                 y: pointer.1,
-                visual: visual_snapshot.lock().ok().and_then(|cache| {
-                    let (observed_at, window, picture) = cache.as_ref()?;
-                    if observed_at.elapsed() > Duration::from_millis(800) {
-                        return None;
-                    }
-                    crate::visual_target::record_snapshot(window, picture, pointer.0, pointer.1)
-                        .ok()
-                }),
+                visual: None,
                 target: {
+                    #[cfg(target_os = "windows")]
+                    let direct = point_target.lock().ok().and_then(|cache| {
+                        let (observed_at, probe) = cache.as_ref()?;
+                        (observed_at.elapsed() < Duration::from_millis(800)
+                            && probe.contains(pointer.0, pointer.1))
+                            .then(|| probe.target.clone())
+                    });
                     let cached = snapshot.lock().ok().and_then(|cache| {
                         (cache.0.elapsed() < Duration::from_millis(2200))
                             .then(|| {
@@ -252,6 +243,8 @@ pub fn run_helper(path: &Path) -> Result<(), String> {
                             })
                             .flatten()
                     });
+                    #[cfg(target_os = "windows")]
+                    let cached = direct.or(cached);
                     #[cfg(target_os = "linux")]
                     let cached = cached.or_else(|| {
                         point_context.as_ref().and_then(|context| {
@@ -307,6 +300,15 @@ fn is_modifier(key: Key) -> bool {
             | Key::MetaLeft
             | Key::MetaRight
     )
+}
+
+fn is_capture_shortcut(shortcut: &str, key: Key, ctrl: bool, shift: bool, alt: bool, meta: bool) -> bool {
+    match shortcut {
+        "PrintScreen" => key == Key::PrintScreen && !ctrl && !shift && !alt && !meta,
+        "Alt+PrintScreen" => key == Key::PrintScreen && alt && !ctrl && !shift && !meta,
+        "Control+Shift+S" => key == Key::KeyS && ctrl && shift && !alt && !meta,
+        _ => false,
+    }
 }
 
 fn key_name(key: Key) -> Option<&'static str> {
@@ -369,6 +371,10 @@ impl RecordingSession {
         &self.window.id
     }
     pub fn start(window_id: &str, executable: &Path) -> Result<Self, String> {
+        Self::start_with_capture_shortcut(window_id, executable, "PrintScreen")
+    }
+
+    pub fn start_with_capture_shortcut(window_id: &str, executable: &Path, capture_shortcut: &str) -> Result<Self, String> {
         if crate::window_capture::is_wayland_session() {
             return Err("Operation recording requires an X11 session on Linux".into());
         }
@@ -398,6 +404,7 @@ impl RecordingSession {
             .arg(&session.event_file)
             .env("MARKITS_RECORDING_TARGET_ONLY", "1")
             .env("MARKITS_RECORDING_WINDOW_ID", window_id)
+            .env("MARKITS_RECORDING_CAPTURE_SHORTCUT", capture_shortcut)
             .env(
                 "MUNIN_RECORDING_WINDOW",
                 serde_json::to_string(&context).map_err(|e| e.to_string())?,
@@ -520,6 +527,7 @@ impl Drop for RecordingSession {
     }
 }
 
+#[cfg(test)]
 fn event_in_window(
     event: &RecordedEvent,
     window: &crate::window_capture::WindowInfo,
@@ -543,6 +551,16 @@ fn event_in_window(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn capture_keys_are_excluded_without_excluding_normal_typing() {
+        assert!(is_capture_shortcut("PrintScreen", Key::PrintScreen, false, false, false, false));
+        assert!(is_capture_shortcut("Alt+PrintScreen", Key::PrintScreen, false, false, true, false));
+        assert!(is_capture_shortcut("Control+Shift+S", Key::KeyS, true, true, false, false));
+        assert!(!is_capture_shortcut("Control+Shift+S", Key::KeyS, false, false, false, false));
+        assert!(!is_capture_shortcut("Control+Shift+S", Key::KeyS, true, false, false, false));
+        assert!(!is_capture_shortcut("PrintScreen", Key::PrintScreen, false, false, true, false));
+    }
 
     #[test]
     fn exports_only_target_clicks_and_excludes_controls() {

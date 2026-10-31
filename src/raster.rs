@@ -460,6 +460,40 @@ pub fn render_composed_png_bytes(
     render_composed_png_bytes_with_crop(json, image_bytes, None)
 }
 
+// Average each block from the original image so overlapping marks remain stable.
+fn apply_mosaics(source: &DynamicImage, scene: &Scene) -> image::RgbaImage {
+    let original = source.to_rgba8();
+    let mut output = original.clone();
+    for annotation in &scene.visible_scene().annotations {
+        let crate::model::Annotation::Mosaic { target, block_size, .. } = annotation else { continue };
+        let block_size = block_size.unwrap_or(12).clamp(2, 64);
+        let left = target.x.floor().clamp(0.0, source.width() as f64) as u32;
+        let top = target.y.floor().clamp(0.0, source.height() as f64) as u32;
+        let right = (target.x + target.width).ceil().clamp(0.0, source.width() as f64) as u32;
+        let bottom = (target.y + target.height).ceil().clamp(0.0, source.height() as f64) as u32;
+        for y in (top..bottom).step_by(block_size as usize) {
+            for x in (left..right).step_by(block_size as usize) {
+                let end_x = (x + block_size).min(right);
+                let end_y = (y + block_size).min(bottom);
+                let mut sum = [0u64; 4];
+                for py in y..end_y {
+                    for px in x..end_x {
+                        for (channel, value) in original.get_pixel(px, py).0.iter().enumerate() {
+                            sum[channel] += *value as u64;
+                        }
+                    }
+                }
+                let count = u64::from((end_x - x) * (end_y - y));
+                let color = image::Rgba(sum.map(|value| (value / count) as u8));
+                for py in y..end_y {
+                    for px in x..end_x { output.put_pixel(px, py, color); }
+                }
+            }
+        }
+    }
+    output
+}
+
 pub fn render_composed_png_bytes_with_crop(
     json: &str,
     image_bytes: &[u8],
@@ -493,12 +527,21 @@ pub fn render_composed_png_bytes_with_crop(
     let render_res = renderer::render_with_layout_from_json(&resolved)?;
     let svg = &render_res.svg;
     let root_end = svg.find('>').ok_or("Generated SVG has no root element")? + 1;
-    let encoded = base64::engine::general_purpose::STANDARD.encode(image_bytes);
+    let mut mosaic_png = std::io::Cursor::new(Vec::new());
+    let has_mosaic = scene.visible_scene().annotations.iter()
+        .any(|annotation| matches!(annotation, crate::model::Annotation::Mosaic { .. }));
+    let (background, background_format) = if has_mosaic {
+        DynamicImage::ImageRgba8(apply_mosaics(&source, &scene)).write_to(&mut mosaic_png, ImageFormat::Png)?;
+        (mosaic_png.get_ref().as_slice(), "png")
+    } else {
+        (image_bytes, format_str)
+    };
+    let encoded = base64::engine::general_purpose::STANDARD.encode(background);
     let mut composed = String::with_capacity(svg.len() + encoded.len() + 200);
     composed.push_str(&svg[..root_end]);
     composed.push_str(&format!(
         "\n  <image x=\"0\" y=\"0\" width=\"{}\" height=\"{}\" href=\"data:image/{};base64,{}\"/>",
-        width, height, format_str, encoded
+        width, height, background_format, encoded
     ));
     composed.push_str(&svg[root_end..]);
 
@@ -596,6 +639,35 @@ mod tests {
         assert!(crop_image(&source, 0, 0, 0, 2).is_err());
         assert!(crop_image(&source, 3, 0, 2, 2).is_err());
         assert!(crop_image(&source, u32::MAX, 0, 2, 2).is_err());
+    }
+
+    #[test]
+    fn mosaic_export_changes_only_visible_selected_pixels() {
+        let original = image::RgbaImage::from_fn(30, 20, |x, y| {
+            image::Rgba([(x * 7) as u8, (y * 10) as u8, 50, 255])
+        });
+        let mut png = std::io::Cursor::new(Vec::new());
+        DynamicImage::ImageRgba8(original.clone()).write_to(&mut png, ImageFormat::Png).unwrap();
+        let json = r#"{"canvas":{"width":30,"height":20},"annotations":[
+            {"type":"mosaic","target":[4,3,100,100]},
+            {"type":"mosaic","target":[0,0,3,3]}
+        ],"hidden_annotations":[1]}"#;
+        let result = render_composed_png_bytes(json, png.get_ref()).unwrap();
+        let image = image::load_from_memory(&result).unwrap().to_rgba8();
+        assert_eq!(image.get_pixel(0, 0), original.get_pixel(0, 0));
+        assert_eq!(image.get_pixel(3, 10), original.get_pixel(3, 10));
+        assert_eq!(image.get_pixel(4, 3), image.get_pixel(15, 14));
+        assert_eq!(image.get_pixel(4, 3).0, [66, 85, 50, 255]);
+        assert_ne!(image.get_pixel(29, 19), original.get_pixel(29, 19));
+        let scene = Scene::from_json(json).unwrap();
+        let roundtrip = serde_json::to_string(&scene).unwrap();
+        assert_eq!(Scene::from_json(&roundtrip).unwrap().annotations.len(), 2);
+        let stronger = json.replace("\"type\":\"mosaic\"", "\"type\":\"mosaic\",\"block_size\":24");
+        let result = render_composed_png_bytes(&stronger, png.get_ref()).unwrap();
+        let stronger_image = image::load_from_memory(&result).unwrap().to_rgba8();
+        assert_eq!(stronger_image.get_pixel(4, 3), stronger_image.get_pixel(27, 19));
+        assert_ne!(stronger_image.get_pixel(4, 3), image.get_pixel(4, 3));
+        assert_eq!(stronger_image.get_pixel(0, 0), original.get_pixel(0, 0));
     }
 
     #[test]

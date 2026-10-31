@@ -1,58 +1,46 @@
 type Invoke = <T>(command: string, args?: Record<string, unknown>) => Promise<T>;
-interface RecordedEvent { kind: string; value?: string; x?: number; y?: number; dx?: number; dy?: number; elapsed_ms: number }
+interface RecordedEvent {
+  kind: string; value?: string; x?: number; y?: number; dx?: number; dy?: number; elapsed_ms: number;
+  target?: { name: string; role: string } | null;
+  visual?: { png: string; anchor_x: number; anchor_y: number } | null;
+  include_cursor?: boolean;
+  pointer?: { x: number; y: number; target?: { name: string } | null } | null;
+}
 interface Status { running: boolean; paused: boolean; events: RecordedEvent[] }
 
-export function addRecordingButton(invoke: Invoke) {
+export function addRecordingButton(invoke: Invoke, currentImage?: () => string | null) {
   const button = document.createElement('button');
   button.id = 'btn-record-operations';
   button.className = 'btn';
-  button.textContent = 'ウインドウ操作を記録';
+  button.textContent = '⏺ 操作を記録';
   document.querySelector('.action-bar')?.prepend(button);
-  button.addEventListener('click', () => { void chooseRecordingWindow(invoke); });
+  button.addEventListener('click', async () => {
+    button.disabled = true;
+    try {
+      const imageDataUrl = currentImage?.();
+      if (imageDataUrl) await invoke('cmd_recording_start_from_image', { imageDataUrl });
+      else await chooseRecordingWindow(invoke);
+    } catch (error) { alert(String(error)); }
+    finally { button.disabled = false; }
+  });
 }
 
 async function chooseRecordingWindow(invoke: Invoke) {
-  const dialog = document.createElement('dialog');
-  dialog.innerHTML = `<h2>ウインドウ操作を記録</h2><p>クリック・文字入力・キー・スクロールを操作データとして保存します。</p>
-    <label for="record-window">対象ウインドウ</label><select id="record-window" class="form-control"></select>
-    <p role="status"></p><button data-action="refresh" class="btn">一覧を更新</button>
-    <button data-action="start" class="btn btn-primary">記録を開始</button><button data-action="cancel" class="btn">キャンセル</button>`;
-  document.body.append(dialog);
-  dialog.showModal();
-  const select = dialog.querySelector('select')!;
-  const status = dialog.querySelector('[role=status]')!;
-  const start = dialog.querySelector<HTMLButtonElement>('[data-action=start]')!;
-  const refresh = dialog.querySelector<HTMLButtonElement>('[data-action=refresh]')!;
-  const cancel = dialog.querySelector<HTMLButtonElement>('[data-action=cancel]')!;
-  let starting = false;
-  dialog.addEventListener('cancel', event => { if (starting) event.preventDefault(); });
-  const reload = async () => {
-    start.disabled = true; refresh.disabled = true;
-    try {
-      const windows = await invoke<Array<{id: string; title: string}>>('cmd_recording_windows');
-      select.replaceChildren(...windows.map(window => new Option(window.title, window.id)));
-      status.textContent = windows.length ? '' : '対象ウインドウがありません。';
-    } catch (error) { status.textContent = String(error); }
-    finally { start.disabled = !select.options.length; refresh.disabled = false; }
-  };
-  refresh.onclick = () => { void reload(); };
-  cancel.onclick = () => dialog.close();
-  dialog.onclose = () => dialog.remove();
-  start.onclick = async () => {
-    starting = true; start.disabled = true; refresh.disabled = true; cancel.disabled = true;
-    status.textContent = '記録を準備中…';
-    try { await invoke('cmd_recording_start', { windowId: select.value }); dialog.close(); }
-    catch (error) { status.textContent = String(error); }
-    finally { starting = false; start.disabled = false; refresh.disabled = false; cancel.disabled = false; }
-  };
-  await reload();
+  try {
+    await invoke('cmd_select_recording_window');
+  } catch (error) {
+    alert(String(error));
+  }
 }
 
 export function showRecordingControls(invoke: Invoke) {
-  document.body.innerHTML = `<main class="recording-panel"><h2>操作を録画</h2>
-    <p>操作は下のリストに順次追加されます。画像を残したいタイミングで「キャプチャ」を押してください。</p>
+  document.body.innerHTML = `<main class="recording-panel"><h2>操作を記録</h2>
+    <p>操作は下のリストに順次追加されます。撮影キーならマウスを動かさず、ホバー中の画面も撮影できます。</p>
+    <p class="record-capture-shortcut"><span>撮影キー</span> <kbd id="record-capture-key">準備中…</kbd><span>マウスを動かさず撮影</span></p>
+    <p>対象ウィンドウの操作だけを記録します。クリックは「名称で照合」または「座標のみ」で記録されます。</p>
     <p id="record-status" role="status">記録中</p><p>Ctrl＋Shift＋F9：一時停止／再開<br>Ctrl＋Shift＋F10：入力記録を停止</p>
     <button id="record-screenshot" class="btn btn-primary">📷 キャプチャ</button>
+    <label id="record-cursor-label" hidden><input id="record-include-cursor" type="checkbox" disabled> ポインタ付き撮影</label>
     <div id="record-screenshots" class="recording-screenshots" aria-label="撮影したスクリーンショット"></div>
     <label><input id="record-export-json" type="checkbox"> 操作記録のJSONも保存</label>
     <button id="record-pause" class="btn">一時停止</button><button id="record-finish" class="btn btn-primary">終了して画像を保存</button>
@@ -64,17 +52,42 @@ export function showRecordingControls(invoke: Invoke) {
   const thumbnails = document.getElementById('record-screenshots')!;
   const status = document.getElementById('record-status')!;
   const list = document.getElementById('record-events')!;
+  const cursor = document.getElementById('record-include-cursor') as HTMLInputElement;
+  cursor.onchange = async () => {
+    cursor.disabled = true;
+    try { cursor.checked = await invoke<boolean>('cmd_recording_cursor_mode', { enabled: cursor.checked }); }
+    catch (error) { cursor.checked = !cursor.checked; status.textContent = String(error); }
+    finally { cursor.disabled = false; }
+  };
   let paused = false, busy = false, polling = false;
   let completed: unknown;
+  const addScreenshot = (url: string) => {
+    const image = document.createElement('img');
+    image.src = url; image.alt = `スクリーンショット ${thumbnails.children.length + 1}`;
+    thumbnails.append(image);
+    status.textContent = `${thumbnails.children.length} 枚の撮影ポイントを追加しました`;
+  };
+  screenshot.disabled = true;
+  void (async () => {
+    try {
+      const { listen } = await import('@tauri-apps/api/event');
+      await listen<string>('recording-screenshot', event => addScreenshot(event.payload));
+      await listen<string>('recording-capture-error', event => { status.textContent = event.payload; });
+      const shortcut = await invoke<{ shortcut: string }>('cmd_get_capture_shortcut');
+      if (await invoke<boolean>('cmd_cursor_capture_supported')) {
+        document.getElementById('record-cursor-label')!.hidden = false;
+        cursor.checked = await invoke<boolean>('cmd_recording_cursor_mode');
+        cursor.disabled = false;
+      }
+      document.getElementById('record-capture-key')!.textContent = shortcut.shortcut.replace('Control', 'Ctrl').replaceAll('+', ' + ');
+      screenshot.disabled = false;
+    } catch (error) { status.textContent = String(error); }
+  })();
   screenshot.onclick = async () => {
     if (busy || completed) return;
     busy = true; screenshot.disabled = true; finish.disabled = true; cancel.disabled = true; pause.disabled = true;
     try {
-      const url = await invoke<string>('cmd_recording_screenshot');
-      const image = document.createElement('img');
-      image.src = url; image.alt = `スクリーンショット ${thumbnails.children.length + 1}`;
-      thumbnails.append(image);
-      status.textContent = `${thumbnails.children.length} 枚の撮影ポイントを追加しました`;
+      await invoke<string>('cmd_recording_screenshot');
     } catch (error) { status.textContent = String(error); }
     finally { busy = false; screenshot.disabled = false; finish.disabled = false; cancel.disabled = false; pause.disabled = false; }
   };
@@ -91,11 +104,21 @@ export function showRecordingControls(invoke: Invoke) {
       const labels: Record<string, string> = { click: 'クリック', text: '文字入力', key: 'キー', scroll: 'スクロール', screenshot: '📷 キャプチャ' };
       result.events.forEach((event, index) => {
         const item = list.children[index] ?? list.appendChild(document.createElement('li'));
-        const detail = event.kind === 'scroll'
+        const position = event.x === undefined ? '' : `(${Math.round(event.x)}, ${Math.round(event.y ?? 0)})`;
+        const detail = event.kind === 'screenshot' && event.include_cursor
+          ? `ポインタ付き${event.pointer?.target ? `／ホバー：${event.pointer.target.name}` : event.pointer ? `／位置：(${Math.round(event.pointer.x)}, ${Math.round(event.pointer.y)})` : ''}`
+          : event.kind === 'click'
+          ? event.target
+            ? `【名称で照合】「${event.target.name}」／種類：${event.target.role}／記録位置：${position}`
+            : `【座標のみ】名称を取得できませんでした／記録位置：${position}`
+          : event.kind === 'scroll'
           ? `横 ${event.dx ?? 0} / 縦 ${event.dy ?? 0}`
-          : event.value ?? (event.x === undefined ? '' : `(${Math.round(event.x)}, ${Math.round(event.y ?? 0)})`);
+          : event.value ?? position;
         const text = `${(event.elapsed_ms / 1000).toFixed(1)}秒 ${labels[event.kind] ?? event.kind} ${detail}`;
-        if (item.textContent !== text) item.textContent = text;
+        let label = item.querySelector('span');
+        if (!label) { label = document.createElement('span'); item.appendChild(label); }
+        if (label.textContent !== text) label.textContent = text;
+
       });
       while (list.children.length > result.events.length) list.lastElementChild?.remove();
     } catch (error) { if (!busy && !completed) status.textContent = String(error); }

@@ -31,7 +31,6 @@
           <div class="divider-v"></div>
           <button id="btn-toggle-snap" class="btn btn-toggle active" title="UI要素スナップ (Altで一時切替)">🧲 スナップ</button>
           <button id="btn-crop" class="btn btn-toggle" title="キャンバスをクロップ (切り抜き)">✂️ クロップ</button>
-          <button id="btn-autocrop" class="btn btn-toggle" title="マークに合わせてクロップ (トグル切替)">🎯 マークでクロップ</button>
           <button id="btn-revert-crop" class="btn btn-sm" title="クロップを解除して元の画像に戻す" style="display: none;">↺ クロップ解除</button>
           <div class="divider-v"></div>
           <div class="zoom-controls">
@@ -55,26 +54,9 @@
             ✓ 編集終了
           </button>
         </div>
-      </div>
-    </header>
-
-    <!-- 1. Home View: Capture History & Gallery -->
-    <main id="home-view" class="home-view" style="display:none">
-      <div class="home-container">
-        <!-- Quick Action Hero Banner -->
-        <div class="home-hero">
-          <div class="hero-text">
-            <h2>スクリーンキャプチャ & アノテーション</h2>
-            <p>いつでも設定した撮影ショートカットを押すか、右上の「📷 キャプチャ」から画面を切り取れます。<br>過去に撮影したキャプチャは自動的に履歴に保存され、クリックするといつでもアノテーションを再編集できます。</p>
-          </div>
-          <div class="hero-actions">
-            <button id="btn-hero-capture" class="btn btn-primary btn-lg">
-              📷 今すぐ画面をキャプチャ
-            </button>
-            <button id="btn-hero-open" class="btn btn-lg">
-              📂 既存の画像を開いて編集
-            </button>
-          </div>
+        <details id="toolbar-settings" class="toolbar-settings">
+          <summary class="btn">⚙ 設定</summary>
+          <div id="toolbar-settings-panel" class="toolbar-settings-panel" role="group" aria-label="撮影の設定">
           <div class="capture-shortcut-settings">
             <label for="ui-exploration-depth">UI探索階層の深さ</label>
             <input id="ui-exploration-depth" type="number" min="1" max="128" step="1" required disabled
@@ -91,8 +73,14 @@
             </select>
             <span id="capture-shortcut-status" role="status" aria-live="polite"></span>
           </div>
-        </div>
+          </div>
+        </details>
+      </div>
+    </header>
 
+    <!-- 1. Home View: Capture History & Gallery -->
+    <main id="home-view" class="home-view" style="display:none">
+      <div class="home-container">
         <!-- History Section -->
         <div class="history-section-header">
           <div class="section-title-wrap">
@@ -116,10 +104,6 @@
       <!-- Left Tool Palette -->
       <aside class="palette-panel">
         <div class="panel-title">マークツール</div>
-        <div id="recent-tools" class="recent-tools" hidden>
-          <div class="tool-group-label">最近使ったツール</div>
-          <div id="recent-tool-list" class="tool-list"></div>
-        </div>
         <div class="tool-list">
           <button class="tool-btn active" data-type="select" title="選択・ハンドル操作モード">
             👆 選択
@@ -157,6 +141,7 @@
           <button class="tool-btn" data-type="circle" title="円形・楕円">
             ⭕ 円形
           </button>
+          <button class="tool-btn" data-type="mosaic" title="選択範囲にモザイクをかける">▦ モザイク</button>
           <button class="tool-btn" data-type="spotlight" title="スポットライト (注目領域暗転)">
             🔦 スポットライト
           </button>
@@ -246,9 +231,9 @@
         <div class="output-size-panel">
           <div class="panel-title">出力サイズ</div>
           <div class="editor-output-controls">
-            <label>幅 <input id="editor-export-width" type="number" min="10" max="10000" step="1" aria-label="出力幅" /> px</label>
+            <label>幅 (px)<input id="editor-export-width" type="number" min="10" max="10000" step="1" aria-label="出力幅" /></label>
             <button id="editor-aspect-lock" class="btn-aspect-lock active" type="button" title="アスペクト比を固定" aria-label="アスペクト比を固定" aria-pressed="true">🔒</button>
-            <label>高さ <input id="editor-export-height" type="number" min="10" max="10000" step="1" aria-label="出力高さ" /> px</label>
+            <label>高さ (px)<input id="editor-export-height" type="number" min="10" max="10000" step="1" aria-label="出力高さ" /></label>
           </div>
           <div class="output-size-hint">このサイズと縦横比でプレビュー・保存します</div>
           <label class="reproduction-json-option"><input id="save-reproduction-json" type="checkbox" /> 再現用テキスト（JSON）も保存</label>
@@ -277,17 +262,15 @@
           <div class="ui-element-header">
             <span id="ui-element-badge" class="ui-element-badge"></span>
             <span id="ui-element-action-hint" class="ui-element-action-hint">クリックでキャプチャ</span>
-            <button id="btn-record-hovered-window" class="ui-element-action-hint" type="button">操作を録画</button>
+            <button id="btn-record-hovered-window" class="ui-element-action-hint" type="button">⏺ 操作を記録</button>
           </div>
-        </div>
-        <div id="selection-box" class="selection-box">
-          <div id="selection-size-badge" class="selection-size-badge">0 × 0</div>
         </div>
       </div>
       <div class="overlay-toolbar">
-        <button id="btn-mode-capture" class="btn btn-sm btn-primary" aria-pressed="true">クリックでキャプチャ</button>
-        <button id="btn-mode-record" class="btn btn-sm" aria-pressed="false">操作を録画</button>
-        <span class="overlay-hint">ウィンドウをクリックしてキャプチャ / ドラッグで範囲指定</span>
+        <button id="btn-mode-capture" class="btn btn-sm btn-primary" aria-pressed="true">📷 撮影</button>
+        <label id="capture-cursor-option" class="capture-cursor-option" hidden><input id="capture-include-cursor" type="checkbox"> マウスカーソルを含める</label>
+        <button id="btn-mode-record" class="btn btn-sm" aria-pressed="false">⏺ 操作を記録</button>
+        <span class="overlay-hint">ウィンドウをクリックして撮影</span>
         <button id="btn-capture-fullscreen" class="btn btn-sm btn-primary">🖥️ 全画面キャプチャ</button>
         <button id="btn-cancel-capture" class="btn btn-sm btn-danger">✕ キャンセル (Esc)</button>
       </div>

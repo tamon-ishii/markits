@@ -525,6 +525,9 @@ pub enum ResolvedAnnotation {
         shadow: bool,
         stroke_width: Option<f64>,
     },
+    Mosaic {
+        target: TargetRect,
+    },
     Spotlight {
         target: TargetRect,
         style: SemanticStyle,
@@ -746,6 +749,10 @@ impl LayoutEngine {
                         shadow,
                         stroke_width: *stroke_width,
                     });
+                    occupied_rects.push(*target);
+                }
+                Annotation::Mosaic { target, .. } => {
+                    resolved.push(ResolvedAnnotation::Mosaic { target: *target });
                     occupied_rects.push(*target);
                 }
                 Annotation::Spotlight { target, style } => {

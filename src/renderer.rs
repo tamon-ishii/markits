@@ -160,7 +160,7 @@ fn element_geometry(annotation: &ResolvedAnnotation) -> ([f64; 4], Option<Vec<[f
         ResolvedAnnotation::Label { box_rect, .. } => (rect(box_rect), None),
         ResolvedAnnotation::Callout { box_rect, arrow_start, arrow_end, .. } =>
             (rect(box_rect), Some(vec![point(arrow_start), point(arrow_end)])),
-        ResolvedAnnotation::Spotlight { target, .. } => (rect(target), None),
+        ResolvedAnnotation::Spotlight { target, .. } | ResolvedAnnotation::Mosaic { target } => (rect(target), None),
         ResolvedAnnotation::Circle { cx, cy, rx, ry, .. } => ([cx-rx, cy-ry, 2.0*rx, 2.0*ry], None),
         ResolvedAnnotation::Badge { center, radius, .. } | ResolvedAnnotation::StepArrow { center, radius, .. } => {
             let path = if let ResolvedAnnotation::StepArrow { arrow_start, arrow_end, .. } = annotation {

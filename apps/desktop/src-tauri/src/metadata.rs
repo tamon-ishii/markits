@@ -8,6 +8,7 @@ pub const MARKITS_KEYWORD: &str = "markits:annotations";
 pub const MARKITS_UI_ELEMENTS_KEYWORD: &str = "markits:ui_elements";
 pub const MARKITS_CROP_KEYWORD: &str = "markits:crop_info";
 pub const MARKITS_SOURCE_KEYWORD: &str = "markits:source_image";
+pub const MARKITS_CAPTURE_TARGET_KEYWORD: &str = "markits:capture_target";
 const PNG_SIGNATURE: &[u8; 8] = b"\x89PNG\r\n\x1a\n";
 
 #[derive(Error, Debug)]

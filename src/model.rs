@@ -439,6 +439,13 @@ pub enum Annotation {
         #[serde(default)]
         shadow: Option<bool>,
     },
+    Mosaic {
+        target: TargetRect,
+        #[serde(default)]
+        block_size: Option<u32>,
+        #[serde(default)]
+        style: SemanticStyle,
+    },
     Spotlight {
         target: TargetRect,
         #[serde(default)]
@@ -570,6 +577,7 @@ impl Annotation {
             | Annotation::Callout { target, .. }
             | Annotation::Badge { target, .. }
             | Annotation::Spotlight { target, .. }
+            | Annotation::Mosaic { target, .. }
             | Annotation::Pin { target, .. }
             | Annotation::Bullseye { target, .. }
             | Annotation::Divider { target, .. }
@@ -601,6 +609,7 @@ impl Annotation {
             | Annotation::Callout { style, .. }
             | Annotation::Badge { style, .. }
             | Annotation::Spotlight { style, .. }
+            | Annotation::Mosaic { style, .. }
             | Annotation::Pin { style, .. }
             | Annotation::Bullseye { style, .. }
             | Annotation::Divider { style, .. }
@@ -635,7 +644,7 @@ impl Annotation {
             | Annotation::Bullseye { shadow, .. }
             | Annotation::StepArrow { shadow, .. }
             | Annotation::BezierArrow { shadow, .. } => *shadow,
-            Annotation::Spotlight { .. } | Annotation::Divider { .. } => None,
+            Annotation::Spotlight { .. } | Annotation::Mosaic { .. } | Annotation::Divider { .. } => None,
         }
     }
 

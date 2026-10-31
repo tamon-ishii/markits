@@ -1,4 +1,4 @@
-export type SemanticStyle = 'primary' | 'secondary' | 'warning' | 'danger' | 'info' | 'step';
+export type SemanticStyle = 'primary' | 'secondary' | 'warning' | 'danger' | 'info' | 'step' | 'pink';
 export type PositionHint = 'top' | 'bottom' | 'left' | 'right' | 'center' | 'auto';
 
 export interface Canvas {
@@ -144,7 +144,14 @@ export interface SpotlightAnnotation extends BaseAnnotation {
   target: [number, number, number, number];
 }
 
+export interface MosaicAnnotation extends BaseAnnotation {
+  type: 'mosaic';
+  target: [number, number, number, number];
+  block_size?: number;
+}
+
 export type Annotation =
+  | MosaicAnnotation
   | ArrowAnnotation
   | BezierArrowAnnotation
   | CalloutAnnotation
@@ -178,6 +185,8 @@ export interface DetectedUiElement {
 }
 
 export interface CapturedImage {
+  capture_shortcut?: string;
+  recording_mode?: boolean;
   width: number;
   height: number;
   data_url: string;

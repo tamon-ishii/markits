@@ -20,6 +20,10 @@ pub enum CaptureError {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CapturedImage {
+    #[serde(default)]
+    pub capture_shortcut: Option<String>,
+    #[serde(default)]
+    pub recording_mode: bool,
     pub width: u32,
     pub height: u32,
     pub data_url: String,
@@ -40,6 +44,8 @@ pub fn rgba_to_captured_image(img: &RgbaImage) -> Result<CapturedImage, CaptureE
     let data_url = format!("data:image/png;base64,{}", b64);
 
     Ok(CapturedImage {
+        capture_shortcut: None,
+        recording_mode: false,
         width: img.width(),
         height: img.height(),
         data_url,
