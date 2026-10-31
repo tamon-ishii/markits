@@ -57,6 +57,11 @@
           <summary class="btn">⚙ 設定</summary>
           <div id="toolbar-settings-panel" class="toolbar-settings-panel" role="group" aria-label="撮影の設定">
           <div class="capture-shortcut-settings">
+            <label for="app-language">Language / 言語</label>
+            <select id="app-language" aria-label="Language / 言語"><option value="ja">日本語</option><option value="en">English</option></select>
+            <span id="app-language-status" role="status" aria-live="polite"></span>
+          </div>
+          <div class="capture-shortcut-settings">
             <label for="ui-exploration-depth">UI探索階層の深さ</label>
             <input id="ui-exploration-depth" type="number" min="1" max="128" step="1" required disabled
               style="width: 80px" aria-describedby="ui-exploration-depth-help ui-exploration-depth-status">

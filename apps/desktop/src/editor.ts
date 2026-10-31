@@ -1,8 +1,9 @@
+import { t } from './i18n.ts';
 import { Annotation, BezierArrowAnnotation, ArrowAnnotation, Scene, SemanticStyle, PositionHint, DetectedUiElement } from './types.ts';
 
 const STYLE_LABELS: Record<SemanticStyle, string> = {
-  primary: '標準', secondary: '補助', warning: '注意', danger: '危険',
-  info: '情報', step: '手順', pink: '強調',
+  primary: t('標準'), secondary: t('補助'), warning: t('注意'), danger: t('危険'),
+  info: t('情報'), step: t('手順'), pink: t('強調'),
 };
 
 function escapeXml(str: string): string {
@@ -81,6 +82,9 @@ export class AnnotationEditor {
   private cropHistoryStack: CropHistoryState[] = [];
 
   private activeTool: string = 'select';
+  private hoverPreview: Annotation | null = null;
+  private hoverPreviewKey = '';
+  private hoverPreviewRevision = 0;
   private selection = new Set<number>();
   private primary: number | null = null;
   private get selectedIndex() { return this.primary; }
@@ -675,7 +679,7 @@ export class AnnotationEditor {
     if (annotations.length === 0) {
       const empty = document.createElement('div');
       empty.className = 'layer-empty';
-      empty.textContent = 'マークはまだありません';
+      empty.textContent = t('マークはまだありません');
       this.layerListEl.appendChild(empty);
       return;
     }
@@ -696,10 +700,10 @@ export class AnnotationEditor {
         return button;
       };
       const detail = 'text' in annotation && annotation.text ? `: ${annotation.text}` : '';
-      addButton('select', `${index + 1}. ${annotation.type}${detail}`, 'このマークを選択');
-      addButton('visibility', hidden ? '◌' : '◉', hidden ? '表示する' : '非表示にする');
-      addButton('up', '↑', '前面に移動').disabled = index === annotations.length - 1;
-      addButton('down', '↓', '背面に移動').disabled = index === 0;
+      addButton('select', `${index + 1}. ${annotation.type}${detail}`, t('このマークを選択'));
+      addButton('visibility', hidden ? '◌' : '◉', hidden ? t('表示する') : t('非表示にする'));
+      addButton('up', '↑', t('前面に移動')).disabled = index === annotations.length - 1;
+      addButton('down', '↓', t('背面に移動')).disabled = index === 0;
       this.layerListEl.appendChild(row);
     }
   }
@@ -795,6 +799,7 @@ export class AnnotationEditor {
     });
 
     window.addEventListener('keydown', (e) => {
+      if (e.key === 'Alt' || e.key === 'Escape') this.clearSnapGuide();
       if (['INPUT', 'TEXTAREA', 'SELECT'].includes((e.target as HTMLElement).tagName)) {
         return;
       }
@@ -1083,7 +1088,48 @@ export class AnnotationEditor {
   }
 
   public clearSnapGuide(): void {
+    this.setHoverPreview(null);
     this.renderAllSnapTargets();
+  }
+
+  private setHoverPreview(annotation: Annotation | null): void {
+    const key = annotation ? JSON.stringify(annotation) : '';
+    if (key === this.hoverPreviewKey) return;
+    this.hoverPreview = annotation;
+    this.hoverPreviewKey = key;
+    this.hoverPreviewRevision++;
+    this.scheduleRender();
+  }
+
+  private creationSnap(x: number, y: number, bypass: boolean) {
+    if (bypass) return { x, y, snapped: false, element: undefined };
+    const point = this.findSnapPoint(x, y);
+    if (point.snapped) return point;
+    const hit = this.findSnapElementAtPoint(x, y);
+    return hit.snapped && hit.element
+      ? { x: hit.element.x + hit.element.width / 2, y: hit.element.y + hit.element.height / 2,
+          snapped: true, element: hit.element }
+      : point;
+  }
+
+  private createSnappedAnnotation(type: string, snap: { x: number; y: number; snapped: boolean; element?: DetectedUiElement }): Annotation {
+    const annotation = this.createDefaultAnnotation(type, snap.x, snap.y);
+    if (snap.snapped && snap.element && 'target' in annotation) {
+      const el = snap.element;
+      const { width, height } = this.scene.canvas;
+      if (el.width <= 650 && el.height <= 450 && (width < 200 || height < 200 || (
+        el.width < width * 0.65 && el.height < height * 0.65 && el.width * el.height < width * height * 0.40))) {
+        annotation.target = [Math.round(el.x), Math.round(el.y), Math.round(el.width), Math.round(el.height)];
+      }
+    }
+    if (annotation.type === 'arrow') {
+      const { width, height } = this.scene.canvas;
+      let x = snap.x - 80, y = snap.y - 60;
+      if (x < 10) x = Math.min(width - 10, snap.x + 80);
+      if (y < 10) y = Math.min(height - 10, snap.y + 60);
+      annotation.start = [Math.round(x), Math.round(y)];
+    }
+    return annotation;
   }
 
   /**
@@ -1092,6 +1138,7 @@ export class AnnotationEditor {
   private renderAllSnapTargets(snap?: { x: number; y: number; snapped: boolean; element?: DetectedUiElement }) {
     if (!this.snapGuideLayerEl) return;
     if (!this.isSnapEnabled || this.uiElements.length === 0 || this.isCropMode) {
+      this.setHoverPreview(null);
       this.snapGuideLayerEl.innerHTML = '';
       this.activeSnapLayerEl = null;
       return;
@@ -1107,6 +1154,7 @@ export class AnnotationEditor {
     }
 
     if (!snap?.snapped || !snap.element || !this.activeSnapLayerEl) {
+      this.setHoverPreview(null);
       if (this.activeSnapLayerEl) this.activeSnapLayerEl.innerHTML = '';
       return;
     }
@@ -1188,6 +1236,7 @@ export class AnnotationEditor {
 
   private handleMouseDown(e: MouseEvent) {
     if (e.button !== 0 || this.isCropMode) return;
+    this.setHoverPreview(null);
     const target = e.target as SVGElement;
     const coords = this.getCanvasCoords(e);
 
@@ -1224,33 +1273,12 @@ export class AnnotationEditor {
 
     // 2. Creating a new mark
     if (this.activeTool !== 'select') {
-      const snap = e.altKey ? { x: coords.x, y: coords.y, snapped: false } : this.findSnapPoint(coords.x, coords.y);
+      const snap = this.creationSnap(coords.x, coords.y, e.altKey);
       this.isCreating = true;
       this.createStartX = snap.x;
       this.createStartY = snap.y;
 
-      const newAnno = this.createDefaultAnnotation(this.activeTool, snap.x, snap.y);
-      if (snap.snapped && snap.element && 'target' in newAnno) {
-        const cw = this.scene.canvas.width;
-        const ch = this.scene.canvas.height;
-        const el = snap.element;
-        const isNotHuge =
-          el.width <= 650 &&
-          el.height <= 450 &&
-          (cw < 200 || ch < 200 || (
-            el.width < cw * 0.65 &&
-            el.height < ch * 0.65 &&
-            el.width * el.height < cw * ch * 0.40
-          ));
-        if (isNotHuge) {
-          (newAnno as any).target = [
-            Math.round(el.x),
-            Math.round(el.y),
-            Math.round(el.width),
-            Math.round(el.height),
-          ];
-        }
-      }
+      const newAnno = this.createSnappedAnnotation(this.activeTool, snap);
       this.clearSnapGuide();
       if (this.activeTool === 'arrow') {
         (newAnno as ArrowAnnotation).start = [Math.round(snap.x), Math.round(snap.y)];
@@ -1473,8 +1501,10 @@ export class AnnotationEditor {
     const isInsideCanvas = coords.x >= 0 && coords.x <= cw && coords.y >= 0 && coords.y <= ch;
 
     if (this.activeTool !== 'select' && this.isSnapEnabled && isInsideCanvas) {
-      const snap = e.altKey ? { x: coords.x, y: coords.y, snapped: false } : this.findSnapPoint(coords.x, coords.y);
+      const snap = this.creationSnap(coords.x, coords.y, e.altKey);
       this.renderAllSnapTargets(snap);
+      const overCanvas = e.target instanceof Node && this.canvasContainerEl.contains(e.target);
+      this.setHoverPreview(overCanvas && snap.snapped ? this.createSnappedAnnotation(this.activeTool, snap) : null);
     } else {
       this.clearSnapGuide();
     }
@@ -1597,7 +1627,7 @@ export class AnnotationEditor {
         return {
           type: 'callout',
           target: defaultTarget,
-          text: '説明テキスト',
+          text: t('説明テキスト'),
           position: 'auto',
           style: 'primary',
         };
@@ -1605,7 +1635,7 @@ export class AnnotationEditor {
         return {
           type: 'pin',
           target: defaultTarget,
-          text: '注目ポイント',
+          text: t('注目ポイント'),
           position: 'top',
           style: 'primary',
         };
@@ -1613,7 +1643,7 @@ export class AnnotationEditor {
         return {
           type: 'label',
           target: defaultTarget,
-          text: 'ラベル',
+          text: t('ラベル'),
           position: 'top',
           style: 'primary',
         };
@@ -1709,11 +1739,15 @@ export class AnnotationEditor {
       return;
     }
     this.isRendering = true;
+    const previewRevision = this.hoverPreviewRevision;
     try {
       const cleanScene = this.getCleanScene();
+      if (this.hoverPreview) cleanScene.annotations.push(this.cleanAnnotation(this.hoverPreview));
       const svg = await this.renderCallback(JSON.stringify(cleanScene));
-      this.svgLayerEl.innerHTML = svg;
-      this.renderMosaicPreview(cleanScene);
+      if (previewRevision === this.hoverPreviewRevision) {
+        this.svgLayerEl.innerHTML = svg;
+        this.renderMosaicPreview(cleanScene);
+      }
     } catch (e) {
       console.warn('SVG render warning:', e);
     } finally {
@@ -1925,7 +1959,7 @@ export class AnnotationEditor {
           ? position : Math.abs(dx) / Math.max(1, width) > Math.abs(dy) / Math.max(1, height)
             ? (dx > 0 ? 'right' : 'left') : (dy > 0 ? 'bottom' : 'top');
         const title = document.createElementNS('http://www.w3.org/2000/svg', 'title');
-        title.textContent = 'クリックで位置を切替（上 → 右 → 下 → 左）、ドラッグで移動';
+        title.textContent = t('クリックで位置を切替（上 → 右 → 下 → 左）、ドラッグで移動');
         hit.appendChild(title);
       }
       this.handlesLayerEl.appendChild(hit);
@@ -2021,26 +2055,26 @@ export class AnnotationEditor {
     const indices=[...this.selection];
     const annotations=indices.map(i=>this.scene.annotations[i]);
     const types=[...new Set(annotations.map(a=>a.type))];
-    this.inspectorEl.innerHTML='<p>'+indices.length+' 個のマークを選択中</p>';
+    this.inspectorEl.innerHTML='<p>'+indices.length+t(' 個のマークを選択中</p>');
     if (types.length>1) {
-      this.inspectorEl.insertAdjacentHTML('beforeend','<p>同じ種類を選ぶと一括変更できます。</p>');
+      this.inspectorEl.insertAdjacentHTML('beforeend',t('<p>同じ種類を選ぶと一括変更できます。</p>'));
       for(const type of types) {
-        const button=document.createElement('button'); button.className='form-control'; button.textContent=type+' のみ選択';
+        const button=document.createElement('button'); button.className='form-control'; button.textContent=type+t(' のみ選択');
         button.onclick=()=>this.selectMany(indices.filter(i=>this.scene.annotations[i].type===type)); this.inspectorEl.appendChild(button);
       }
       return;
     }
-    const fields: [string,string,string[] | null][]=types[0] === 'mosaic' ? [] : [['style','スタイル',Object.keys(STYLE_LABELS)]];
-    if (!['spotlight', 'divider', 'mosaic'].includes(types[0])) fields.push(['shadow','影',['true','false']]);
-    if (['arrow','bezier-arrow','callout','pin','label'].includes(types[0])) fields.push(['outline','縁取り',['true','false']]);
-    if (['badge','step-arrow'].includes(types[0])) fields.push(['step','手順番号',null]);
-    if (types[0] === 'rounded-rect') fields.push(['rx','角丸の横半径',null],['ry','角丸の縦半径',null]);
-    if (['callout','pin','badge','step-arrow','label','bezier-arrow'].includes(types[0])) fields.push(['position','配置',['auto','top','bottom','left','right','center']]);
-    if (types[0] === 'divider') fields.push(['position','配置',['top','bottom','left','right']]);
-    if (['arrow','bezier-arrow','step-arrow','rect','rounded-rect','circle','divider'].includes(types[0])) fields.push(['stroke_width','線の太さ',null]);
-    if (['arrow','bezier-arrow'].includes(types[0])) fields.push(['line_style','線種',['solid','dashed','dotted']],['arrowhead','矢印の先端',['filled','open']],['arrow_skin','矢印の形',['classic','sketch','bold']],['box','テキスト枠',['true','false']],['text_placement','テキスト位置',['middle','end']]);
-    if (['arrow','bezier-arrow','callout','pin','badge','step-arrow','label'].includes(types[0])) fields.push(['text','テキスト',null],['font_family','フォント',['sans-serif','serif','monospace']]);
-    if (['arrow','bezier-arrow','callout','label'].includes(types[0])) fields.push(['font_size','文字サイズ',null]);
+    const fields: [string,string,string[] | null][]=types[0] === 'mosaic' ? [] : [['style',t('スタイル'),Object.keys(STYLE_LABELS)]];
+    if (!['spotlight', 'divider', 'mosaic'].includes(types[0])) fields.push(['shadow',t('影'),['true','false']]);
+    if (['arrow','bezier-arrow','callout','pin','label'].includes(types[0])) fields.push(['outline',t('縁取り'),['true','false']]);
+    if (['badge','step-arrow'].includes(types[0])) fields.push(['step',t('手順番号'),null]);
+    if (types[0] === 'rounded-rect') fields.push(['rx',t('角丸の横半径'),null],['ry',t('角丸の縦半径'),null]);
+    if (['callout','pin','badge','step-arrow','label','bezier-arrow'].includes(types[0])) fields.push(['position',t('配置'),['auto','top','bottom','left','right','center']]);
+    if (types[0] === 'divider') fields.push(['position',t('配置'),['top','bottom','left','right']]);
+    if (['arrow','bezier-arrow','step-arrow','rect','rounded-rect','circle','divider'].includes(types[0])) fields.push(['stroke_width',t('線の太さ'),null]);
+    if (['arrow','bezier-arrow'].includes(types[0])) fields.push(['line_style',t('線種'),['solid','dashed','dotted']],['arrowhead',t('矢印の先端'),['filled','open']],['arrow_skin',t('矢印の形'),['classic','sketch','bold']],['box',t('テキスト枠'),['true','false']],['text_placement',t('テキスト位置'),['middle','end']]);
+    if (['arrow','bezier-arrow','callout','pin','badge','step-arrow','label'].includes(types[0])) fields.push(['text',t('テキスト'),null],['font_family',t('フォント'),['sans-serif','serif','monospace']]);
+    if (['arrow','bezier-arrow','callout','label'].includes(types[0])) fields.push(['font_size',t('文字サイズ'),null]);
     for (const [key,title,options] of fields) {
       const label=document.createElement('label'); label.textContent=title;
       const input=document.createElement(options ? 'select' : 'input'); input.className='form-control';
@@ -2048,7 +2082,7 @@ export class AnnotationEditor {
       label.htmlFor = input.id;
       const values=annotations.map(a=>(a as any)[key]); const common=values.every(v=>v===values[0]) ? values[0] : undefined;
       if(input instanceof HTMLSelectElement) {
-        input.add(new Option('混在・未設定（変更しない）',''));
+        input.add(new Option(t('混在・未設定（変更しない）'),''));
         for(const value of options!) input.add(new Option(key === 'style' ? STYLE_LABELS[value as SemanticStyle] : value,value));
         input.value=common===undefined ? '' : String(common);
       } else {
@@ -2059,7 +2093,7 @@ export class AnnotationEditor {
           if (key==='font_size') input.max='200';
           input.step=key==='step' ? '1' : '0.5';
         }
-        input.value=common===undefined ? '' : String(common); input.placeholder='混在・未設定';
+        input.value=common===undefined ? '' : String(common); input.placeholder=t('混在・未設定');
       }
       input.addEventListener('change',()=>{
         // Undo or a selection change can blur a pending input while replacing
@@ -2083,14 +2117,14 @@ export class AnnotationEditor {
     this.updateLayerList();
     if (this.selection.size>1) { this.updateBulkInspector(); return; }
     if (this.selectedIndex === null || this.selectedIndex >= this.scene.annotations.length) {
-      this.inspectorEl.innerHTML = '<div class="empty-selection">マークを選択してください</div>';
+      this.inspectorEl.innerHTML = t('<div class="empty-selection">マークを選択してください</div>');
       return;
     }
 
     const idx = this.selectedIndex;
     const anno = this.scene.annotations[idx];
 
-    let html = `
+    let html = t`
       <div class="form-group">
         <label>種類</label>
         <input class="form-control" type="text" value="${anno.type}" disabled />
@@ -2109,7 +2143,7 @@ export class AnnotationEditor {
       </div>
     `;
 
-    html += `
+    html += t(`
       <div class="form-group">
         <label>マークのスタイル</label>
         <div class="stroke-presets">
@@ -2119,13 +2153,13 @@ export class AnnotationEditor {
           <button type="button" class="mark-style-preset" data-mark-style="guide">手順</button>
         </div>
       </div>
-    `;
+    `);
 
     // Stroke width (線の太さ) controls for arrows and shapes
     const supportsStrokeWidth = ['arrow', 'bezier-arrow', 'step-arrow', 'rect', 'rounded-rect', 'circle', 'divider'].includes(anno.type);
     if (supportsStrokeWidth) {
       const currentStroke = (anno as any).stroke_width ?? (anno.type === 'arrow' || anno.type === 'bezier-arrow' ? 4 : 2.5);
-      html += `
+      html += t`
         <div class="form-group">
           <label>線の太さ (Stroke Width): <span id="stroke-width-val">${currentStroke}px</span></label>
           <div class="stroke-presets">
@@ -2143,9 +2177,9 @@ export class AnnotationEditor {
     const isArrowType = anno.type === 'arrow' || anno.type === 'bezier-arrow';
     if (isArrowType) {
       const hasText = (anno as any).has_text !== undefined ? Boolean((anno as any).has_text) : Boolean((anno as any).text && String((anno as any).text).trim().length > 0);
-      const textVal = (anno as any).text ?? 'クリック';
+      const textVal = (anno as any).text ?? t('クリック');
       const arrowSkin = (anno as any).arrow_skin ?? 'classic';
-      html += `
+      html += t`
         <div class="form-group">
           <label>矢印の形</label>
           <div class="arrow-skin-options" role="group" aria-label="矢印の形">
@@ -2199,7 +2233,7 @@ export class AnnotationEditor {
         </div>
       `;
     } else if ('text' in anno || ['callout', 'label', 'pin'].includes(anno.type)) {
-      html += `
+      html += t`
         <div class="form-group">
           <label>テキスト内容</label>
           <textarea id="prop-text" class="form-control">${(anno as any).text ?? ''}</textarea>
@@ -2209,7 +2243,7 @@ export class AnnotationEditor {
 
     // Step number (only for step-arrow and badge)
     if (anno.type === 'badge' || anno.type === 'step-arrow' || ('step' in anno && anno.type !== 'arrow')) {
-      html += `
+      html += t`
         <div class="form-group">
           <label for="prop-step">手順番号</label>
           <input id="prop-step" class="form-control" type="number" min="1" step="1" value="${Number.isSafeInteger(Number((anno as any).step)) && Number((anno as any).step) > 0 ? Number((anno as any).step) : 1}" />
@@ -2224,7 +2258,7 @@ export class AnnotationEditor {
       const currentFamily = (anno as any).font_family ?? 'Arial';
       const currentSize = (anno as any).font_size ?? 14;
 
-      html += `
+      html += t`
         <div class="form-group">
           <label>フォント設定</label>
           <select id="prop-font-family" class="form-control">
@@ -2250,24 +2284,24 @@ export class AnnotationEditor {
     if (hasPositionHint) {
       const pos = (anno as any).position ?? 'auto';
       const isBezierArrow = anno.type === 'bezier-arrow';
-      html += `
+      html += t`
         <div class="form-group">
-          <label for="prop-position">${isBezierArrow ? '曲線に対する文字位置' : anno.type === 'badge' ? 'バッジの配置位置' : '配置位置'}</label>
+          <label for="prop-position">${isBezierArrow ? t('曲線に対する文字位置') : anno.type === 'badge' ? t('バッジの配置位置') : t('配置位置')}</label>
           <select id="prop-position" class="form-control">
-            <option value="auto" ${pos === 'auto' ? 'selected' : ''}>${isBezierArrow ? '曲線の外側（自動）' : '自動'}</option>
-            <option value="top" ${pos === 'top' ? 'selected' : ''}>${isBezierArrow ? '曲線の上' : '上'}</option>
-            <option value="bottom" ${pos === 'bottom' ? 'selected' : ''}>${isBezierArrow ? '曲線の下' : '下'}</option>
+            <option value="auto" ${pos === 'auto' ? 'selected' : ''}>${isBezierArrow ? t('曲線の外側（自動）') : t('自動')}</option>
+            <option value="top" ${pos === 'top' ? 'selected' : ''}>${isBezierArrow ? t('曲線の上') : t('上')}</option>
+            <option value="bottom" ${pos === 'bottom' ? 'selected' : ''}>${isBezierArrow ? t('曲線の下') : t('下')}</option>
             <option value="left" ${pos === 'left' ? 'selected' : ''}>左</option>
             <option value="right" ${pos === 'right' ? 'selected' : ''}>右</option>
-            ${isBezierArrow ? `<option value="center" ${pos === 'center' ? 'selected' : ''}>曲線上（中央）</option>` : ''}
+            ${isBezierArrow ? t`<option value="center" ${pos === 'center' ? 'selected' : ''}>曲線上（中央）</option>` : ''}
           </select>
-          ${isBezierArrow ? '<div class="arrow-placement-hint">文字の置き場所を変えます。矢印の向きや位置は変わりません。</div>' : ''}
+          ${isBezierArrow ? t('<div class="arrow-placement-hint">文字の置き場所を変えます。矢印の向きや位置は変わりません。</div>') : ''}
         </div>
       `;
     }
 
     if (anno.type === 'badge' || anno.type === 'label') {
-      html += `<div class="form-group">
+      html += t`<div class="form-group">
         <label for="prop-badge-x">対象位置 X (px)</label>
         <input id="prop-badge-x" class="form-control" type="number" step="1" value="${anno.target[0]}" />
         <label for="prop-badge-y">対象位置 Y (px)</label>
@@ -2277,7 +2311,7 @@ export class AnnotationEditor {
     }
 
     if (anno.type === 'mosaic') {
-      html += `<div class="form-group">
+      html += t`<div class="form-group">
         <label for="prop-mosaic-strength">モザイクの強さ: <span id="mosaic-strength-value">${anno.block_size ?? 12}</span></label>
         <input id="prop-mosaic-strength" class="form-control" type="range" min="2" max="64" step="1" value="${anno.block_size ?? 12}" />
         <div class="arrow-placement-hint">値を大きくするとモザイクが粗くなります。</div>
@@ -2285,13 +2319,13 @@ export class AnnotationEditor {
     }
 
     // Delete Button
-    html += `
+    html += t(`
       <div style="margin-top: 16px;">
         <button id="btn-delete-anno" class="btn btn-danger btn-sm" style="width: 100%;">
           🗑️ このマークを削除 (Del)
         </button>
       </div>
-    `;
+    `);
 
     this.inspectorEl.innerHTML = html;
     if (anno.type === 'mosaic') {
@@ -2409,7 +2443,7 @@ export class AnnotationEditor {
           textEditContainer.style.display = checked ? 'block' : 'none';
         }
         if (checked && (!(anno as any).text || String((anno as any).text).trim() === '')) {
-          (anno as any).text = 'クリック';
+          (anno as any).text = t('クリック');
           const tEl = document.getElementById('prop-text') as HTMLTextAreaElement | null;
           if (tEl) tEl.value = (anno as any).text;
         }
@@ -2529,6 +2563,7 @@ export class AnnotationEditor {
 
   public startCropMode(): void {
     if (!this.hasImage()) return;
+    this.setHoverPreview(null);
     const cropState = this.getCropState();
     const previousCrop = cropState.baseImageState && (cropState.isAutoCropped || cropState.hasCropHistory)
       ? { x: cropState.autoCropOffset.x, y: cropState.autoCropOffset.y,

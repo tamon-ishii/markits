@@ -198,6 +198,64 @@ fn local_snap_elements(elements: Vec<crate::ui_elements::DetectedUiElement>, cro
     } else { elements }
 }
 
+/// Capture UI data with each recorded frame, rather than scanning the final
+/// window state when the recording is saved. Share the normal capture scan slot.
+pub(crate) fn attach_window_snap_metadata(png: Vec<u8>, window_id: &str) -> Result<Vec<u8>, String> {
+    let _timing = crate::playback_trace::Span::new("snapshot.ui_metadata");
+    if metadata::extract_ui_elements(&png).map_err(|e| e.to_string())?.is_some() {
+        return Ok(png);
+    }
+    let target_json = match metadata::extract_text_chunk(&png, metadata::MARKITS_CAPTURE_TARGET_KEYWORD)
+        .map_err(|e| e.to_string())? {
+        Some(json) => json,
+        None => serde_json::to_string(&markits::semantic_target::window_context(window_id)?)
+            .map_err(|e| e.to_string())?,
+    };
+    let target: crate::ui_elements::DetectedUiElement = serde_json::from_str(&target_json).map_err(|e| e.to_string())?;
+    let mut elements = vec![target.clone()];
+    let slot_timing = crate::playback_trace::Span::new("snapshot.ui_scan_slot");
+    let deadline = Instant::now() + Duration::from_secs(3);
+    let acquired = loop {
+        if DETAIL_SCAN_RUNNING.compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst).is_ok() { break true; }
+        if Instant::now() >= deadline { break false; }
+        std::thread::sleep(Duration::from_millis(20));
+    };
+    drop(slot_timing);
+    if acquired {
+        let guard = DetailScanGuard;
+        let (sender, receiver) = std::sync::mpsc::sync_channel(1);
+        let scan = std::thread::Builder::new().name("recording-ui-scan".into()).spawn(move || {
+            let _guard = guard;
+            let collected = crate::ui_elements::capture_desktop_detailed_elements_for_window(0, 0, &target);
+            let _ = sender.send(collected);
+        });
+        if scan.is_ok() {
+            let _timing = crate::playback_trace::Span::new("snapshot.ui_scan_result");
+            match receiver.recv_timeout(deadline.saturating_duration_since(Instant::now())) {
+                Ok(collected) if !collected.is_empty() => elements = collected,
+                result => eprintln!("Recorded frame UI scan unavailable: {result:?}"),
+            }
+        }
+    } else {
+        eprintln!("Recorded frame UI scan skipped: another UI scan is still running");
+    }
+    embed_snapshot_ui_metadata(&png, &target_json, elements)
+}
+
+fn embed_snapshot_ui_metadata(png: &[u8], target_json: &str, elements: Vec<crate::ui_elements::DetectedUiElement>) -> Result<Vec<u8>, String> {
+    let _timing = crate::playback_trace::Span::new("snapshot.embed_ui_metadata");
+    let target: crate::ui_elements::DetectedUiElement = serde_json::from_str(target_json).map_err(|e| e.to_string())?;
+    if !target.x.is_finite() || !target.y.is_finite() || !target.width.is_finite() || !target.height.is_finite()
+        || target.width <= 0.0 || target.height <= 0.0 {
+        return Err("Invalid snapshot window bounds".into());
+    }
+    let dimensions = image::load_from_memory(png).map_err(|e| e.to_string())?.dimensions();
+    let elements = local_snap_elements(elements, Some((target.x, target.y, target.width, target.height)), dimensions);
+    let png = metadata::embed_text_chunk(png, metadata::MARKITS_CAPTURE_TARGET_KEYWORD, target_json)
+        .map_err(|e| e.to_string())?;
+    metadata::embed_ui_elements(&png, &elements).map_err(|e| e.to_string())
+}
+
 #[tauri::command]
 pub async fn cmd_finish_capture(
     app: tauri::AppHandle,
@@ -940,6 +998,49 @@ pub fn cmd_copy_to_clipboard(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn recorded_frames_keep_individual_snap_maps_through_history_and_export() {
+        let target = crate::ui_elements::DetectedUiElement { role: "window".into(), name: Some("Recorder target".into()),
+            window_id: Some("hwnd:0x123".into()), pid: Some(42), x: -320.0, y: 200.0, width: 320.0, height: 240.0 };
+        let target_json = serde_json::to_string(&target).unwrap();
+        let original = decode_data_url(&create_test_bg_data_url(640, 480)).unwrap();
+        let mut pictures = Vec::new();
+        for (name, x) in [("First frame", -280.0), ("Second frame", -240.0)] {
+            let button = crate::ui_elements::DetectedUiElement { role: "button".into(), name: Some(name.into()),
+                window_id: None, pid: None, x, y: 260.0, width: 80.0, height: 30.0 };
+            let tagged = embed_snapshot_ui_metadata(&original, &target_json, vec![target.clone(), button]).unwrap();
+            // Already tagged snapshots must not rescan a later window state.
+            assert_eq!(attach_window_snap_metadata(tagged.clone(), "not-a-live-window").unwrap(), tagged);
+            pictures.push(tagged);
+        }
+        let recording = crate::playback::SavedRecording { capture_area: None, window_id: "0x123".into(), pid: 42,
+            recording: markits::recording::OperationRecording { version: 1, window: "Recorder target".into(),
+                bounds: [-320, 200, 320, 240], events: vec![] } };
+        let saved = crate::playback::save_snapshots(&recording, pictures).unwrap();
+        struct Cleanup(Vec<String>);
+        impl Drop for Cleanup {
+            fn drop(&mut self) { for id in &self.0 { let _ = history::delete_history_item(id); } }
+        }
+        let _cleanup = Cleanup(saved.iter().map(|frame| frame.history_id.clone().unwrap()).collect());
+        for (index, frame) in saved.iter().enumerate() {
+            let reloaded = history::load_history_item(frame.history_id.as_ref().unwrap()).unwrap();
+            assert_eq!(frame.ui_elements, reloaded.ui_elements);
+            let elements = reloaded.ui_elements.as_ref().unwrap();
+            assert_eq!(elements.len(), 1);
+            assert_eq!(elements[0].name.as_deref(), Some(if index == 0 { "First frame" } else { "Second frame" }));
+            assert_eq!((elements[0].x, elements[0].y, elements[0].width, elements[0].height),
+                (80.0 + index as f64 * 80.0, 120.0, 160.0, 60.0));
+            let bytes = decode_data_url(&reloaded.image_data_url).unwrap();
+            assert_eq!(image::load_from_memory(&bytes).unwrap().to_rgba8(), image::load_from_memory(&original).unwrap().to_rgba8());
+            assert_eq!(metadata::extract_text_chunk(&bytes, metadata::MARKITS_CAPTURE_TARGET_KEYWORD).unwrap().as_deref(), Some(target_json.as_str()));
+            let export = metadata::embed_metadata(&original, Some(r#"{"canvas":{"width":640,"height":480},"annotations":[]}"#), Some(elements), None).unwrap();
+            let export = metadata::embed_text_chunk(&export, metadata::MARKITS_SOURCE_KEYWORD, &reloaded.image_data_url).unwrap();
+            let exported = metadata::load_image_with_metadata(&export).unwrap();
+            assert_eq!(exported.ui_elements.as_ref(), Some(elements));
+            assert_eq!(metadata::extract_ui_elements(&decode_data_url(&exported.image_data_url).unwrap()).unwrap().as_ref(), Some(elements));
+        }
+    }
 
     #[test]
     fn cursor_capture_recovers_scan_target_and_translates_scaled_snap_positions() {

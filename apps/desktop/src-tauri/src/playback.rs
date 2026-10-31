@@ -38,8 +38,15 @@ pub struct SavedRecording {
     pub pid: u32,
 }
 
-#[derive(Default)]
 pub struct PlaybackState(pub AtomicBool, pub AtomicBool, pub Mutex<PlaybackProgress>, pub AtomicBool, pub Mutex<u8>);
+
+impl Default for PlaybackState {
+    fn default() -> Self {
+        Self(AtomicBool::new(false), AtomicBool::new(false),
+            Mutex::new(PlaybackProgress { shorten_waits: true, ..Default::default() }),
+            AtomicBool::new(false), Mutex::new(0))
+    }
+}
 
 #[derive(Default, Clone, Serialize)]
 pub struct PlaybackProgress {
@@ -57,26 +64,61 @@ pub struct PlaybackProgress {
     paused: bool,
     wait_total_ms: u64,
     wait_remaining_ms: u64,
+    shorten_waits: bool,
+    include_cursor: bool,
+    #[serde(skip)]
+    cursor_override: Option<bool>,
+}
+
+#[tauri::command]
+pub fn cmd_playback_cursor_mode(state: tauri::State<'_, PlaybackState>, enabled: bool) -> Result<(), String> {
+    if enabled && !cfg!(target_os = "windows") {
+        return Err(crate::i18n::text("ポインタ付き撮影はWindows専用です", "Pointer capture is available only on Windows").into());
+    }
+    let mut progress = state.2.lock().map_err(|e| e.to_string())?;
+    progress.cursor_override = Some(enabled);
+    progress.include_cursor = enabled;
+    Ok(())
+}
+
+#[tauri::command]
+pub fn cmd_playback_wait_mode(state: tauri::State<'_, PlaybackState>, shorten_waits: bool) -> Result<(), String> {
+    state.2.lock().map_err(|e| e.to_string())?.shorten_waits = shorten_waits;
+    Ok(())
+}
+
+fn operation_wait(configured_ms: u64, shorten_waits: bool, _is_screenshot: bool) -> u64 {
+    if shorten_waits { 0 } else { configured_ms }
+}
+
+fn screenshot_settle_wait(shorten_waits: bool, moved_pointer: bool, action_settled: bool) -> u64 {
+    if shorten_waits && !action_settled { 1000 } else if moved_pointer { 300 } else { 0 }
+}
+
+fn post_operation_wait(event: &RecordedEvent, shorten_waits: bool) -> u64 {
+    if matches!(event, RecordedEvent::Click { .. }) ||
+        (shorten_waits && !matches!(event, RecordedEvent::Screenshot { .. })) { 1000 } else { 0 }
 }
 
 #[tauri::command]
 pub fn cmd_playback_capture_wait(state: tauri::State<'_, PlaybackState>, index: usize, milliseconds: u64) -> Result<(), String> {
     let mut progress = state.2.lock().map_err(|e| e.to_string())?;
-    *progress.waits_ms.get_mut(index).ok_or("操作が見つかりません")? = if index == 0 { 0 } else { milliseconds.min(3_600_000) };
+    *progress.waits_ms.get_mut(index).ok_or(crate::i18n::text("操作が見つかりません", "Operation not found"))? = if index == 0 { 0 } else { milliseconds.min(3_600_000) };
     Ok(())
 }
 
 #[tauri::command]
 pub fn cmd_playback_control(state: tauri::State<'_, PlaybackState>, action: String) -> Result<(), String> {
     let mut mode = state.4.lock().map_err(|e| e.to_string())?;
-    *mode = match action.as_str() { "pause" => 1, "resume" => 0, "step" => 2, _ => return Err("不明な操作です".into()) };
+    *mode = match action.as_str() { "pause" => 1, "resume" => 0, "step" => 2, _ => return Err(crate::i18n::text("不明な操作です", "Unknown operation").into()) };
     Ok(())
 }
 
 fn wait_for_step(app: &tauri::AppHandle) -> Result<(), String> {
+    let _timing = crate::playback_trace::Span::new("control.wait_for_play");
     loop {
         let state = app.state::<PlaybackState>();
-        if state.1.load(Ordering::SeqCst) { return Err("再撮影を停止しました".into()); }
+        if state.1.load(Ordering::SeqCst) { return Err(crate::i18n::text("再撮影を停止しました", "Recapture stopped").into()); }
         let mut mode = state.4.lock().map_err(|e| e.to_string())?;
         let paused = *mode == 1;
         progress(app, |value| value.paused = paused);
@@ -87,7 +129,7 @@ fn wait_for_step(app: &tauri::AppHandle) -> Result<(), String> {
 }
 
 fn wait_for_retry(app: &tauri::AppHandle, error: String) -> Result<(), String> {
-    if app.state::<PlaybackState>().1.load(Ordering::SeqCst) { return Err("再撮影を停止しました".into()); }
+    if app.state::<PlaybackState>().1.load(Ordering::SeqCst) { return Err(crate::i18n::text("再撮影を停止しました", "Recapture stopped").into()); }
     let popup = app.get_webview_window("playback");
     let was_hidden = popup.as_ref().and_then(|w| w.is_visible().ok()) == Some(false);
     if was_hidden { if let Some(w) = &popup { let _ = w.show(); } }
@@ -101,10 +143,11 @@ fn wait_for_retry(app: &tauri::AppHandle, error: String) -> Result<(), String> {
 }
 
 fn activate_for_replay(app: &tauri::AppHandle, window_id: &str) -> Result<(), String> {
+    let _timing = crate::playback_trace::Span::new("window.activate");
     loop {
         match markits::window_capture::activate_window(window_id) {
             Ok(_) => return Ok(()),
-            Err(error) => wait_for_retry(app, format!("対象ウィンドウを操作できません: {error}"))?,
+            Err(error) => wait_for_retry(app, crate::localized!("対象ウィンドウを操作できません: {error}", "Cannot control the target window: {error}"))?,
         }
     }
 }
@@ -135,17 +178,17 @@ fn describe(event: &RecordedEvent) -> String {
     match event {
         RecordedEvent::Click { x, y, target, .. } => target
             .as_ref()
-            .map(|target| format!("クリック【名称で照合】：{}（{}）", target.name, target.role))
-            .unwrap_or_else(|| format!("クリック【座標のみ】：({x:.0}, {y:.0})")),
+            .map(|target| crate::localized!("クリック【名称で照合】：{}（{}）", "Click [match by name]: {} ({})", target.name, target.role))
+            .unwrap_or_else(|| crate::localized!("クリック【座標のみ】：({x:.0}, {y:.0})", "Click [coordinates only]: ({x:.0}, {y:.0})")),
         RecordedEvent::Text { value, .. } => {
-            format!("文字入力：{}", value.chars().take(60).collect::<String>())
+            crate::localized!("文字入力：{}", "Text input: {}", value.chars().take(60).collect::<String>())
         }
-        RecordedEvent::Key { value, .. } => format!("キー：{value}"),
-        RecordedEvent::Scroll { dx, dy, .. } => format!("スクロール：横 {dx} / 縦 {dy}"),
-        RecordedEvent::Screenshot { include_cursor: true, pointer, .. } => format!("ポインタ付き撮影：{}",
+        RecordedEvent::Key { value, .. } => crate::localized!("キー：{value}", "Key: {value}"),
+        RecordedEvent::Scroll { dx, dy, .. } => crate::localized!("スクロール：横 {dx} / 縦 {dy}", "Scroll: horizontal {dx} / vertical {dy}"),
+        RecordedEvent::Screenshot { include_cursor: true, pointer, .. } => crate::localized!("ポインタ付き撮影：{}", "Capture with pointer: {}",
             pointer.as_ref().map(|p| p.target.as_ref().map(|target| target.name.clone())
-                .unwrap_or_else(|| format!("({:.0}, {:.0})", p.x, p.y))).unwrap_or_else(|| "現在のウィンドウ".into())),
-        RecordedEvent::Screenshot { .. } => "キャプチャ：現在のウィンドウを新しく撮影".into(),
+                .unwrap_or_else(|| format!("({:.0}, {:.0})", p.x, p.y))).unwrap_or_else(|| crate::i18n::text("現在のウィンドウ", "Current window").into())),
+        RecordedEvent::Screenshot { .. } => crate::i18n::text("キャプチャ：現在のウィンドウを新しく撮影", "Capture: take a new screenshot of the current window").into(),
     }
 }
 
@@ -155,14 +198,21 @@ fn without_popup<T>(
     app: &tauri::AppHandle,
     action: impl FnOnce() -> Result<T, String>,
 ) -> Result<T, String> {
+    without_popup_restore(app, true, action)
+}
+
+fn without_popup_restore<T>(app: &tauri::AppHandle, restore: bool, action: impl FnOnce() -> Result<T, String>) -> Result<T, String> {
     let popup = app.get_webview_window("playback");
     if let Some(popup) = &popup {
-        popup.hide().map_err(|e| e.to_string())?;
-        thread::sleep(Duration::from_millis(80));
+        if popup.is_visible().unwrap_or(true) {
+            let _timing = crate::playback_trace::Span::new("popup.hide");
+            popup.hide().map_err(|e| e.to_string())?;
+            thread::sleep(Duration::from_millis(80));
+        }
     }
     let result = action();
-    if let Some(popup) = popup {
-        let _ = popup.show();
+    if restore || result.is_err() {
+        if let Some(popup) = popup { let _ = popup.show(); }
     }
     result
 }
@@ -177,9 +227,22 @@ pub fn extract(bytes: &[u8]) -> Result<Option<SavedRecording>, String> {
         if let Some(json) =
             metadata::extract_text_chunk(&bytes, OPERATIONS_KEY).map_err(|e| e.to_string())?
         {
-            return serde_json::from_str(&json)
-                .map(Some)
-                .map_err(|e| e.to_string());
+            let mut saved: SavedRecording = serde_json::from_str(&json).map_err(|e| e.to_string())?;
+            // Repair frames produced before cursor overrides normalized live
+            // screen coordinates back into the original recording space.
+            if let Some(target) = metadata::extract_text_chunk(&bytes, metadata::MARKITS_CAPTURE_TARGET_KEYWORD)
+                .ok().flatten().and_then(|json| serde_json::from_str::<crate::ui_elements::DetectedUiElement>(&json).ok()) {
+                let recorded = saved.recording.bounds.map(|v| v as f64);
+                let current = [target.x, target.y, target.width, target.height];
+                for event in &mut saved.recording.events {
+                    if let RecordedEvent::Screenshot { pointer: Some(pointer), .. } = event {
+                        if !point_in_bounds(pointer.x, pointer.y, recorded) && point_in_bounds(pointer.x, pointer.y, current) {
+                            *pointer = pointer_in_recording_space(pointer.clone(), saved.recording.bounds, current);
+                        }
+                    }
+                }
+            }
+            return Ok(Some(saved));
         }
         let Some(source) = metadata::extract_text_chunk(&bytes, metadata::MARKITS_SOURCE_KEYWORD)
             .map_err(|e| e.to_string())?
@@ -198,8 +261,9 @@ fn decode(url: &str) -> Result<Vec<u8>, String> {
 }
 
 pub fn snapshot(window_id: &str) -> Result<Vec<u8>, String> {
+    let _timing = crate::playback_trace::Span::new("snapshot.total");
     #[cfg(target_os = "windows")]
-    { crate::cursor_capture::snapshot_without_cursor(window_id) }
+    { crate::commands::attach_window_snap_metadata(crate::cursor_capture::snapshot_without_cursor(window_id)?, window_id) }
     #[cfg(not(target_os = "windows"))]
     {
     let pixels = markits::window_capture::read_window_pixels(window_id, None)?;
@@ -207,7 +271,7 @@ pub fn snapshot(window_id: &str) -> Result<Vec<u8>, String> {
     pixels
         .write_to(&mut png, image::ImageFormat::Png)
         .map_err(|e| e.to_string())?;
-    Ok(png.into_inner())
+    crate::commands::attach_window_snap_metadata(png.into_inner(), window_id)
     }
 }
 
@@ -215,6 +279,7 @@ pub fn save_snapshots(
     saved: &SavedRecording,
     pictures: Vec<Vec<u8>>,
 ) -> Result<Vec<metadata::LoadedImageResult>, String> {
+    let _timing = crate::playback_trace::Span::new("history.save_snapshots");
     let group = format!(
         "operations_{}_{}",
         std::process::id(),
@@ -255,7 +320,7 @@ pub async fn cmd_playback(
     image_data_url: String,
     max_wait_ms: Option<u64>,
 ) -> Result<Vec<metadata::LoadedImageResult>, String> {
-    let saved = extract(&decode(&image_data_url)?)?.ok_or("この画像には操作記録がありません")?;
+    let saved = extract(&decode(&image_data_url)?)?.ok_or(crate::i18n::text("この画像には操作記録がありません", "This image has no recorded operations"))?;
     let _ = max_wait_ms;
     let max_wait_ms = u64::MAX;
     app.state::<crate::recording::RecordingState>()
@@ -266,13 +331,20 @@ pub async fn cmd_playback(
         .1
         .store(false, Ordering::SeqCst);
     progress(&app, |value| {
+        let shorten_waits = value.shorten_waits;
+        let cursor_override = value.cursor_override;
+        let recorded_cursor = saved.recording.events.iter().any(|event|
+            matches!(event, RecordedEvent::Screenshot { include_cursor: true, .. }));
         *value = PlaybackProgress {
+            shorten_waits,
+            include_cursor: cursor_override.unwrap_or(recorded_cursor),
+            cursor_override,
             running: true,
             total: saved.recording.events.len(),
             operations: saved.recording.events.iter().map(describe).collect(),
             waits_ms: recorded_waits(&saved.recording.events),
             paused: true,
-            message: "待機時間を確認し、再生を押してください".into(),
+            message: crate::i18n::text("待機時間を確認し、再生を押してください", "Check the delays, then press Play").into(),
             ..Default::default()
         }
     });
@@ -283,7 +355,7 @@ pub async fn cmd_playback(
         "playback",
         tauri::WebviewUrl::App("index.html".into()),
     )
-    .title("MarkIts — 再生・再撮影")
+    .title(crate::i18n::text("MarkIts — 再生・再撮影", "MarkIts — Playback & Recapture"))
     .inner_size(480.0, 760.0)
     .always_on_top(true)
     .focused(false)
@@ -313,15 +385,16 @@ pub async fn cmd_playback(
         match &result {
             Ok(images) => {
                 value.captures = images.len();
-                value.message = format!("完了：新しく {} 枚を撮影しました", images.len());
+                value.message = crate::localized!("完了：新しく {} 枚を撮影しました", "Completed: {} new images captured", images.len());
             }
             Err(error) => {
-                value.message = format!("再生を停止しました（操作 {} / {}）", value.step, value.total);
+                value.message = crate::localized!("再生を停止しました（操作 {} / {}）", "Playback stopped (operation {} / {})", value.step, value.total);
                 value.error = Some(error.clone());
             }
         }
     });
     if let Some(popup) = app.get_webview_window("playback") {
+        let _ = popup.show();
         let _ = popup.set_focusable(true);
     }
     if let Some(main) = app.get_webview_window("main") {
@@ -332,19 +405,23 @@ pub async fn cmd_playback(
 
 fn replay(
     app: &tauri::AppHandle,
-    saved: SavedRecording,
+    mut saved: SavedRecording,
     max_wait_ms: u64,
 ) -> Result<Vec<metadata::LoadedImageResult>, String> {
+    let _trace = crate::playback_trace::Run::start();
+    let _timing = crate::playback_trace::Span::new("replay.total");
     let _depth = markits::ui_elements::capture_depth_scope(128);
+    let ready_timing = crate::playback_trace::Span::new("frontend.ready");
     let ready_started = std::time::Instant::now();
     while !app.state::<PlaybackState>().3.load(Ordering::SeqCst) {
-        if app.state::<PlaybackState>().1.load(Ordering::SeqCst) { return Err("再生を停止しました".into()); }
-        if ready_started.elapsed() > Duration::from_secs(10) { return Err("操作リストの表示が完了しませんでした".into()); }
+        if app.state::<PlaybackState>().1.load(Ordering::SeqCst) { return Err(crate::i18n::text("再生を停止しました", "Playback stopped").into()); }
+        if ready_started.elapsed() > Duration::from_secs(10) { return Err(crate::i18n::text("操作リストの表示が完了しませんでした", "The operation list did not finish loading").into()); }
         thread::sleep(Duration::from_millis(20));
     }
     if saved.recording.version != 1 {
-        return Err("未対応の操作記録バージョンです".into());
+        return Err(crate::i18n::text("未対応の操作記録バージョンです", "Unsupported recording version").into());
     }
+    drop(ready_timing);
     if let Some(area) = saved.capture_area.clone() {
         return replay_fullscreen(app, saved, area, max_wait_ms);
     }
@@ -365,7 +442,7 @@ fn replay(
             .collect();
         if matches.len() != 1 {
             return Err(
-                "対象ウインドウを一意に特定できません。対象を開いてから再生してください".into(),
+                crate::i18n::text("対象ウインドウを一意に特定できません。対象を開いてから再生してください", "Cannot identify a unique target window. Open the target and try again.").into(),
             );
         }
         matches[0]
@@ -382,40 +459,47 @@ fn replay(
     let check = || -> Result<(), String> {
         loop {
             if app.state::<PlaybackState>().1.load(Ordering::SeqCst) {
-                return Err("再生を停止しました".into());
+                return Err(crate::i18n::text("再生を停止しました", "Playback stopped").into());
             }
             match markits::window_capture::is_window_active(&window.id) {
                 Ok(true) => return Ok(()),
-                Ok(false) => wait_for_retry(app, "対象ウィンドウからフォーカスが移動しました。対象を確認して再生してください".into())?,
-                Err(error) => wait_for_retry(app, format!("対象ウィンドウを確認できません: {error}"))?,
+                Ok(false) => wait_for_retry(app, crate::i18n::text("対象ウィンドウからフォーカスが移動しました。対象を確認して再生してください", "The target window lost focus. Check the target, then press Play.").into())?,
+                Err(error) => wait_for_retry(app, crate::localized!("対象ウィンドウを確認できません: {error}", "Cannot check the target window: {error}"))?,
             }
             activate_for_replay(app, &window.id)?;
         }
     };
     let mut pictures = Vec::new();
+    let mut captured_cursor_modes = Vec::new();
+    let action_settled = std::cell::Cell::new(false);
+    let next_is_screenshot = std::cell::Cell::new(false);
     play_events(
         &saved.recording.events,
         max_wait_ms,
         |_, index| {
+            next_is_screenshot.set(matches!(saved.recording.events.get(index + 1), Some(RecordedEvent::Screenshot { .. })));
             wait_for_step(app)?;
             activate_for_replay(app, &window.id)?;
-            let delay = app.state::<PlaybackState>().2.lock().map_err(|e| e.to_string())?.waits_ms[index];
+            let delay = {
+                let state = app.state::<PlaybackState>();
+                let progress = state.2.lock().map_err(|e| e.to_string())?;
+                operation_wait(progress.waits_ms[index], progress.shorten_waits,
+                    matches!(saved.recording.events[index], RecordedEvent::Screenshot { .. }))
+            };
             progress(app, |value| {
                 value.step = index + 1;
                 let event = &saved.recording.events[index];
                 value.target_image = None;
                 value.target_description = match event {
-                    RecordedEvent::Click { x, y, target, .. } => Some(format!(
-                        "対象ウィンドウ：{} ／ 記録時の位置：({x:.0}, {y:.0}) ／ {}",
+                    RecordedEvent::Click { x, y, target, .. } => Some(crate::localized!("対象ウィンドウ：{} ／ 記録時の位置：({x:.0}, {y:.0}) ／ {}", "Target window: {} / Recorded position: ({x:.0}, {y:.0}) / {}",
                         saved.recording.window,
-                        target.as_ref().map(|t| format!("操作対象：{}", t.name))
-                            .unwrap_or_else(|| "記録座標を使用".into())
+                        target.as_ref().map(|t| crate::localized!("操作対象：{}", "Target: {}", t.name))
+                            .unwrap_or_else(|| crate::i18n::text("記録座標を使用", "Use recorded coordinates").into())
                     )),
                     _ => None,
                 };
                 value.message = if delay > 0 {
-                    format!(
-                        "待機中（{:.1} 秒）：{}",
+                    crate::localized!("待機中（{:.1} 秒）：{}", "Waiting ({:.1} s): {}",
                         delay as f64 / 1000.0,
                         describe(&saved.recording.events[index])
                     )
@@ -430,15 +514,18 @@ fn replay(
         },
         |event| {
             progress(app, |value| {
-                value.message = format!("実行中：{}", describe(event))
+                value.message = crate::localized!("実行中：{}", "Running: {}", describe(event))
             });
             match event {
                 RecordedEvent::Screenshot { include_cursor, pointer, .. } => {
+                    let include_cursor = app.state::<PlaybackState>().2.lock().map_err(|e| e.to_string())?
+                        .cursor_override.unwrap_or(*include_cursor);
+                    let shorten_waits = app.state::<PlaybackState>().2.lock().map_err(|e| e.to_string())?.shorten_waits;
                     let point = if let Some(pointer) = pointer {
                         let current = markits::window_capture::list_windows()?.into_iter()
-                            .find(|w| w.id == window.id).ok_or("対象ウィンドウが閉じられました")?;
+                            .find(|w| w.id == window.id).ok_or(crate::i18n::text("対象ウィンドウが閉じられました", "The target window was closed"))?;
                         loop {
-                            let result = if pointer.target.is_some() { markits::semantic_target::observe_window(&window.id) } else { Ok(Vec::new()) }
+                            let result = if pointer.target.is_some() { crate::playback_trace::measure("ui.observe_pointer_target", || markits::semantic_target::observe_window(&window.id)) } else { Ok(Vec::new()) }
                                 .and_then(|elements| hover_point(pointer, &saved.recording, &current, &elements));
                             match result {
                                 Ok(point) => break Some(point),
@@ -450,10 +537,18 @@ fn replay(
                         if let Some((x, y)) = point {
                             check()?;
                             send(rdev::EventType::MouseMove { x, y })?;
-                            for _ in 0..6 { check()?; thread::sleep(Duration::from_millis(50)); }
                         }
-                        if *include_cursor { Ok(crate::cursor_capture::snapshot_window(&window.id)?.raw_png) }
-                        else { snapshot(&window.id) }
+                        wait_before_screenshot(app, shorten_waits, point.is_some(), action_settled.replace(false), &check)?;
+                        wait_for_visual_ready(app, window, None, &check)?;
+                        let recorded_pointer = if include_cursor && pointer.is_none() {
+                            crate::cursor_capture::current_pointer(&window.id)?.map(|pointer|
+                                pointer_in_recording_space(pointer, saved.recording.bounds,
+                                    [window.x as f64, window.y as f64, window.width as f64, window.height as f64]))
+                        } else { pointer.clone() };
+                        let png = if include_cursor { crate::commands::attach_window_snap_metadata(crate::cursor_capture::snapshot_window(&window.id)?.raw_png, &window.id)? }
+                        else { snapshot(&window.id)? };
+                        captured_cursor_modes.push((include_cursor, recorded_pointer));
+                        Ok(png)
                     })?)
                 }
                 RecordedEvent::Click {
@@ -465,12 +560,12 @@ fn replay(
                     let current = markits::window_capture::list_windows()?
                         .into_iter()
                         .find(|w| w.id == window.id)
-                        .ok_or("対象ウインドウが閉じられました")?;
+                        .ok_or(crate::i18n::text("対象ウインドウが閉じられました", "The target window was closed"))?;
                     let point = if let Some(target) = target {
                         let element = loop {
-                            let result = markits::semantic_target::observe_window(&window.id)
+                            let result = crate::playback_trace::measure("ui.observe_click_target", || markits::semantic_target::observe_window(&window.id))
                                 .and_then(|elements| target.resolve(&elements).map(|element| element.map(|e| (e.x + e.width / 2.0, e.y + e.height / 2.0))))
-                                .and_then(|element| element.ok_or_else(|| format!("操作対象が見つかりません: {}", target.name)));
+                                .and_then(|element| element.ok_or_else(|| crate::localized!("操作対象が見つかりません: {}", "Target element not found: {}", target.name)));
                             match result {
                                 Ok(element) => break element,
                                 Err(error) => {
@@ -484,13 +579,33 @@ fn replay(
                         relative_point(*x, *y, &saved.recording, &current)?
                     };
                     check()?;
-                    without_popup(app, || {
+                    without_popup_restore(app, !next_is_screenshot.get(), || {
                         send(rdev::EventType::MouseMove {
                             x: point.0,
                             y: point.1,
                         })?;
+                        let before_navigation = if target.as_ref().is_some_and(|target| target.role == "link") {
+                            Some(crate::cursor_capture::sample_window_frame(&current)?)
+                        } else { None };
                         send(rdev::EventType::ButtonPress(rdev::Button::Left))?;
                         send(rdev::EventType::ButtonRelease(rdev::Button::Left))?;
+                        // Start settling immediately after releasing the click,
+                        // before showing the popup or executing another event.
+                        let click_timing = crate::playback_trace::Span::with_expected("click.after_wait", Some(1000));
+                        progress(app, |value| value.message = crate::i18n::text(
+                            "クリック後の画面切り替えを待っています（1秒）",
+                            "Waiting for the screen transition after clicking (1 second)").into());
+                        countdown(app, post_operation_wait(event, false), &check)?;
+                        drop(click_timing);
+                        if let Some(before) = before_navigation.as_ref() {
+                            loop {
+                                match wait_for_visual_ready(app, &current, Some(before), &check) {
+                                    Ok(()) => break,
+                                    Err(error) => { wait_for_retry(app, error)?; activate_for_replay(app, &window.id)?; }
+                                }
+                            }
+                        }
+                        action_settled.set(true);
                         Ok(())
                     })?;
                 }
@@ -500,7 +615,7 @@ fn replay(
                     let current = markits::window_capture::list_windows()?
                         .into_iter()
                         .find(|w| w.id == window.id)
-                        .ok_or("対象ウインドウが閉じられました")?;
+                        .ok_or(crate::i18n::text("対象ウインドウが閉じられました", "The target window was closed"))?;
                     let (x, y) = relative_point(*x, *y, &saved.recording, &current)?;
                     without_popup(app, || {
                         send(rdev::EventType::MouseMove { x, y })?;
@@ -512,6 +627,12 @@ fn replay(
                     })?;
                 }
             }
+            let shorten_waits = app.state::<PlaybackState>().2.lock().map_err(|e| e.to_string())?.shorten_waits;
+            if !matches!(event, RecordedEvent::Click { .. } | RecordedEvent::Screenshot { .. }) {
+                let wait = post_operation_wait(event, shorten_waits);
+                countdown(app, wait, &check)?;
+                action_settled.set(wait > 0);
+            }
             progress(app, |value| {
                 value.completed.push(describe(event));
                 if matches!(event, RecordedEvent::Screenshot { .. }) {
@@ -521,53 +642,177 @@ fn replay(
             Ok(())
         },
     )?;
+    apply_captured_cursor_modes(&mut saved.recording.events, captured_cursor_modes);
     if pictures.is_empty() {
         check()?;
-        thread::sleep(Duration::from_millis(250));
+        let shorten_waits = app.state::<PlaybackState>().2.lock().map_err(|e| e.to_string())?.shorten_waits;
         progress(app, |value| {
-            value.message = "キャプチャ：現在のウィンドウを新しく撮影".into()
+            value.message = crate::i18n::text("キャプチャ：現在のウィンドウを新しく撮影", "Capture: take a new screenshot of the current window").into()
         });
-        pictures.push(without_popup(app, || snapshot(&window.id))?);
+        pictures.push(without_popup(app, || {
+            countdown(app, if shorten_waits { if action_settled.get() { 0 } else { 1000 } } else { 250 }, &check)?;
+            wait_for_visual_ready(app, window, None, &check)?;
+            let include_cursor = app.state::<PlaybackState>().2.lock().map_err(|e| e.to_string())?.include_cursor;
+            if include_cursor {
+                let pointer = crate::cursor_capture::current_pointer(&window.id)?.map(|pointer|
+                    pointer_in_recording_space(pointer, saved.recording.bounds,
+                        [window.x as f64, window.y as f64, window.width as f64, window.height as f64]));
+                let png = crate::commands::attach_window_snap_metadata(crate::cursor_capture::snapshot_window(&window.id)?.raw_png, &window.id)?;
+                let elapsed_ms = saved.recording.events.last().map(event_elapsed_ms).unwrap_or(0);
+                saved.recording.events.push(RecordedEvent::Screenshot { elapsed_ms, include_cursor: true, pointer });
+                Ok(png)
+            } else { snapshot(&window.id) }
+        })?);
     }
     save_snapshots(&saved, pictures)
 }
 
-fn replay_fullscreen(app: &tauri::AppHandle, saved: SavedRecording, area: crate::cursor_capture::CursorCaptureTarget, max_wait_ms: u64) -> Result<Vec<metadata::LoadedImageResult>, String> {
+fn replay_fullscreen(app: &tauri::AppHandle, mut saved: SavedRecording, area: crate::cursor_capture::CursorCaptureTarget, max_wait_ms: u64) -> Result<Vec<metadata::LoadedImageResult>, String> {
     if !matches!(area, crate::cursor_capture::CursorCaptureTarget::Fullscreen) || saved.recording.events.is_empty() || saved.recording.events.iter().any(|event| !matches!(event, RecordedEvent::Screenshot { .. })) {
-        return Err("全画面の再撮影に不正な操作が含まれています".into());
+        return Err(crate::i18n::text("全画面の再撮影に不正な操作が含まれています", "The fullscreen recording contains invalid operations").into());
     }
     if let Some(main) = app.get_webview_window("main") { main.hide().map_err(|e| e.to_string())?; }
     let check = || -> Result<(), String> {
-        if app.state::<PlaybackState>().1.load(Ordering::SeqCst) { Err("再生を停止しました".into()) } else { Ok(()) }
+        if app.state::<PlaybackState>().1.load(Ordering::SeqCst) { Err(crate::i18n::text("再生を停止しました", "Playback stopped").into()) } else { Ok(()) }
     };
     let mut pictures = Vec::new();
+    let mut captured_cursor_modes = Vec::new();
     play_events(&saved.recording.events, max_wait_ms,
         |_, index| {
             wait_for_step(app)?;
-            let delay = app.state::<PlaybackState>().2.lock().map_err(|e| e.to_string())?.waits_ms[index];
+            let delay = {
+                let state = app.state::<PlaybackState>();
+                let progress = state.2.lock().map_err(|e| e.to_string())?;
+                operation_wait(progress.waits_ms[index], progress.shorten_waits, true)
+            };
             progress(app, |value| { value.step = index + 1; value.message = describe(&saved.recording.events[index]); });
             countdown(app, delay, &check)?;
             check()
         },
         |event| {
-            let RecordedEvent::Screenshot { pointer, .. } = event else { unreachable!() };
+            let RecordedEvent::Screenshot { pointer, include_cursor, .. } = event else { unreachable!() };
+            let include_cursor = app.state::<PlaybackState>().2.lock().map_err(|e| e.to_string())?
+                .cursor_override.unwrap_or(*include_cursor);
+            let shorten_waits = app.state::<PlaybackState>().2.lock().map_err(|e| e.to_string())?.shorten_waits;
             let bounds = area.bounds()?;
             let point = pointer.as_ref().map(|pointer| relative_point(pointer.x, pointer.y, &saved.recording, &bounds)).transpose()?;
             pictures.push(without_popup(app, || {
                 check()?;
                 if let Some((x, y)) = point {
                     send(rdev::EventType::MouseMove { x, y })?;
-                    for _ in 0..6 { check()?; thread::sleep(Duration::from_millis(50)); }
                 }
-                Ok(crate::cursor_capture::snapshot_target(&area)?.raw_png)
+                wait_before_screenshot(app, shorten_waits, point.is_some(), false, &check)?;
+                wait_for_visual_ready(app, &bounds, None, &check)?;
+                let recorded_pointer = if include_cursor && pointer.is_none() {
+                    crate::cursor_capture::pointer_in_bounds(&bounds)?.map(|pointer|
+                        pointer_in_recording_space(pointer, saved.recording.bounds,
+                            [bounds.x as f64, bounds.y as f64, bounds.width as f64, bounds.height as f64]))
+                } else { pointer.clone() };
+                let png = crate::cursor_capture::snapshot_target_with_cursor(&area, include_cursor)?.raw_png;
+                captured_cursor_modes.push((include_cursor, recorded_pointer));
+                Ok(png)
             })?);
             progress(app, |value| { value.completed.push(describe(event)); value.captures += 1; });
             Ok(())
         })?;
+    apply_captured_cursor_modes(&mut saved.recording.events, captured_cursor_modes);
     save_snapshots(&saved, pictures)
 }
 
+fn event_elapsed_ms(event: &RecordedEvent) -> u64 {
+    match event {
+        RecordedEvent::Click { elapsed_ms, .. } | RecordedEvent::Text { elapsed_ms, .. } |
+        RecordedEvent::Key { elapsed_ms, .. } | RecordedEvent::Scroll { elapsed_ms, .. } |
+        RecordedEvent::Screenshot { elapsed_ms, .. } => *elapsed_ms,
+    }
+}
+
+fn point_in_bounds(x: f64, y: f64, [left, top, width, height]: [f64; 4]) -> bool {
+    width > 0.0 && height > 0.0 && x >= left && y >= top && x < left + width && y < top + height
+}
+
+fn pointer_in_recording_space(mut pointer: markits::recording::RecordedPointer, original: [i64; 4], current: [f64; 4]) -> markits::recording::RecordedPointer {
+    if current[2] > 0.0 && current[3] > 0.0 {
+        pointer.x = original[0] as f64 + (pointer.x - current[0]) * original[2] as f64 / current[2];
+        pointer.y = original[1] as f64 + (pointer.y - current[1]) * original[3] as f64 / current[3];
+    }
+    pointer
+}
+
+fn apply_captured_cursor_modes(events: &mut [RecordedEvent], modes: Vec<(bool, Option<markits::recording::RecordedPointer>)>) {
+    let mut modes = modes.into_iter();
+    for event in events {
+        if let RecordedEvent::Screenshot { include_cursor, pointer, .. } = event {
+            if let Some((enabled, position)) = modes.next() { *include_cursor = enabled; *pointer = position; }
+        }
+    }
+}
+
+fn wait_before_screenshot(app: &tauri::AppHandle, shorten_waits: bool, moved_pointer: bool, action_settled: bool, check: &impl Fn() -> Result<(), String>) -> Result<(), String> {
+    let delay = screenshot_settle_wait(shorten_waits, moved_pointer, action_settled);
+    if delay == 1000 {
+        progress(app, |value| value.message = crate::i18n::text(
+            "画面の切り替わりを待っています（撮影前に1秒）",
+            "Waiting for the screen transition (1 second before capture)").into());
+    }
+    countdown(app, delay, check)
+}
+
+fn frame_change_fraction(before: &image::GrayImage, after: &image::GrayImage) -> f64 {
+    if before.dimensions() != after.dimensions() { return 1.0; }
+    let count = before.as_raw().iter().zip(after.as_raw())
+        .filter(|(a, b)| a.abs_diff(**b) > 12).count();
+    count as f64 / before.as_raw().len().max(1) as f64
+}
+
+struct VisualReadiness {
+    baseline: Option<image::GrayImage>,
+    previous: image::GrayImage,
+    changed: bool,
+    stable_since: Duration,
+}
+
+impl VisualReadiness {
+    fn new(baseline: Option<&image::GrayImage>, initial: image::GrayImage, elapsed: Duration) -> Self {
+        let changed = baseline.is_none_or(|before| frame_change_fraction(before, &initial) >= 0.02);
+        Self { baseline: baseline.cloned(), previous: initial, changed, stable_since: elapsed }
+    }
+
+    fn observe(&mut self, frame: image::GrayImage, elapsed: Duration) -> bool {
+        if !self.changed && self.baseline.as_ref().is_some_and(|before| frame_change_fraction(before, &frame) >= 0.02) {
+            self.changed = true;
+            self.stable_since = elapsed;
+        }
+        if frame_change_fraction(&self.previous, &frame) > 0.002 { self.stable_since = elapsed; }
+        self.previous = frame;
+        self.changed && elapsed.saturating_sub(self.stable_since) >= Duration::from_millis(600)
+    }
+}
+
+fn wait_for_visual_ready(app: &tauri::AppHandle, window: &markits::window_capture::WindowInfo,
+    before_navigation: Option<&image::GrayImage>, check: &impl Fn() -> Result<(), String>) -> Result<(), String> {
+    let _timing = crate::playback_trace::Span::new("screen.wait_for_transition");
+    progress(app, |value| value.message = crate::i18n::text(
+        "画面の切り替え・描画の完了を確認しています…",
+        "Waiting for the screen transition and drawing to settle…").into());
+    let started = std::time::Instant::now();
+    let initial = crate::cursor_capture::sample_window_frame(window)?;
+    let mut readiness = VisualReadiness::new(before_navigation, initial, started.elapsed());
+    loop {
+        check()?;
+        if started.elapsed() >= Duration::from_secs(10) {
+            return Err(crate::i18n::text(
+                "画面の切り替え完了を確認できないため撮影を止めました。対象画面を確認して再生してください。",
+                "Capture paused because the screen transition could not be confirmed. Check the target and press Play.").into());
+        }
+        thread::sleep(Duration::from_millis(150));
+        let frame = crate::cursor_capture::sample_window_frame(window)?;
+        if readiness.observe(frame, started.elapsed()) { return Ok(()); }
+    }
+}
+
 fn countdown(app: &tauri::AppHandle, mut remaining: u64, check: &impl Fn() -> Result<(), String>) -> Result<(), String> {
+    let _timing = crate::playback_trace::Span::with_expected("delay.countdown", Some(remaining));
     progress(app, |value| { value.wait_total_ms = remaining; value.wait_remaining_ms = remaining; });
     while remaining > 0 {
         check()?;
@@ -601,6 +846,8 @@ fn play_events(
 ) -> Result<(), String> {
     let mut previous = 0;
     for (index, event) in events.iter().enumerate() {
+        crate::playback_trace::step(index + 1);
+        let _step_timing = crate::playback_trace::Span::new("step.total");
         let elapsed = match event {
             RecordedEvent::Click { elapsed_ms, .. }
             | RecordedEvent::Text { elapsed_ms, .. }
@@ -608,8 +855,8 @@ fn play_events(
             | RecordedEvent::Scroll { elapsed_ms, .. }
             | RecordedEvent::Screenshot { elapsed_ms, .. } => *elapsed_ms,
         };
-        before(elapsed.saturating_sub(previous).min(max_wait_ms), index)?;
-        action(event)?;
+        crate::playback_trace::measure("step.prepare", || before(elapsed.saturating_sub(previous).min(max_wait_ms), index))?;
+        crate::playback_trace::measure("step.execute", || action(event))?;
         previous = elapsed;
     }
     Ok(())
@@ -631,7 +878,7 @@ fn relative_point(
         || x >= (left + width) as f64
         || y >= (top + height) as f64
     {
-        return Err("操作座標が対象ウインドウの外にあります".into());
+        return Err(crate::i18n::text("操作座標が対象ウインドウの外にあります", "The operation coordinates are outside the target window").into());
     }
     Ok((
         window.x as f64 + (x - left as f64) * window.width as f64 / width as f64,
@@ -645,7 +892,7 @@ fn hover_point(pointer: &markits::recording::RecordedPointer, recording: &Operat
         if let Some(element) = target.resolve(elements)? {
             let [x, y] = pointer.target_offset.unwrap_or([0.5, 0.5]);
             if !x.is_finite() || !y.is_finite() || !(0.0..1.0).contains(&x) || !(0.0..1.0).contains(&y) {
-                return Err("記録されたポインタ位置が対象部品の外にあります".into());
+                return Err(crate::i18n::text("記録されたポインタ位置が対象部品の外にあります", "The recorded pointer position is outside the target element").into());
             }
             return Ok((element.x + element.width * x, element.y + element.height * y));
         }
@@ -654,7 +901,7 @@ fn hover_point(pointer: &markits::recording::RecordedPointer, recording: &Operat
 }
 
 fn send(event: rdev::EventType) -> Result<(), String> {
-    rdev::simulate(&event).map_err(|e| format!("入力を再生できません: {e:?}"))?;
+    rdev::simulate(&event).map_err(|e| crate::localized!("入力を再生できません: {e:?}", "Cannot replay input: {e:?}"))?;
     thread::sleep(Duration::from_millis(15));
     Ok(())
 }
@@ -768,7 +1015,7 @@ fn parse_chord(value: &str) -> Result<Vec<rdev::Key>, String> {
                 "7" => Num7,
                 "8" => Num8,
                 "9" => Num9,
-                _ => return Err(format!("未対応のキー操作です: {value}")),
+                _ => return Err(crate::localized!("未対応のキー操作です: {value}", "Unsupported key operation: {value}")),
             })
         })
         .collect()
@@ -777,6 +1024,91 @@ fn parse_chord(value: &str) -> Result<Vec<rdev::Key>, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn cursor_override_positions_are_normalized_and_legacy_frames_are_repaired() {
+        let mut png = Cursor::new(Vec::new());
+        image::RgbaImage::new(16, 16).write_to(&mut png, image::ImageFormat::Png).unwrap();
+        let saved = SavedRecording { capture_area: None, window_id: "0x123".into(), pid: 42,
+            recording: OperationRecording { version: 1, window: "Test".into(), bounds: [1894, 153, 1467, 1019],
+                events: vec![RecordedEvent::Screenshot { elapsed_ms: 0, include_cursor: true,
+                    pointer: Some(markits::recording::RecordedPointer { x: 812.0, y: 447.0, target: None, target_offset: None }) }] } };
+        let bytes = metadata::embed_text_chunk(png.get_ref(), OPERATIONS_KEY, &serde_json::to_string(&saved).unwrap()).unwrap();
+        let bytes = metadata::embed_text_chunk(&bytes, metadata::MARKITS_CAPTURE_TARGET_KEYWORD,
+            r#"{"role":"window","x":345,"y":136,"width":1467,"height":1019}"#).unwrap();
+        let reloaded = extract(&bytes).unwrap().unwrap();
+        let RecordedEvent::Screenshot { pointer: Some(pointer), .. } = &reloaded.recording.events[0] else { panic!("missing pointer") };
+        assert_eq!((pointer.x, pointer.y), (2361.0, 464.0));
+        let current = markits::window_capture::WindowInfo { id: "0x123".into(), title: "Test".into(), x: 345, y: 136, width: 1467, height: 1019 };
+        assert_eq!(relative_point(pointer.x, pointer.y, &reloaded.recording, &current).unwrap(), (812.0, 447.0));
+        let fresh = pointer_in_recording_space(markits::recording::RecordedPointer { x: 812.0, y: 447.0, target: None, target_offset: None },
+            saved.recording.bounds, [345.0, 136.0, 1467.0, 1019.0]);
+        assert_eq!((fresh.x, fresh.y), (2361.0, 464.0));
+    }
+
+    #[test]
+    fn transition_wait_does_not_accept_the_unchanged_old_screen() {
+        let old = image::GrayImage::from_pixel(96, 64, image::Luma([20]));
+        let new = image::GrayImage::from_pixel(96, 64, image::Luma([160]));
+        let mut readiness = VisualReadiness::new(Some(&old), old.clone(), Duration::ZERO);
+        assert!(!readiness.observe(old.clone(), Duration::from_secs(1)));
+        assert!(!readiness.observe(old.clone(), Duration::from_secs(5)));
+        assert!(!readiness.observe(new.clone(), Duration::from_millis(5200)));
+        assert!(!readiness.observe(new.clone(), Duration::from_millis(5500)));
+        assert!(readiness.observe(new, Duration::from_millis(5800)));
+    }
+
+    #[test]
+    fn transition_wait_restarts_its_settle_period_during_animation() {
+        let a = image::GrayImage::from_pixel(96, 64, image::Luma([20]));
+        let b = image::GrayImage::from_pixel(96, 64, image::Luma([80]));
+        let c = image::GrayImage::from_pixel(96, 64, image::Luma([160]));
+        let mut readiness = VisualReadiness::new(None, a, Duration::ZERO);
+        assert!(!readiness.observe(b, Duration::from_millis(500)));
+        assert!(!readiness.observe(c.clone(), Duration::from_millis(900)));
+        assert!(!readiness.observe(c.clone(), Duration::from_millis(1200)));
+        assert!(readiness.observe(c, Duration::from_millis(1500)));
+    }
+
+    #[test]
+    fn recapture_persists_each_actual_cursor_mode_and_keeps_hover_positions() {
+        let original: Vec<RecordedEvent> = serde_json::from_str(r#"[
+            {"kind":"click","elapsed_ms":0,"x":10,"y":20},
+            {"kind":"screenshot","elapsed_ms":100,"include_cursor":true,"pointer":{"x":10,"y":20}},
+            {"kind":"screenshot","elapsed_ms":200,"include_cursor":false}
+        ]"#).unwrap();
+        let mut events = original.clone();
+        let pointer = markits::recording::RecordedPointer { x: 10.0, y: 20.0, target: None, target_offset: None };
+        apply_captured_cursor_modes(&mut events, vec![(false, Some(pointer.clone())), (true, Some(pointer))]);
+        assert!(matches!(events[0], RecordedEvent::Click { elapsed_ms: 0, .. }));
+        assert!(matches!(&events[1], RecordedEvent::Screenshot { include_cursor: false, pointer: Some(p), .. } if p.x == 10.0));
+        assert!(matches!(&events[2], RecordedEvent::Screenshot { include_cursor: true, pointer: Some(p), .. } if p.y == 20.0));
+        let reloaded: Vec<RecordedEvent> = serde_json::from_str(&serde_json::to_string(&events).unwrap()).unwrap();
+        assert!(matches!(reloaded[1], RecordedEvent::Screenshot { include_cursor: false, .. }));
+        assert!(matches!(reloaded[2], RecordedEvent::Screenshot { include_cursor: true, .. }));
+    }
+
+    #[test]
+    fn shortened_mode_waits_one_second_per_operation_without_double_waiting_for_screenshots() {
+        let click = RecordedEvent::Click { elapsed_ms: 0, x: 0.0, y: 0.0, target: None, visual: None };
+        let screenshot = RecordedEvent::Screenshot { elapsed_ms: 1, include_cursor: false, pointer: None };
+        assert_eq!(operation_wait(60_000, true, false), 0);
+        assert_eq!(post_operation_wait(&click, true), 1000);
+        assert_eq!(post_operation_wait(&click, false), 1000);
+        assert_eq!(screenshot_settle_wait(true, false, true), 0);
+        assert_eq!(post_operation_wait(&screenshot, true), 0);
+        assert_eq!(screenshot_settle_wait(true, false, false), 1000);
+        assert_eq!(screenshot_settle_wait(true, true, false), 1000);
+        assert!(PlaybackState::default().2.lock().unwrap().shorten_waits);
+    }
+
+    #[test]
+    fn recorded_mode_keeps_user_delays_and_existing_pointer_settling() {
+        assert_eq!(operation_wait(3456, false, false), 3456);
+        assert_eq!(operation_wait(0, false, false), 0);
+        assert_eq!(screenshot_settle_wait(false, false, false), 0);
+        assert_eq!(screenshot_settle_wait(false, true, false), 300);
+    }
 
     #[test]
     fn pointer_replay_uses_named_control_offset_then_recorded_window_coordinates() {

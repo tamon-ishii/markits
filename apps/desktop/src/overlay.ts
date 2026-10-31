@@ -1,3 +1,4 @@
+import { t } from './i18n.ts';
 import { DetectedUiElement } from './types.ts';
 import { findWindowAt } from './window-hit-test.ts';
 
@@ -70,16 +71,16 @@ export class CaptureOverlay {
 
   private updateCaptureHint() {
     const key = this.captureShortcut.replace('Control', 'Ctrl');
-    document.getElementById('ui-element-action-hint')!.textContent = this.recordingMode ? 'クリックで操作記録を開始' : this.includeCursor ? 'クリックで撮影対象を選択' : 'クリックで撮影';
+    document.getElementById('ui-element-action-hint')!.textContent = this.recordingMode ? t('クリックで操作記録を開始') : this.includeCursor ? t('クリックで撮影対象を選択') : t('クリックで撮影');
     document.querySelector('.overlay-hint')!.textContent = this.recordingMode
-      ? `記録対象をクリックしてください。記録中は${key}キーで撮影できます。`
-      : this.includeCursor ? `対象を選択後、カーソルを動かし、${key}キーをもう一度押して撮影します。`
-      : 'ウィンドウをクリックして撮影。範囲の調整は撮影後にクロップできます。';
+      ? t`記録対象をクリックしてください。記録中は${key}キーで撮影できます。`
+      : this.includeCursor ? t`対象を選択後、カーソルを動かし、${key}キーをもう一度押して撮影します。`
+      : t('ウィンドウをクリックして撮影。範囲の調整は撮影後にクロップできます。');
   }
 
   private recordWindow(win: DetectedUiElement | null) {
     if (!win?.window_id) {
-      alert('このウィンドウを特定できません。別のウィンドウを選択してください。');
+      alert(t('このウィンドウを特定できません。別のウィンドウを選択してください。'));
       return;
     }
     this.hide();
@@ -271,7 +272,7 @@ export class CaptureOverlay {
       this.hoverBoxEl.style.height = `${sh}px`;
       this.hoverBoxEl.style.display = 'block';
 
-      const title = win.name ? `🪟 ${win.name}` : `🪟 ウィンドウ (${Math.round(win.width)} × ${Math.round(win.height)})`;
+      const title = win.name ? `🪟 ${win.name}` : t`🪟 ウィンドウ (${Math.round(win.width)} × ${Math.round(win.height)})`;
       this.hoverBadgeEl.textContent = title;
     } else {
       // No window under cursor: entire screen dimmed

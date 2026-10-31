@@ -1377,6 +1377,10 @@ dialog::backdrop { background: rgba(0, 0, 0, 0.55); }
 .playback-panel li.playback-active { color: #93c5fd; background: #1e3a5f; border-radius: 4px; padding: 6px; font-weight: bold; }
 .playback-panel li.playback-done { color: #86efac; }
 .playback-controls { display: flex; gap: 6px; flex-wrap: wrap; }
+.playback-options { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 8px 14px; margin-top: 10px; }
+.playback-wait-option { display: inline-flex; align-items: center; gap: 6px; color: #a8b8cf; font-size: 11px; cursor: pointer; }
+.playback-wait-option[hidden] { display: none; }
+.playback-wait-option input { width: 13px; height: 13px; accent-color: #719eff; }
 #playback-error { color: #fca5a5; }
 .recording-panel ol { padding-left: 24px; overflow-wrap: anywhere; }
 /* Each recording retains an ordered set of capture points. */
@@ -1425,3 +1429,35 @@ dialog::backdrop { background: rgba(0, 0, 0, 0.55); }
 .playback-panel li.playback-active { background: #20334d; border-color: #678ed0; border-radius: 10px; padding: 12px; font-weight: 400; }
 .playback-panel li.playback-done { opacity: .65; }
 #playback-error:not([hidden]) { background: #492b34; border-radius: 7px; padding: 10px; font-size: 12px; }
+
+/* Operation recorder */
+.recording-panel { padding: 24px; display: flex; flex-direction: column; gap: 16px; background: radial-gradient(ellipse at top right, #243647 0, #141820 55%); }
+.recording-panel > :not(ol) { flex-shrink: 0; }
+.recording-eyebrow { color: #7fc9c1; font-size: 10px; font-weight: 700; letter-spacing: .16em; }
+.recording-heading h2 { font-size: 26px; letter-spacing: -.03em; margin: 6px 0; }
+.recording-heading p { color: #a3afc2; font-size: 12px; line-height: 1.7; }
+.recording-card { background: #1c2934; border: 1px solid #344954; border-radius: 14px; padding: 18px; }
+#record-status { color: #9fe1cb; font-size: 13px; font-weight: 600; line-height: 1.6; margin: 0 0 16px; overflow-wrap: anywhere; }
+#record-status::before { content: ''; display: inline-block; width: 7px; height: 7px; background: #66d7b5; border-radius: 50%; margin-right: 8px; box-shadow: 0 0 0 4px #66d7b518; }
+.recording-panel .record-capture-shortcut { padding: 14px 0; border-top: 1px solid #344954; color: #a7bac9; font-size: 11px; gap: 9px; }
+.recording-panel .record-capture-shortcut kbd { font: 600 16px system-ui; color: #d9edff; background: #283e50; border: 1px solid #58788e; border-bottom-width: 3px; border-radius: 7px; padding: 6px 11px; }
+.recording-capture-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 14px; margin-top: 2px; }
+.recording-panel label { font-size: 12px; color: #bdcbd7; display: inline-flex; align-items: center; gap: 7px; }
+.recording-panel label[hidden] { display: none; }
+.recording-panel input[type=checkbox] { accent-color: #63cdb3; width: 14px; height: 14px; }
+.recording-panel .recording-screenshots { margin-top: 14px; gap: 8px; }
+.recording-panel .recording-screenshots:empty { display: none; }
+.recording-panel .recording-screenshots img { border: 1px solid #42596b; background: #121923; border-radius: 8px; }
+.recording-controls { display: grid; grid-template-columns: 1fr 1.8fr .7fr; gap: 8px; }
+.recording-controls .btn { justify-content: center; padding: 11px 6px; font-size: 12px; white-space: nowrap; }
+#record-cancel { color: #a6b3c3; background: transparent; }
+.recording-options { color: #99aebe; border-bottom: 1px solid #2e3c4a; padding-bottom: 14px; font-size: 11px; }
+.recording-options summary { cursor: pointer; }
+.recording-options label { margin-top: 14px; }
+.recording-options p { margin-top: 12px; font-size: 11px; line-height: 1.9; }
+.recording-options kbd { color: #c4d9e7; }
+.recording-panel h3 { display: flex; justify-content: space-between; align-items: center; font-size: 13px; }
+.recording-panel h3 span { color: #899dad; font-size: 10px; font-weight: 400; }
+.recording-panel ol { flex: 1; min-height: 90px; overflow-y: auto; list-style: none; padding: 0 3px 0 0; }
+.recording-panel ol:empty::before { content: attr(data-empty-label); display: block; padding: 24px 16px; color: #899dad; border: 1px dashed #344954; border-radius: 10px; text-align: center; font-size: 12px; line-height: 1.7; }
+.recording-panel li { padding: 11px 13px; margin-bottom: 8px; background: #1c2530; border: 1px solid #2f3e4d; border-radius: 9px; font-size: 12px; line-height: 1.65; }

@@ -33,12 +33,13 @@ function fixture() {
   const window = { innerWidth: 1200, innerHeight: 800, addEventListener() {} };
   const modules = new Map();
   function load(file) {
+    if (file.endsWith('.json')) return { default: JSON.parse(fs.readFileSync(file, 'utf8')) };
     if (modules.has(file)) return modules.get(file);
     const module = { exports: {} }; modules.set(file, module.exports);
     const code = ts.transpileModule(fs.readFileSync(file, 'utf8'), {
       compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
     }).outputText;
-    vm.runInNewContext(code, { module, exports: module.exports, document, window,
+    vm.runInNewContext(code, { module, exports: module.exports, document, window, navigator: { language: 'ja-JP' },
       require: id => load(path.resolve(path.dirname(file), id)), alert: message => { throw new Error(message); } });
     return module.exports;
   }

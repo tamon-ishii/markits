@@ -1,3 +1,4 @@
+import { t, getLocale, initializeI18n, saveLocale } from './i18n.ts';
 import { AnnotationEditor } from './editor.ts';
 import { addRecordingButton, showRecordingControls } from './recording.ts';
 import { showPlaybackControls } from './playback.ts';
@@ -45,6 +46,8 @@ async function raiseAppWindow() {
 }
 
 document.addEventListener('DOMContentLoaded', async () => {
+  initializeI18n();
+  if (isTauri) await invokeTauri('cmd_set_locale', { locale: getLocale() });
   let windowLabel = 'main';
   if (isTauri) {
     try {
@@ -122,7 +125,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             } catch (error) {
               await invokeTauri('cmd_cancel_capture').catch(() => {});
               const { emitTo } = await import('@tauri-apps/api/event');
-              await emitTo('main', 'capture-error', `操作記録を開始できませんでした: ${error}`);
+              await emitTo('main', 'capture-error', t`操作記録を開始できませんでした: ${error}`);
             }
           },
           async selection => {
@@ -136,7 +139,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             } catch (error) {
               await invokeTauri('cmd_cancel_capture').catch(() => {});
               const { emitTo } = await import('@tauri-apps/api/event');
-              await emitTo('main', 'capture-error', `カーソル付き撮影を準備できませんでした: ${error}`);
+              await emitTo('main', 'capture-error', t`カーソル付き撮影を準備できませんでした: ${error}`);
             }
           },
           captured.recording_mode ?? false,
@@ -162,6 +165,15 @@ document.addEventListener('DOMContentLoaded', async () => {
   const shortcutSelect = document.getElementById('capture-shortcut') as HTMLSelectElement | null;
   const shortcutStatus = document.getElementById('capture-shortcut-status');
   const toolbarSettings = document.getElementById('toolbar-settings') as HTMLDetailsElement;
+  const languageSelect = document.getElementById('app-language') as HTMLSelectElement;
+  languageSelect.addEventListener('change', () => {
+    try {
+      saveLocale(languageSelect.value);
+      window.location.reload();
+    } catch (error) {
+      document.getElementById('app-language-status')!.textContent = String(error);
+    }
+  });
   document.addEventListener('click', event => {
     if (!toolbarSettings.contains(event.target as Node)) toolbarSettings.open = false;
   });
@@ -205,7 +217,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       depthInput.disabled = true;
       try {
         savedDepth = await invokeTauri<number>('cmd_set_ui_exploration_depth', { depth: depthInput.valueAsNumber });
-        if (depthStatus) depthStatus.textContent = '保存しました';
+        if (depthStatus) depthStatus.textContent = t('保存しました');
       } catch (error) {
         if (depthStatus) depthStatus.textContent = String(error);
       } finally {
@@ -222,7 +234,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   const playButton = document.createElement('button');
   playButton.className = 'btn';
   playButton.id = 'btn-playback';
-  playButton.textContent = '▶ 再撮影';
+  playButton.textContent = t('▶ 再撮影');
   playButton.hidden = true;
   editorActions.prepend(playButton);
   window.addEventListener('markits-background-changed', async (event) => {
@@ -252,7 +264,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       }
       await loadHistory();
     } catch (error) {
-      if (String(error) !== '再撮影を停止しました') alert(`再生・再撮影に失敗しました: ${error}`);
+      if (!['再撮影を停止しました', 'Recapture stopped', '再生を停止しました', 'Playback stopped'].includes(String(error))) alert(t`再生・再撮影に失敗しました: ${error}`);
     }
     finally { playbackBusy = false; playButton.disabled = false; }
   };
@@ -357,7 +369,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   };
   window.addEventListener('markits-image-loaded', () => {
     const count = editor.getUiElements().length;
-    setUiStatus(count > 0 ? 'ready' : 'idle', count > 0 ? `UI ${count} 要素` : 'UI 検出なし');
+    setUiStatus(count > 0 ? 'ready' : 'idle', count > 0 ? t`UI ${count} 要素` : t('UI 検出なし'));
   });
 
   // Tool buttons
@@ -379,30 +391,30 @@ document.addEventListener('DOMContentLoaded', async () => {
   const loadHistory = async () => {
     const generation = ++historyLoadGeneration;
     if (!isTauri) {
-      historyGrid.innerHTML = `
+      historyGrid.innerHTML = t(`
         <div class="history-empty">
           <div class="history-empty-icon">🖼️</div>
           <p>ブラウザプレビューでは履歴機能はシミュレーションのみとなります。</p>
         </div>
-      `;
-      historyCount.textContent = '0 件';
+      `);
+      historyCount.textContent = t('0 件');
       return;
     }
 
     try {
-      historyGrid.innerHTML = '<div class="history-loading">履歴を読み込んでいます...</div>';
+      historyGrid.innerHTML = t('<div class="history-loading">履歴を読み込んでいます...</div>');
       const items = await invokeTauri<HistoryItem[]>('cmd_get_history');
       if (generation !== historyLoadGeneration) return;
-      historyCount.textContent = `${items.length} 件`;
+      historyCount.textContent = t`${items.length} 件`;
 
       if (items.length === 0) {
-        historyGrid.innerHTML = `
+        historyGrid.innerHTML = t(`
           <div class="history-empty">
             <div class="history-empty-icon">📸</div>
             <h4>まだキャプチャ履歴がありません</h4>
             <p style="margin-top: 6px; font-size: 13px;">「画面をキャプチャ」ボタンまたは設定した撮影ショートカットで撮影してみましょう。</p>
           </div>
-        `;
+        `);
         return;
       }
 
@@ -412,10 +424,10 @@ document.addEventListener('DOMContentLoaded', async () => {
         let selectedItem = item;
         const card = document.createElement('div');
         card.className = 'history-card';
-        card.innerHTML = `
+        card.innerHTML = t`
           <div class="history-thumb-wrap">
             <img class="history-thumb" src="${item.thumbnail_data_url}" alt="Capture ${item.id}" />
-            ${item.is_cropped ? '<span class="history-crop-badge" style="position: absolute; top: 6px; left: 6px; background: rgba(16, 185, 129, 0.9); color: white; font-size: 11px; font-weight: 600; padding: 2px 6px; border-radius: 4px; pointer-events: none; backdrop-filter: blur(4px); box-shadow: 0 1px 3px rgba(0,0,0,0.3);">✂️ クロップ</span>' : ''}
+            ${item.is_cropped ? t('<span class="history-crop-badge" style="position: absolute; top: 6px; left: 6px; background: rgba(16, 185, 129, 0.9); color: white; font-size: 11px; font-weight: 600; padding: 2px 6px; border-radius: 4px; pointer-events: none; backdrop-filter: blur(4px); box-shadow: 0 1px 3px rgba(0,0,0,0.3);">✂️ クロップ</span>') : ''}
             <div class="history-reedit-overlay">
               <span class="reedit-tag">✏️ 再編集する</span>
             </div>
@@ -423,10 +435,10 @@ document.addEventListener('DOMContentLoaded', async () => {
           <div class="history-info">
             <div class="history-meta">
               <span class="history-date">${item.date_formatted}</span>
-              <span class="history-dims">${item.width} × ${item.height}${item.has_annotations ? ' · 注釈あり' : ''}${item.is_cropped ? ' · クロップ' : ''}</span>
+              <span class="history-dims">${item.width} × ${item.height}${item.has_annotations ? t(' · 注釈あり') : ''}${item.is_cropped ? t(' · クロップ') : ''}</span>
             </div>
             <div class="history-actions">
-              <button class="btn-copy-history" title="画像をクリップボードにコピー">コピー</button>
+              <button class="btn-copy-history" title="画像をクリップボードにコピー" aria-label="画像をクリップボードにコピー"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="8" y="8" width="12" height="13" rx="2"/><path d="M16 8V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h3"/></svg></button>
               <button class="btn-delete-history" title="履歴から削除">🗑️</button>
             </div>
           </div>
@@ -438,9 +450,9 @@ document.addEventListener('DOMContentLoaded', async () => {
           group.forEach((frame, index) => {
             const button = document.createElement('button');
             button.className = 'history-frame';
-            button.title = `スクリーンショット ${index + 1} を編集`;
+            button.title = t`スクリーンショット ${index + 1} を編集`;
             const thumbnail = document.createElement('img');
-            thumbnail.src = frame.thumbnail_data_url; thumbnail.alt = `スクリーンショット ${index + 1}`;
+            thumbnail.src = frame.thumbnail_data_url; thumbnail.alt = t`スクリーンショット ${index + 1}`;
             button.append(thumbnail);
             button.addEventListener('click', () => { selectedItem = frame; });
             thumbWrap.append(button);
@@ -478,9 +490,9 @@ document.addEventListener('DOMContentLoaded', async () => {
             currentHistoryId = selectedItem.id;
             editor.markClean();
             await switchView('editor');
-            if (loaded.ui_elements?.length) setUiStatus('ready', `保存済み UIMap ${loaded.ui_elements.length} 要素 · 位置の再確認を推奨`);
+            if (loaded.ui_elements?.length) setUiStatus('ready', t`保存済み UIMap ${loaded.ui_elements.length} 要素 · 位置の再確認を推奨`);
           } catch (e: any) {
-            alert(`キャプチャの読み込みに失敗しました: ${e?.message ?? e}`);
+            alert(t`キャプチャの読み込みに失敗しました: ${e?.message ?? e}`);
           }
         });
 
@@ -489,7 +501,9 @@ document.addEventListener('DOMContentLoaded', async () => {
           event.stopPropagation();
           if (copyBtn.disabled) return;
           copyBtn.disabled = true;
-          copyBtn.textContent = 'コピー中…';
+          copyBtn.title = t('コピー中…');
+          copyBtn.setAttribute('aria-label', t('コピー中…'));
+          copyBtn.setAttribute('aria-busy', 'true');
           try {
             const loaded = await invokeTauri<LoadedImageResult>('cmd_load_history_item', { id: selectedItem.id });
             await invokeTauri('cmd_copy_to_clipboard', {
@@ -501,12 +515,15 @@ document.addEventListener('DOMContentLoaded', async () => {
               exportWidth: null,
               exportHeight: null,
             });
-            copyBtn.textContent = 'コピー済み';
+            copyBtn.title = t('コピー済み');
+            copyBtn.setAttribute('aria-label', t('コピー済み'));
           } catch (error: any) {
-            copyBtn.textContent = 'コピー';
-            alert(`クリップボードへのコピーに失敗しました: ${error?.message ?? error}`);
+            copyBtn.title = t('画像をクリップボードにコピー');
+            copyBtn.setAttribute('aria-label', t('画像をクリップボードにコピー'));
+            alert(t`クリップボードへのコピーに失敗しました: ${error?.message ?? error}`);
           } finally {
             copyBtn.disabled = false;
+            copyBtn.removeAttribute('aria-busy');
           }
         });
 
@@ -514,12 +531,12 @@ document.addEventListener('DOMContentLoaded', async () => {
         const delBtn = card.querySelector('.btn-delete-history') as HTMLButtonElement;
         delBtn.addEventListener('click', async (e) => {
           e.stopPropagation();
-          if (confirm(`このキャプチャ履歴${group.length > 1 ? `（${group.length} 枚）` : ''}を削除しますか？`)) {
+          if (confirm(t`このキャプチャ履歴${group.length > 1 ? t`（${group.length} 枚）` : ''}を削除しますか？`)) {
             try {
               for (const frame of group) await invokeTauri('cmd_delete_history_item', { id: frame.id });
               await loadHistory();
             } catch (err: any) {
-              alert(`削除エラー: ${err?.message ?? err}`);
+              alert(t`削除エラー: ${err?.message ?? err}`);
             }
           }
         });
@@ -527,7 +544,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         historyGrid.appendChild(card);
       }
     } catch (e: any) {
-      historyGrid.innerHTML = `<div class="history-empty"><p>履歴の読み込みに失敗しました: ${e?.message ?? e}</p></div>`;
+      historyGrid.innerHTML = t`<div class="history-empty"><p>履歴の読み込みに失敗しました: ${e?.message ?? e}</p></div>`;
     }
   };
 
@@ -540,10 +557,10 @@ document.addEventListener('DOMContentLoaded', async () => {
         await invokeTauri('cmd_start_capture');
       } catch (e: any) {
         console.warn('Failed to start capture:', e);
-        alert(`画面キャプチャの起動に失敗しました: ${e?.message ?? e}`);
+        alert(t`画面キャプチャの起動に失敗しました: ${e?.message ?? e}`);
       }
     } else {
-      alert('画面キャプチャはデスクトップ環境で動作します。');
+      alert(t('画面キャプチャはデスクトップ環境で動作します。'));
     }
   };
 
@@ -572,10 +589,10 @@ document.addEventListener('DOMContentLoaded', async () => {
           );
           currentHistoryId = null;
           await switchView('editor');
-          if (result.ui_elements?.length) setUiStatus('ready', `保存済み UIMap ${result.ui_elements.length} 要素 · 位置の再確認を推奨`);
+          if (result.ui_elements?.length) setUiStatus('ready', t`保存済み UIMap ${result.ui_elements.length} 要素 · 位置の再確認を推奨`);
         }
       } catch (e: any) {
-        alert(`ファイル読み込みエラー: ${e?.message ?? e}`);
+        alert(t`ファイル読み込みエラー: ${e?.message ?? e}`);
       }
     } else {
       document.getElementById('file-input')?.click();
@@ -707,7 +724,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     editor.commitPendingCrop();
     const bgDataUrl = editor.getBackgroundImageDataUrl();
     if (!bgDataUrl || bgDataUrl.length === 0) {
-      alert('保存またはコピーする画像がありません。まずはキャプチャまたは画像を開いてください。');
+      alert(t('保存またはコピーする画像がありません。まずはキャプチャまたは画像を開いてください。'));
       return false;
     }
 
@@ -733,7 +750,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (!bgDataUrl || bgDataUrl.length === 0) return;
 
     if (!isTauri) {
-      alert('ブラウザプレビューモードでは保存APIは動作しません。');
+      alert(t('ブラウザプレビューモードでは保存APIは動作しません。'));
       return;
     }
 
@@ -765,11 +782,11 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
         await autoSaveToHistory();
         alert(exportReproduction
-          ? 'PNGと同じ場所に再現用JSONを保存しました。UI名の対象は、新しい画像のUI情報を使って再現できます。'
-          : 'PNGファイルとして保存しました（再編集メタデータ付き）。');
+          ? t('PNGと同じ場所に再現用JSONを保存しました。UI名の対象は、新しい画像のUI情報を使って再現できます。')
+          : t('PNGファイルとして保存しました（再編集メタデータ付き）。'));
       }
     } catch (e: any) {
-      alert(`保存に失敗しました: ${e?.message ?? e}`);
+      alert(t`保存に失敗しました: ${e?.message ?? e}`);
     }
   };
 
@@ -778,7 +795,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (!bgDataUrl || bgDataUrl.length === 0) return;
 
     if (!isTauri) {
-      alert('クリップボードAPIはデスクトップ環境で動作します。');
+      alert(t('クリップボードAPIはデスクトップ環境で動作します。'));
       return;
     }
 
@@ -791,9 +808,9 @@ document.addEventListener('DOMContentLoaded', async () => {
         exportHeight: height,
       });
       await autoSaveToHistory();
-      alert('クリップボードに画像をコピーしました。');
+      alert(t('クリップボードに画像をコピーしました。'));
     } catch (e: any) {
-      alert(`クリップボードへのコピーに失敗しました: ${e?.message ?? e}`);
+      alert(t`クリップボードへのコピーに失敗しました: ${e?.message ?? e}`);
     }
   };
 
@@ -837,19 +854,19 @@ document.addEventListener('DOMContentLoaded', async () => {
       if (event.payload.history_id === currentHistoryId) {
         editor.setUiElements(event.payload.elements);
         const count = editor.getUiElements().length;
-        setUiStatus(count > 0 ? 'ready' : 'idle', count > 0 ? `UI ${count} 要素` : 'UI 要素なし');
+        setUiStatus(count > 0 ? 'ready' : 'idle', count > 0 ? t`UI ${count} 要素` : t('UI 要素なし'));
       }
     });
 
     await listen<{ history_id: string; status: string }>('capture-ui-scan-status', (event) => {
       if (event.payload.history_id !== currentHistoryId) return;
-      if (event.payload.status === 'started') setUiStatus('scanning', 'UI 解析中…');
-      else if (event.payload.status === 'timeout') setUiStatus('failed', 'UI 取得が時間切れ');
-      else if (event.payload.status === 'failed') setUiStatus('failed', 'UI を取得できません');
+      if (event.payload.status === 'started') setUiStatus('scanning', t('UI 解析中…'));
+      else if (event.payload.status === 'timeout') setUiStatus('failed', t('UI 取得が時間切れ'));
+      else if (event.payload.status === 'failed') setUiStatus('failed', t('UI を取得できません'));
     });
 
     await listen<string>('capture-error', (event) => {
-      alert(`画面キャプチャに失敗しました: ${event.payload}`);
+      alert(t`画面キャプチャに失敗しました: ${event.payload}`);
     });
 
     await listen('trigger-capture', async () => {
@@ -869,9 +886,9 @@ document.addEventListener('DOMContentLoaded', async () => {
       if (manualStudioSession) {
         document.body.classList.add('manual-studio-integration');
         const saveButton = document.getElementById('btn-save-file');
-        if (saveButton) { saveButton.textContent = 'Manual Studioへ注釈を返す'; saveButton.title = '注釈付きPNGを保存してManual Studioへ戻ります'; }
+        if (saveButton) { saveButton.textContent = t('Manual Studioへ注釈を返す'); saveButton.title = t('注釈付きPNGを保存してManual Studioへ戻ります'); }
         const doneButton = document.getElementById('btn-done-editing');
-        if (doneButton) { doneButton.textContent = '編集終了（Manual Studioへ返す）'; doneButton.title = '編集内容を保存し、スクリーンショット一覧へ返します'; }
+        if (doneButton) { doneButton.textContent = t('編集終了（Manual Studioへ返す）'); doneButton.title = t('編集内容を保存し、スクリーンショット一覧へ返します'); }
         const image = await invokeTauri<LoadedImageResult>('cmd_load_image', { filePath: manualStudioSession.input });
         editor.setBackgroundImage(image.image_data_url, image.width, image.height, image.annotations_json, image.ui_elements);
         if (image.base_image_data_url && image.base_width && image.base_height) editor.restoreCropState({ dataUrl: image.base_image_data_url, width: image.base_width, height: image.base_height, uiElements: image.base_ui_elements ?? [] }, image.crop_info ?? null);
@@ -880,7 +897,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       } else {
         switchView('home');
       }
-    } catch (error) { switchView('home'); alert(`Manual Studio連携を開始できませんでした: ${error}`); }
+    } catch (error) { switchView('home'); alert(t`Manual Studio連携を開始できませんでした: ${error}`); }
   } else {
     switchView('home');
   }

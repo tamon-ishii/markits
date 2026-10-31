@@ -19,10 +19,10 @@ impl RecordingState {
     pub fn claim_playback(&self, playback: &crate::playback::PlaybackState) -> Result<(), String> {
         let session = self.0.lock().map_err(|e| e.to_string())?;
         if session.is_some() {
-            return Err("記録中は再生できません".into());
+            return Err(crate::i18n::text("記録中は再生できません", "Cannot play back while recording").into());
         }
         if playback.0.swap(true, std::sync::atomic::Ordering::SeqCst) {
-            return Err("操作を再生中です".into());
+            return Err(crate::i18n::text("操作を再生中です", "Playback is in progress").into());
         }
         Ok(())
     }
@@ -39,14 +39,14 @@ struct RecordingSnapshot {
 #[tauri::command]
 pub fn cmd_recording_cursor_mode(state: State<'_, RecordingState>, enabled: Option<bool>) -> Result<bool, String> {
     if let Some(enabled) = enabled {
-        if enabled && !cfg!(target_os = "windows") { return Err("ポインタ付き撮影はWindows専用です".into()); }
+        if enabled && !cfg!(target_os = "windows") { return Err(crate::i18n::text("ポインタ付き撮影はWindows専用です", "Pointer capture is available only on Windows").into()); }
         state.3.store(enabled, Ordering::SeqCst);
     }
     Ok(state.3.load(Ordering::SeqCst))
 }
 
 fn capture_frame(id: &str, include_cursor: bool) -> Result<(Vec<u8>, Option<markits::recording::RecordedPointer>), String> {
-    if include_cursor {
+    let (png, pointer) = if include_cursor {
         let mut pointer = crate::cursor_capture::current_pointer(id)?;
         let captured = crate::cursor_capture::snapshot_window(id)?;
         #[cfg(target_os = "windows")]
@@ -60,15 +60,16 @@ fn capture_frame(id: &str, include_cursor: bool) -> Result<(Vec<u8>, Option<mark
                 }
             }
         }
-        Ok((captured.raw_png, pointer))
-    } else { Ok((crate::playback::snapshot(id)?, None)) }
+        (captured.raw_png, pointer)
+    } else { (crate::playback::snapshot(id)?, None) };
+    Ok((crate::commands::attach_window_snap_metadata(png, id)?, pointer))
 }
 
 pub(crate) fn single_pointer_capture(id: &str) -> Result<String, String> {
     let window = markits::window_capture::list_windows()?.into_iter().find(|w| w.id == id)
-        .ok_or("撮影対象のウィンドウが見つかりません")?;
+        .ok_or(crate::i18n::text("撮影対象のウィンドウが見つかりません", "Capture target window not found"))?;
     let pid = markits::window_capture::window_process_ids()?.into_iter()
-        .find(|(candidate, _)| candidate == id).ok_or("撮影対象のアプリが見つかりません")?.1;
+        .find(|(candidate, _)| candidate == id).ok_or(crate::i18n::text("撮影対象のアプリが見つかりません", "Capture target app not found"))?.1;
     let (png, pointer) = capture_frame(id, true)?;
     let saved = crate::playback::SavedRecording { capture_area: None,
         recording: OperationRecording {
@@ -102,6 +103,8 @@ pub async fn cmd_recording_screenshot(
             std::thread::sleep(std::time::Duration::from_millis(80));
         }
         let include_cursor = shared.3.load(Ordering::SeqCst);
+        let elapsed_ms = shared.2.lock().map_err(|e| e.to_string())?.as_ref()
+            .map_or(0, |start| start.elapsed().as_millis() as u64);
         let captured = capture_frame(session.window_id(), include_cursor);
         if let Some(control) = control { let _ = control.show(); }
         let resume = session.pause(status.paused);
@@ -109,12 +112,6 @@ pub async fn cmd_recording_screenshot(
         resume?;
         let thumbnail =
             crate::history::generate_thumbnail_data_url(&png, 200).map_err(|e| e.to_string())?;
-        let elapsed_ms = shared
-            .2
-            .lock()
-            .map_err(|e| e.to_string())?
-            .as_ref()
-            .map_or(0, |start| start.elapsed().as_millis() as u64);
         shared
             .1
             .lock()
@@ -142,19 +139,19 @@ pub async fn cmd_recording_windows() -> Result<Vec<markits::window_capture::Wind
 
 #[tauri::command]
 pub async fn cmd_recording_start_from_image(app: AppHandle, image_data_url: String) -> Result<(), String> {
-    let payload = image_data_url.split_once(',').ok_or("画像データが不正です")?.1;
+    let payload = image_data_url.split_once(',').ok_or(crate::i18n::text("画像データが不正です", "Invalid image data"))?.1;
     let bytes = base64::engine::general_purpose::STANDARD.decode(payload).map_err(|e| e.to_string())?;
     let (id, pid) = if let Some(saved) = crate::playback::extract(&bytes)? {
         if saved.capture_area.is_some() {
-            return Err("全画面の画像には単一の撮影元ウィンドウがありません。ホームの「操作を記録」から対象を選択してください。".into());
+            return Err(crate::i18n::text("全画面の画像には単一の撮影元ウィンドウがありません。ホームの「操作を記録」から対象を選択してください。", "Fullscreen images have no single source window. Use Record actions on Home to select a target.").into());
         }
         (saved.window_id, Some(saved.pid))
     } else {
         let json = crate::metadata::extract_text_chunk(&bytes, crate::metadata::MARKITS_CAPTURE_TARGET_KEYWORD)
             .map_err(|e| e.to_string())?
-            .ok_or("この画像には撮影元ウィンドウの情報がありません。新しくウィンドウを撮影してから記録してください。")?;
+            .ok_or(crate::i18n::text("この画像には撮影元ウィンドウの情報がありません。新しくウィンドウを撮影してから記録してください。", "This image has no source window information. Capture a window before recording."))?;
         let target: crate::ui_elements::DetectedUiElement = serde_json::from_str(&json).map_err(|e| e.to_string())?;
-        let identity = target.window_id.as_deref().ok_or("撮影元ウィンドウのIDがありません")?;
+        let identity = target.window_id.as_deref().ok_or(crate::i18n::text("撮影元ウィンドウのIDがありません", "The source window ID is missing"))?;
         let native = if let Some(handle) = identity.strip_prefix("hwnd:") {
             let handle = u64::from_str_radix(handle.trim_start_matches("0x"), 16).map_err(|e| e.to_string())?;
             format!("0x{:x}", handle as u32)
@@ -164,7 +161,7 @@ pub async fn cmd_recording_start_from_image(app: AppHandle, image_data_url: Stri
     };
     let owners = markits::window_capture::window_process_ids()?;
     if !owners.iter().any(|(candidate, owner)| candidate == &id && pid.is_none_or(|pid| *owner == pid)) {
-        return Err("撮影元ウィンドウが閉じられています。対象を撮影し直してください。".into());
+        return Err(crate::i18n::text("撮影元ウィンドウが閉じられています。対象を撮影し直してください。", "The source window was closed. Capture the target again.").into());
     }
     cmd_recording_start(app.clone(), app.state(), id, None).await
 }
@@ -189,7 +186,7 @@ pub async fn cmd_recording_start(
             .0
             .load(std::sync::atomic::Ordering::SeqCst)
         {
-            return Err("再生中は記録を開始できません".into());
+            return Err(crate::i18n::text("再生中は記録を開始できません", "Cannot start recording during playback").into());
         }
         shared.1.lock().map_err(|e| e.to_string())?.clear();
         shared.3.store(include_cursor.unwrap_or(false) && cfg!(target_os = "windows"), Ordering::SeqCst);
@@ -210,7 +207,7 @@ pub async fn cmd_recording_start(
         "recording",
         tauri::WebviewUrl::App("index.html".into()),
     )
-    .title("Markits — 操作を記録中")
+    .title(crate::i18n::text("Markits — 操作を記録中", "MarkIts — Recording actions"))
     .inner_size(480.0, 760.0)
     .always_on_top(true)
     .focused(false)
@@ -300,7 +297,7 @@ pub async fn cmd_recording_finish(
         let pid = markits::window_capture::window_process_ids()?
             .into_iter()
             .find(|(id, _)| id == &window_id)
-            .ok_or("対象ウインドウが閉じられました")?
+            .ok_or(crate::i18n::text("対象ウインドウが閉じられました", "The target window was closed"))?
             .1;
         let mut recording = session.finish(exclude)?;
         let mut snapshots = snapshots;

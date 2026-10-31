@@ -5,6 +5,8 @@ pub mod metadata;
 pub mod ui_elements;
 pub mod recording;
 pub mod playback;
+mod i18n;
+pub mod playback_trace;
 mod cursor_capture;
 
 use std::sync::{Mutex, atomic::AtomicU64};
@@ -41,7 +43,7 @@ fn cmd_manual_studio_session(app: AppHandle) -> Result<Option<ManualStudioSessio
 #[tauri::command]
 fn cmd_manual_studio_complete(app: AppHandle) -> Result<(), String> {
     let state = app.state::<AppState>();
-    let session = state.manual_studio.lock().map_err(|e| e.to_string())?.clone().ok_or("Manual Studio連携モードではありません")?;
+    let session = state.manual_studio.lock().map_err(|e| e.to_string())?.clone().ok_or(crate::i18n::text("Manual Studio連携モードではありません", "Not in Manual Studio integration mode"))?;
     std::fs::write(session.completion, "saved").map_err(|e| e.to_string())?;
     app.exit(0);
     Ok(())
@@ -75,7 +77,7 @@ fn cmd_set_ui_exploration_depth(depth: usize) -> Result<usize, String> {
         std::fs::create_dir_all(parent).map_err(|error| error.to_string())?;
     }
     std::fs::write(path, depth.to_string())
-        .map_err(|error| format!("UI探索階層の設定を保存できません: {error}"))?;
+        .map_err(|error| crate::localized!("UI探索階層の設定を保存できません: {error}", "Cannot save UI exploration depth: {error}"))?;
     ui_elements::set_exploration_depth(depth)?;
     Ok(depth)
 }
@@ -135,7 +137,7 @@ fn cmd_set_capture_shortcut(app: AppHandle, shortcut: String) -> Result<Shortcut
             }
             *state.shortcut.lock().map_err(|e| e.to_string())? = previous;
             let _ = register_capture_shortcuts(&app);
-            return Err(format!("ショートカット設定を保存できません: {error}"));
+            return Err(crate::localized!("ショートカット設定を保存できません: {error}", "Cannot save shortcut settings: {error}"));
         }
     }
     cmd_get_capture_shortcut(app)
@@ -188,7 +190,7 @@ fn register_capture_shortcuts(app: &AppHandle) -> Result<(), String> {
                 trigger_capture(&handle);
             }
         })
-        .map_err(|e| format!("ショートカット {key} を登録できません: {e}"));
+        .map_err(|e| crate::localized!("ショートカット {key} を登録できません: {e}", "Cannot register shortcut {key}: {e}"));
     *state.shortcut_warning.lock().map_err(|e| e.to_string())? = result.as_ref().err().cloned();
     result
 }
@@ -224,6 +226,8 @@ pub fn run() {
             playback::cmd_playback,
             playback::cmd_playback_cancel,
             playback::cmd_playback_control,
+            playback::cmd_playback_wait_mode,
+            playback::cmd_playback_cursor_mode,
             playback::cmd_playback_capture_wait,
             playback::cmd_playback_status,
             playback::cmd_playback_ready,
@@ -261,7 +265,8 @@ pub fn run() {
             cmd_get_capture_shortcut,
             cmd_set_capture_shortcut,
             cmd_manual_studio_session,
-            cmd_manual_studio_complete
+            cmd_manual_studio_complete,
+            i18n::cmd_set_locale
         ])
         .on_window_event(|window, event| match event {
             tauri::WindowEvent::CloseRequested { api, .. } => {
@@ -283,7 +288,7 @@ pub fn run() {
                     let session = window.state::<AppState>().manual_studio.lock().ok().and_then(|session| session.clone());
                     if let Some(session) = session {
                         let marker = std::path::Path::new(&session.completion).with_extension("exit");
-                        let _ = std::fs::write(marker, "MarkItsの編集を中止しました。元画像は保持しています。再度編集できます。");
+                        let _ = std::fs::write(marker, crate::i18n::text("MarkItsの編集を中止しました。元画像は保持しています。再度編集できます。", "Editing canceled. The original image is preserved and can be edited again."));
                         window.app_handle().exit(0);
                         return;
                     }

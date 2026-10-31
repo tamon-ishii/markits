@@ -27,16 +27,16 @@ impl CursorCaptureTarget {
             return markits::window_capture::list_windows()?
                 .into_iter()
                 .find(|window| window.id == id)
-                .ok_or_else(|| "撮影対象のウィンドウが閉じられました".into());
+                .ok_or_else(|| crate::i18n::text("撮影対象のウィンドウが閉じられました", "The capture target window was closed").into());
         }
         let screens = screenshots::Screen::all().map_err(|e| e.to_string())?;
         let screen = screens
             .first()
-            .ok_or("撮影する画面が見つかりません")?
+            .ok_or(crate::i18n::text("撮影する画面が見つかりません", "No screen available to capture"))?
             .display_info;
         Ok(markits::window_capture::WindowInfo {
             id: "screen".into(),
-            title: "全画面".into(),
+            title: crate::i18n::text("全画面", "Full screen").into(),
             x: screen.x,
             y: screen.y,
             width: screen.width,
@@ -59,7 +59,7 @@ pub fn cmd_cursor_guide_status(app: tauri::AppHandle) -> Result<CursorGuideStatu
         .lock()
         .map_err(|e| e.to_string())?
         .clone()
-        .ok_or_else(|| "撮影の準備が完了していません".into())
+        .ok_or_else(|| crate::i18n::text("撮影の準備が完了していません", "Capture is not ready").into())
 }
 
 pub fn cancel(app: &tauri::AppHandle) {
@@ -101,7 +101,7 @@ async fn arm_cursor_capture(
     target: CursorCaptureTarget,
 ) -> Result<(), String> {
     if !cfg!(target_os = "windows") {
-        return Err("Windows専用の撮影モードです".into());
+        return Err(crate::i18n::text("Windows専用の撮影モードです", "This capture mode is available only on Windows").into());
     }
     if let Some(overlay) = app.get_webview_window("overlay") {
         overlay
@@ -126,7 +126,7 @@ async fn arm_cursor_capture(
             })
             .await
             .map_err(|e| e.to_string())?
-            .map_err(|e| format!("選択画面のマウス入力を解除できません: {e}"))?;
+            .map_err(|e| crate::localized!("選択画面のマウス入力を解除できません: {e}", "Cannot release mouse input from the selection overlay: {e}"))?;
         }
     }
     crate::register_capture_shortcuts(&app)?;
@@ -149,7 +149,7 @@ async fn arm_cursor_capture(
                 let _ = crate::commands::cmd_cancel_capture(app.clone());
             }
         })
-        .map_err(|e| format!("撮影の取消キーを登録できません: {e}"))?;
+        .map_err(|e| crate::localized!("撮影の取消キーを登録できません: {e}", "Cannot register the capture cancel key: {e}"))?;
     let activate_id = target.window_id().map(str::to_owned);
     *app.state::<crate::AppState>()
         .cursor_target
@@ -177,7 +177,7 @@ async fn arm_cursor_capture(
             "cursor-guide",
             tauri::WebviewUrl::App("index.html".into()),
         )
-        .title("MarkIts — マウスカーソル付き撮影")
+        .title(crate::i18n::text("MarkIts — マウスカーソル付き撮影", "MarkIts — Capture with cursor"))
         .inner_size(440.0, 260.0)
         .resizable(false)
         .always_on_top(true)
@@ -190,7 +190,7 @@ async fn arm_cursor_capture(
             Ok(guide) => guide,
             Err(error) => {
                 cancel(app);
-                return Err(format!("撮影操作ウィンドウを表示できません: {error}"));
+                return Err(crate::localized!("撮影操作ウィンドウを表示できません: {error}", "Cannot show the capture controls: {error}"));
             }
         };
         guide
@@ -302,17 +302,30 @@ pub fn snapshot_window(id: &str) -> Result<crate::capture::CapturedImage, String
     capture_window(id, true)
 }
 
+/// Small cursor-free sample for detecting redraw/transition completion.
+pub(crate) fn sample_window_frame(window: &markits::window_capture::WindowInfo) -> Result<image::GrayImage, String> {
+    #[cfg(target_os = "windows")]
+    let pixels = image::DynamicImage::ImageRgba8(windows::screen_pixels(window)?);
+    #[cfg(not(target_os = "windows"))]
+    let pixels = image::DynamicImage::ImageRgb8(markits::window_capture::read_window_pixels(&window.id, None)?);
+    Ok(pixels.resize_exact(96, 64, image::imageops::FilterType::Triangle).into_luma8())
+}
+
 pub fn snapshot_target(
     target: &CursorCaptureTarget,
 ) -> Result<crate::capture::CapturedImage, String> {
+    snapshot_target_with_cursor(target, true)
+}
+
+pub fn snapshot_target_with_cursor(target: &CursorCaptureTarget, include_cursor: bool) -> Result<crate::capture::CapturedImage, String> {
     if let Some(id) = target.window_id() {
-        return snapshot_window(id);
+        return capture_window(id, include_cursor);
     }
     #[cfg(target_os = "windows")]
     {
         let bounds = target.bounds()?;
         let mut image = windows::screen_pixels(&bounds)?;
-        windows::draw_current_cursor(&mut image, &bounds)?;
+        if include_cursor { windows::draw_current_cursor(&mut image, &bounds)?; }
         let mut captured =
             crate::capture::rgba_to_captured_image(&image).map_err(|e| e.to_string())?;
         captured.ui_elements = crate::ui_elements::filter_elements_for_crop(
@@ -334,7 +347,7 @@ pub fn snapshot_target(
     }
     #[cfg(not(target_os = "windows"))]
     {
-        Err("カーソル付き撮影はWindows専用です".into())
+        Err(crate::i18n::text("カーソル付き撮影はWindows専用です", "Cursor capture is available only on Windows").into())
     }
 }
 
@@ -388,11 +401,11 @@ pub fn current_pointer(id: &str) -> Result<Option<markits::recording::RecordedPo
     let window = markits::window_capture::list_windows()?
         .into_iter()
         .find(|w| w.id == id)
-        .ok_or("撮影対象のウィンドウが見つかりません")?;
+        .ok_or(crate::i18n::text("撮影対象のウィンドウが見つかりません", "Capture target window not found"))?;
     pointer_in_bounds(&window)
 }
 
-fn pointer_in_bounds(
+pub(crate) fn pointer_in_bounds(
     window: &markits::window_capture::WindowInfo,
 ) -> Result<Option<markits::recording::RecordedPointer>, String> {
     #[cfg(target_os = "windows")]
@@ -434,13 +447,13 @@ fn capture_window(id: &str, include_cursor: bool) -> Result<crate::capture::Capt
         let window = markits::window_capture::list_windows()?
             .into_iter()
             .find(|w| w.id == id)
-            .ok_or("撮影対象のウィンドウが見つかりません")?;
-        let mut image = windows::screen_pixels(&window)?;
+            .ok_or(crate::i18n::text("撮影対象のウィンドウが見つかりません", "Capture target window not found"))?;
+        let mut image = crate::playback_trace::measure("snapshot.read_pixels", || windows::screen_pixels(&window))?;
         if include_cursor {
             windows::draw_current_cursor(&mut image, &window)?;
         }
-        let mut captured =
-            crate::capture::rgba_to_captured_image(&image).map_err(|e| e.to_string())?;
+        let mut captured = crate::playback_trace::measure("snapshot.encode_png", ||
+            crate::capture::rgba_to_captured_image(&image)).map_err(|e| e.to_string())?;
         let target = markits::semantic_target::window_context(id)?;
         captured.raw_png = crate::metadata::embed_text_chunk(
             &captured.raw_png,
@@ -458,7 +471,7 @@ fn capture_window(id: &str, include_cursor: bool) -> Result<crate::capture::Capt
     #[cfg(not(target_os = "windows"))]
     {
         let _ = (id, include_cursor);
-        Err("マウスポインタ付き撮影はWindows専用です".into())
+        Err(crate::i18n::text("マウスポインタ付き撮影はWindows専用です", "Pointer capture is available only on Windows").into())
     }
 }
 
