@@ -13,14 +13,20 @@ export function addRecordingButton(invoke: Invoke, currentImage?: () => string |
   button.id = 'btn-record-operations';
   button.className = 'btn';
   button.textContent = '⏺ 操作を記録';
-  document.querySelector('.action-bar')?.prepend(button);
+  const status = document.createElement('span');
+  status.setAttribute('role', 'status');
+  const captureButton = document.getElementById('btn-trigger-capture');
+  if (captureButton) captureButton.after(button, status);
+  else document.querySelector('.action-bar')?.prepend(button, status);
   button.addEventListener('click', async () => {
     button.disabled = true;
+    status.textContent = '記録を準備しています…';
     try {
       const imageDataUrl = currentImage?.();
       if (imageDataUrl) await invoke('cmd_recording_start_from_image', { imageDataUrl });
       else await chooseRecordingWindow(invoke);
-    } catch (error) { alert(String(error)); }
+      status.textContent = '';
+    } catch (error) { status.textContent = String(error); }
     finally { button.disabled = false; }
   });
 }

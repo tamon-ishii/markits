@@ -176,7 +176,7 @@ pub async fn cmd_recording_start(
     window_id: String,
     include_cursor: Option<bool>,
 ) -> Result<(), String> {
-    crate::register_capture_shortcuts(&app)?;
+
     let shared = state.inner().clone();
     let host = app.clone();
     tauri::async_runtime::spawn_blocking(move || {

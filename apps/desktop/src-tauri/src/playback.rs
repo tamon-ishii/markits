@@ -55,12 +55,14 @@ pub struct PlaybackProgress {
     target_image: Option<String>,
     target_description: Option<String>,
     paused: bool,
+    wait_total_ms: u64,
+    wait_remaining_ms: u64,
 }
 
 #[tauri::command]
 pub fn cmd_playback_capture_wait(state: tauri::State<'_, PlaybackState>, index: usize, milliseconds: u64) -> Result<(), String> {
     let mut progress = state.2.lock().map_err(|e| e.to_string())?;
-    *progress.waits_ms.get_mut(index).ok_or("操作が見つかりません")? = milliseconds.min(3_600_000);
+    *progress.waits_ms.get_mut(index).ok_or("操作が見つかりません")? = if index == 0 { 0 } else { milliseconds.min(3_600_000) };
     Ok(())
 }
 
@@ -274,10 +276,9 @@ pub async fn cmd_playback(
             ..Default::default()
         }
     });
-    if let Some(old) = app.get_webview_window("playback") {
-        let _ = old.destroy();
-    }
-    let popup = tauri::WebviewWindowBuilder::new(
+    let popup = if let Some(existing) = app.get_webview_window("playback") {
+        existing.show().map(|_| existing)
+    } else { tauri::WebviewWindowBuilder::new(
         &app,
         "playback",
         tauri::WebviewUrl::App("index.html".into()),
@@ -287,7 +288,7 @@ pub async fn cmd_playback(
     .always_on_top(true)
     .focused(false)
     .focusable(true)
-    .build();
+    .build() };
     if let Err(error) = popup {
         app.state::<PlaybackState>()
             .0
@@ -308,6 +309,7 @@ pub async fn cmd_playback(
         .store(false, Ordering::SeqCst);
     progress(&app, |value| {
         value.running = false;
+        value.wait_remaining_ms = 0;
         match &result {
             Ok(images) => {
                 value.captures = images.len();
@@ -397,7 +399,7 @@ fn replay(
         |_, index| {
             wait_for_step(app)?;
             activate_for_replay(app, &window.id)?;
-            let mut delay = app.state::<PlaybackState>().2.lock().map_err(|e| e.to_string())?.waits_ms[index];
+            let delay = app.state::<PlaybackState>().2.lock().map_err(|e| e.to_string())?.waits_ms[index];
             progress(app, |value| {
                 value.step = index + 1;
                 let event = &saved.recording.events[index];
@@ -421,12 +423,7 @@ fn replay(
                     describe(&saved.recording.events[index])
                 };
             });
-            while delay > 0 {
-                check()?;
-                let chunk = delay.min(50);
-                thread::sleep(Duration::from_millis(chunk));
-                delay -= chunk;
-            }
+            countdown(app, delay, &check)?;
             check()?;
             let _ = app.emit("playback-progress", index + 1);
             Ok(())
@@ -547,9 +544,9 @@ fn replay_fullscreen(app: &tauri::AppHandle, saved: SavedRecording, area: crate:
     play_events(&saved.recording.events, max_wait_ms,
         |_, index| {
             wait_for_step(app)?;
-            let mut delay = app.state::<PlaybackState>().2.lock().map_err(|e| e.to_string())?.waits_ms[index];
+            let delay = app.state::<PlaybackState>().2.lock().map_err(|e| e.to_string())?.waits_ms[index];
             progress(app, |value| { value.step = index + 1; value.message = describe(&saved.recording.events[index]); });
-            while delay > 0 { check()?; let chunk = delay.min(50); thread::sleep(Duration::from_millis(chunk)); delay -= chunk; }
+            countdown(app, delay, &check)?;
             check()
         },
         |event| {
@@ -570,15 +567,27 @@ fn replay_fullscreen(app: &tauri::AppHandle, saved: SavedRecording, area: crate:
     save_snapshots(&saved, pictures)
 }
 
+fn countdown(app: &tauri::AppHandle, mut remaining: u64, check: &impl Fn() -> Result<(), String>) -> Result<(), String> {
+    progress(app, |value| { value.wait_total_ms = remaining; value.wait_remaining_ms = remaining; });
+    while remaining > 0 {
+        check()?;
+        let chunk = remaining.min(50);
+        thread::sleep(Duration::from_millis(chunk));
+        remaining -= chunk;
+        progress(app, |value| value.wait_remaining_ms = remaining);
+    }
+    Ok(())
+}
+
 fn recorded_waits(events: &[RecordedEvent]) -> Vec<u64> {
     let mut previous = 0;
-    events.iter().map(|event| {
+    events.iter().enumerate().map(|(index, event)| {
         let elapsed = match event {
             RecordedEvent::Click { elapsed_ms, .. } | RecordedEvent::Text { elapsed_ms, .. }
             | RecordedEvent::Key { elapsed_ms, .. } | RecordedEvent::Scroll { elapsed_ms, .. }
             | RecordedEvent::Screenshot { elapsed_ms, .. } => *elapsed_ms,
         };
-        let wait = elapsed.saturating_sub(previous);
+        let wait = if index == 0 { 0 } else { elapsed.saturating_sub(previous) };
         previous = elapsed;
         wait
     }).collect()

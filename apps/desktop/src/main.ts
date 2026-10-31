@@ -235,8 +235,10 @@ document.addEventListener('DOMContentLoaded', async () => {
       if (generation === backgroundGeneration) playButton.hidden = !available;
     } catch (error) { console.warn('Could not read operation recording', error); }
   });
+  let replaySource = '';
   const replayCapture = async (imageDataUrl: string) => {
     if (playbackBusy) return;
+    replaySource = imageDataUrl;
     playbackBusy = true; playButton.disabled = true;
     try {
       await autoSaveToHistory();
@@ -249,10 +251,18 @@ document.addEventListener('DOMContentLoaded', async () => {
         await switchView('editor');
       }
       await loadHistory();
-    } catch (error) { alert(`再生・再撮影に失敗しました: ${error}`); }
+    } catch (error) {
+      if (String(error) !== '再撮影を停止しました') alert(`再生・再撮影に失敗しました: ${error}`);
+    }
     finally { playbackBusy = false; playButton.disabled = false; }
   };
   playButton.onclick = () => { void replayCapture(playbackImageDataUrl); };
+  if (isTauri) {
+    const { listen } = await import('@tauri-apps/api/event');
+    await listen('restart-playback', () => {
+      if (replaySource) void replayCapture(replaySource);
+    });
+  }
 
   const autoSaveToHistory = async () => {
     if (!isTauri || !editor.hasImage()) return;
@@ -435,20 +445,6 @@ document.addEventListener('DOMContentLoaded', async () => {
             button.addEventListener('click', () => { selectedItem = frame; });
             thumbWrap.append(button);
           });
-          const replay = document.createElement('button');
-          replay.className = 'btn history-play';
-          replay.textContent = `▶ 再撮影（${group.length} 枚）`;
-          replay.addEventListener('click', async (event) => {
-            event.stopPropagation();
-            if (playbackBusy) return;
-            replay.disabled = true;
-            try {
-              const loaded = await invokeTauri<LoadedImageResult>('cmd_load_history_item', { id: item.id });
-              await replayCapture(loaded.image_data_url);
-            } catch (error) { alert(`操作記録を読み込めませんでした: ${error}`); }
-            finally { replay.disabled = false; }
-          });
-          card.append(replay);
         }
 
         // Card Click -> Open and re-edit in Editor
