@@ -308,6 +308,9 @@ body.editor-view-active #toolbar-settings {
 
 .canvas-container {
   position: relative;
+  /* Image coordinates must not shrink when the uncropped image is wider than
+     the viewport. The image and absolute crop/annotation layers share this box. */
+  flex-shrink: 0;
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.6);
   outline: 1px solid var(--border-color);
   background: white;

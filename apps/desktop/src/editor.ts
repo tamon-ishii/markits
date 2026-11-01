@@ -66,6 +66,7 @@ export class AnnotationEditor {
   private initialCropRect: { x: number; y: number; width: number; height: number } | null = null;
   private cropPresetSelectEl: HTMLSelectElement | null = null;
   private cropPresetRatio: number | null = null;
+  private cropViewScale: { x: number; y: number } | null = null;
 
   private scene: Scene = {
     canvas: { width: 800, height: 600 },
@@ -182,7 +183,7 @@ export class AnnotationEditor {
     // Refit when the available editor area changes, including window resizing.
     // The fit calculation caps automatic enlargement at 100%.
     const viewportResizeObserver = new ResizeObserver(() => {
-      this.zoomFit();
+      if (!this.isCropMode) this.zoomFit();
     });
     viewportResizeObserver.observe(this.viewportEl, { box: 'border-box' });
 
@@ -239,6 +240,8 @@ export class AnnotationEditor {
     uiElements?: DetectedUiElement[] | null,
     isInternalCrop: boolean = false
   ) {
+    this.cropViewScale = null;
+    this.canvasContainerEl.style.translate = '';
     this.bgImgEl.src = dataUrl;
     window.dispatchEvent(new CustomEvent('markits-background-changed', {
       detail: isInternalCrop ? this.baseImageState?.dataUrl ?? dataUrl : dataUrl,
@@ -2571,8 +2574,15 @@ export class AnnotationEditor {
       ? { x: cropState.autoCropOffset.x, y: cropState.autoCropOffset.y,
           width: this.scene.canvas.width, height: this.scene.canvas.height }
       : null;
+    const previousView = previousCrop ? this.canvasContainerEl.getBoundingClientRect() : null;
+    const previousScale = previousCrop ? {
+      x: this.outputWidth / this.scene.canvas.width,
+      y: this.outputHeight / this.scene.canvas.height,
+    } : null;
     this.revertCrop();
     this.isCropMode = true;
+    this.cropViewScale = previousScale;
+    this.setZoom(this.zoomLevel);
     this.selectedIndex = null;
     this.updateHandles();
     this.updateInspector();
@@ -2590,6 +2600,15 @@ export class AnnotationEditor {
       this.editorCropOverlayEl.style.display = 'block';
     }
 
+    if (previousCrop && previousView) {
+      // Restoring the full image changes flex centering and scroll bounds. Anchor
+      // the old crop in screen coordinates; scrolling alone can be clamped to 0.
+      const restoredView = this.canvasContainerEl.getBoundingClientRect();
+      const sx = restoredView.width / cw;
+      const sy = restoredView.height / ch;
+      this.canvasContainerEl.style.translate = `${previousView.left - restoredView.left - previousCrop.x * sx}px ${previousView.top - restoredView.top - previousCrop.y * sy}px`;
+    }
+
     const btnCrop = document.getElementById('btn-crop');
     if (btnCrop) btnCrop.classList.add('active');
   }
@@ -2599,6 +2618,9 @@ export class AnnotationEditor {
     this.isDraggingCrop = false;
     this.activeCropHandle = null;
     this.cropRect = null;
+    this.cropViewScale = null;
+    this.canvasContainerEl.style.translate = '';
+    this.setZoom(this.zoomLevel);
     if (this.cropPresetSelectEl) {
       this.cropPresetSelectEl.value = 'free';
     }
@@ -3216,6 +3238,7 @@ export class AnnotationEditor {
         || width > 10000 || height > 10000) return;
     this.outputWidth = width;
     this.outputHeight = height;
+    this.cropViewScale = null;
     this.setZoom(this.zoomLevel);
     this.zoomFit();
   }
@@ -3226,8 +3249,8 @@ export class AnnotationEditor {
 
   public setZoom(level: number): void {
     this.zoomLevel = Math.max(0.2, Math.min(5.0, Math.round(level * 100) / 100));
-    const sx = this.zoomLevel * this.outputWidth / Math.max(1, this.scene.canvas.width);
-    const sy = this.zoomLevel * this.outputHeight / Math.max(1, this.scene.canvas.height);
+    const sx = this.zoomLevel * (this.cropViewScale?.x ?? this.outputWidth / Math.max(1, this.scene.canvas.width));
+    const sy = this.zoomLevel * (this.cropViewScale?.y ?? this.outputHeight / Math.max(1, this.scene.canvas.height));
     this.canvasContainerEl.style.setProperty('--crop-ui-inverse-x', `${1 / sx}`);
     this.canvasContainerEl.style.setProperty('--crop-ui-inverse-y', `${1 / sy}`);
     this.canvasContainerEl.style.transform = `scale(${sx}, ${sy})`;
