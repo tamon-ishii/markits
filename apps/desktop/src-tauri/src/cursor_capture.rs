@@ -270,7 +270,14 @@ pub async fn capture_pending(app: &tauri::AppHandle) -> Result<bool, String> {
             return Ok(true);
         }
         match capture {
-            Ok(()) => cancel(app),
+            Ok(()) => {
+                cancel(app);
+                // Hiding the guide can change foreground focus on Windows.
+                // Raise the editor after the cursor-capture controls are gone.
+                if let Some(main) = app.get_webview_window("main") {
+                    crate::commands::force_raise_window(&main);
+                }
+            },
             Err(error) => {
                 *state.cursor_target.lock().map_err(|e| e.to_string())? = Some(id);
                 let status = {
