@@ -60,6 +60,7 @@ pub async fn cmd_select_recording_window(app: tauri::AppHandle) -> Result<(), St
 }
 
 async fn start_window_selection(app: tauri::AppHandle, recording_mode: bool) -> Result<(), String> {
+    app.state::<crate::AppState>().capture_ready_for_editing.store(false, Ordering::SeqCst);
     crate::cursor_capture::cancel(&app);
     let generation = app
         .state::<crate::AppState>()
@@ -372,6 +373,9 @@ pub async fn cmd_finish_capture(
     let scan_dimensions = (loaded_res.width, loaded_res.height);
 
     // Instantly notify frontend and raise main window! Zero lag!
+    // Finishing capture enters editing; late guide/overlay cleanup is no
+    // longer cancellation of the capture-only integration process.
+    app.state::<crate::AppState>().capture_ready_for_editing.store(true, Ordering::SeqCst);
     if let Some(main_win) = app.get_webview_window("main") {
         force_raise_window(&main_win);
         main_win
@@ -538,6 +542,10 @@ pub fn cmd_cancel_capture(app: tauri::AppHandle) -> Result<(), String> {
     }
     if let Some(overlay_win) = app.get_webview_window("overlay") {
         let _ = overlay_win.hide();
+    }
+    if app.state::<crate::AppState>().exit_on_capture_cancel()? {
+        app.exit(0);
+        return Ok(());
     }
     if let Some(main_win) = app.get_webview_window("main") {
         force_raise_window(&main_win);
@@ -779,6 +787,12 @@ pub fn cmd_render_svg(scene_json: String) -> Result<String, String> {
     markits::render_from_json(&scene_json).map_err(|e| e.to_string())
 }
 
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EditingMetadata {
+    pub base_ui_elements: Option<Vec<crate::ui_elements::DetectedUiElement>>,
+}
+
 #[tauri::command]
 pub fn cmd_compose_and_save(
     background_data_url: String,
@@ -790,6 +804,7 @@ pub fn cmd_compose_and_save(
     reproduction_json: bool,
     base_background_data_url: Option<String>,
     crop_info: Option<metadata::CropInfo>,
+    editing_metadata: Option<EditingMetadata>,
 ) -> Result<(), String> {
     let output_format = crate::image_export::format_for_path(&save_path)?;
     let prefix = "data:";
@@ -832,10 +847,32 @@ pub fn cmd_compose_and_save(
         composed_png
     };
 
-    // File exports contain only the composed, cropped pixels. Editable originals,
-    // crop state, UIMap and recordings stay in the internal history instead.
-    let _ = (base_background_data_url, crop_info);
-    let final_png = markits::image_metadata::strip_markits_metadata(&final_png_bytes)?;
+    // Ordinary exports are flattened. Munin integration explicitly requests a
+    // self-contained editable PNG, including the unpainted/crop backgrounds.
+    let mut final_png = markits::image_metadata::strip_markits_metadata(&final_png_bytes)?;
+    if let Some(editing) = editing_metadata {
+        final_png = metadata::embed_metadata(&final_png, Some(&scene_json), ui_elements.as_deref(), crop_info.as_ref())
+            .map_err(|e| e.to_string())?;
+        let source = markits::image_metadata::strip_markits_metadata(&bg_bytes)?;
+        final_png = metadata::embed_text_chunk(&final_png, metadata::MARKITS_SOURCE_KEYWORD,
+            &format!("data:image/png;base64,{}", base64::engine::general_purpose::STANDARD.encode(source)))
+            .map_err(|e| e.to_string())?;
+        if let Some(base_url) = base_background_data_url.filter(|_| crop_info.is_some()) {
+            let original_base = decode_data_url(&base_url)?;
+            let mut base = markits::image_metadata::strip_markits_metadata(&original_base)?;
+            let base_ui = editing.base_ui_elements.or_else(|| metadata::extract_ui_elements(&original_base).ok().flatten());
+            if let Some(elements) = base_ui {
+                base = metadata::embed_ui_elements(&base, &elements).map_err(|e| e.to_string())?;
+            }
+            base = crate::playback::copy_metadata(&base, &original_base).map_err(|e| e.to_string())?;
+            final_png = crate::playback::copy_metadata(&final_png, &original_base).map_err(|e| e.to_string())?;
+            final_png = metadata::embed_text_chunk(&final_png, "markits:base_image",
+                &format!("data:image/png;base64,{}", base64::engine::general_purpose::STANDARD.encode(base)))
+                .map_err(|e| e.to_string())?;
+        }
+        // Prefer current capture/playback identity over an older crop base.
+        final_png = crate::playback::copy_metadata(&final_png, &bg_bytes).map_err(|e| e.to_string())?;
+    }
 
     let output = crate::image_export::encode(&final_png, &output_format)?;
     fs::write(&save_path, &output).map_err(|e| e.to_string())?;
@@ -1122,6 +1159,7 @@ mod tests {
             true,
             None,
             None,
+            None,
         );
         assert!(save_res.is_ok(), "compose_and_save failed: {:?}", save_res);
 
@@ -1157,7 +1195,7 @@ mod tests {
             let path = std::env::temp_dir().join(format!("markits_clean_export_{}.{}", std::process::id(), format));
             cmd_compose_and_save(bg.clone(), scene.into(), path.to_string_lossy().into(), None,
                 Some(80), Some(60), false, Some(create_test_bg_data_url(100, 90)),
-                Some(metadata::CropInfo { is_auto_cropped: false, offset_x: 10.0, offset_y: 20.0, base_width: 100, base_height: 90 })).unwrap();
+                Some(metadata::CropInfo { is_auto_cropped: false, offset_x: 10.0, offset_y: 20.0, base_width: 100, base_height: 90 }), None).unwrap();
             let bytes = fs::read(&path).unwrap();
             assert_eq!(markits::image_metadata::strip_markits_metadata(&bytes).unwrap(), bytes);
             let normalized = crate::image_export::to_editable_png(&bytes).unwrap();
@@ -1193,6 +1231,7 @@ mod tests {
             Some(800),
             Some(600),
             false,
+            None,
             None,
             None,
         );

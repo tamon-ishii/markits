@@ -27,6 +27,7 @@ pub struct AppState {
     pub overlay_ready: Mutex<bool>,
     pub pending_capture: Mutex<Option<capture::CapturedImage>>,
     pub capture_generation: AtomicU64,
+    pub capture_ready_for_editing: std::sync::atomic::AtomicBool,
     pub shortcut: Mutex<String>,
     pub shortcut_warning: Mutex<Option<String>>,
     pub manual_studio: Mutex<Option<ManualStudioSession>>,
@@ -35,6 +36,77 @@ pub struct AppState {
 #[derive(Clone, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ManualStudioSession { pub input: String, pub output: String, pub completion: String }
+
+impl AppState {
+    pub(crate) fn exit_on_capture_cancel(&self) -> Result<bool, String> {
+        let capture_handoff = self.manual_studio.lock().map_err(|e| e.to_string())?
+            .as_ref().is_some_and(|session| session.input.is_empty());
+        Ok(capture_handoff && !self.capture_ready_for_editing.load(std::sync::atomic::Ordering::SeqCst))
+    }
+}
+
+fn launch_session(args: &[String]) -> Option<ManualStudioSession> {
+    let input = args.windows(2).find(|pair| pair[0] == "--manual-studio-input").map(|pair| pair[1].clone());
+    let output = args.windows(2).find(|pair| pair[0] == "--manual-studio-output").map(|pair| pair[1].clone());
+    let completion = args.windows(2).find(|pair| pair[0] == "--manual-studio-completion").map(|pair| pair[1].clone());
+    let input = input.or_else(|| args.iter().any(|arg| arg == "--capture").then(String::new));
+    input.zip(output).zip(completion).map(|((input, output), completion)| ManualStudioSession { input, output, completion })
+}
+
+struct StartupCapture(std::sync::atomic::AtomicBool);
+
+impl StartupCapture {
+    fn take(&self) -> bool {
+        self.0.swap(false, std::sync::atomic::Ordering::SeqCst)
+    }
+}
+
+#[tauri::command]
+fn cmd_take_startup_capture(state: tauri::State<'_, StartupCapture>) -> bool {
+    state.take()
+}
+
+#[cfg(test)]
+mod startup_capture_tests {
+    use super::StartupCapture;
+    use std::sync::atomic::AtomicBool;
+
+    #[test]
+    fn launch_capture_is_consumed_once_and_normal_launch_does_not_capture() {
+        let request = StartupCapture(AtomicBool::new(true));
+        assert!(request.take());
+        assert!(!request.take());
+        assert!(!StartupCapture(AtomicBool::new(false)).take());
+    }
+
+    #[test]
+    fn capture_handoff_needs_no_input_but_editing_keeps_its_selected_image() {
+        let capture: Vec<String> = ["--capture", "--manual-studio-output", "out.png", "--manual-studio-completion", "done"].into_iter().map(String::from).collect();
+        let session = super::launch_session(&capture).unwrap();
+        assert!(session.input.is_empty());
+        assert_eq!(session.output, "out.png");
+        assert_eq!(session.completion, "done");
+        let mut edit = capture[1..].to_vec();
+        assert!(super::launch_session(&edit).is_none());
+        edit.extend(["--manual-studio-input".into(), "selected.png".into()]);
+        assert_eq!(super::launch_session(&edit).unwrap().input, "selected.png");
+        assert!(super::launch_session(&["--capture".into()]).is_none());
+    }
+
+    #[test]
+    fn capture_cleanup_keeps_editor_alive_until_user_finishes_editing() {
+        let state = super::AppState::default();
+        assert!(!state.exit_on_capture_cancel().unwrap());
+        *state.manual_studio.lock().unwrap() = Some(super::ManualStudioSession {
+            input: String::new(), output: "capture.png".into(), completion: "done".into(),
+        });
+        assert!(state.exit_on_capture_cancel().unwrap(), "cancel before capture returns to Munin");
+        state.capture_ready_for_editing.store(true, std::sync::atomic::Ordering::SeqCst);
+        assert!(!state.exit_on_capture_cancel().unwrap(), "guide cleanup after capture must preserve the editor");
+        state.capture_ready_for_editing.store(false, std::sync::atomic::Ordering::SeqCst);
+        assert!(state.exit_on_capture_cancel().unwrap(), "a new capture can still be cancelled");
+    }
+}
 
 #[tauri::command]
 fn cmd_manual_studio_session(app: AppHandle) -> Result<Option<ManualStudioSession>, String> {
@@ -205,12 +277,12 @@ pub fn run() {
         if let Err(error) = result { eprintln!("{error}"); std::process::exit(2); }
         return;
     }
-    let input = args.windows(2).find(|pair| pair[0] == "--manual-studio-input").map(|pair| pair[1].clone());
-    let output = args.windows(2).find(|pair| pair[0] == "--manual-studio-output").map(|pair| pair[1].clone());
-    let completion = args.windows(2).find(|pair| pair[0] == "--manual-studio-completion").map(|pair| pair[1].clone());
-    let manual_studio = input.zip(output).zip(completion).map(|((input, output), completion)| ManualStudioSession { input, output, completion });
-    let background = args.iter().any(|arg| arg == "--background") && manual_studio.is_none();
+    let capture_requested = args.iter().any(|arg| arg == "--capture");
+    let manual_studio = launch_session(&args);
+    let startup_capture = args.iter().any(|arg| arg == "--capture") && manual_studio.is_none();
+    let background = capture_requested || (args.iter().any(|arg| arg == "--background") && manual_studio.is_none());
     tauri::Builder::default()
+        .manage(StartupCapture(std::sync::atomic::AtomicBool::new(startup_capture)))
         .manage(recording::RecordingState::default())
         .manage(playback::PlaybackState::default())
         .manage(AppState {
@@ -266,6 +338,7 @@ pub fn run() {
             cmd_get_capture_shortcut,
             cmd_set_capture_shortcut,
             cmd_manual_studio_session,
+            cmd_take_startup_capture,
             cmd_manual_studio_complete,
             i18n::cmd_set_locale
         ])

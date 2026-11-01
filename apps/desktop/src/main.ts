@@ -779,6 +779,7 @@ document.addEventListener('DOMContentLoaded', async () => {
           exportWidth: width,
           exportHeight: height,
           reproductionJson: manualStudioSession ? false : exportReproduction,
+          editingMetadata: manualStudioSession ? { baseUiElements: cropState.baseImageState?.uiElements ?? null } : null,
           baseBackgroundDataUrl: cropState.baseImageState?.dataUrl ?? null,
           cropInfo: cropState.baseImageState && (cropState.isAutoCropped || cropState.hasCropHistory) ? { is_auto_cropped: cropState.isAutoCropped, offset_x: cropState.autoCropOffset.x, offset_y: cropState.autoCropOffset.y, base_width: cropState.baseImageState.width, base_height: cropState.baseImageState.height } : null,
         });
@@ -891,17 +892,24 @@ document.addEventListener('DOMContentLoaded', async () => {
       manualStudioSession = await invokeTauri<ManualStudioSession | null>('cmd_manual_studio_session');
       if (manualStudioSession) {
         document.body.classList.add('manual-studio-integration');
-        const saveButton = document.getElementById('btn-save-file');
-        if (saveButton) { saveButton.textContent = t('Manual Studioへ注釈を返す'); saveButton.title = t('注釈付きPNGを保存してManual Studioへ戻ります'); }
         const doneButton = document.getElementById('btn-done-editing');
-        if (doneButton) { doneButton.textContent = t('編集終了（Manual Studioへ返す）'); doneButton.title = t('編集内容を保存し、スクリーンショット一覧へ返します'); }
+        if (doneButton) { doneButton.textContent = t('編集終了'); doneButton.title = t('編集内容を保存し、スクリーンショット一覧へ返します'); }
+        if (manualStudioSession.input) {
         const image = await invokeTauri<LoadedImageResult>('cmd_load_image', { filePath: manualStudioSession.input });
         editor.setBackgroundImage(image.image_data_url, image.width, image.height, image.annotations_json, image.ui_elements);
         if (image.base_image_data_url && image.base_width && image.base_height) editor.restoreCropState({ dataUrl: image.base_image_data_url, width: image.base_width, height: image.base_height, uiElements: image.base_ui_elements ?? [] }, image.crop_info ?? null);
         currentHistoryId = null;
         await switchView('editor');
+        } else {
+          await handleCaptureTrigger();
+        }
       } else {
-        switchView('home');
+        await switchView('home');
+        // Consume the launch request only after capture listeners and the
+        // initial view are ready. Reuse the normal capture button's action.
+        if (await invokeTauri<boolean>('cmd_take_startup_capture')) {
+          await handleCaptureTrigger();
+        }
       }
     } catch (error) { switchView('home'); alert(t`Manual Studio連携を開始できませんでした: ${error}`); }
   } else {

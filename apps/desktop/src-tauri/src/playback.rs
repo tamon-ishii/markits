@@ -1393,6 +1393,7 @@ mod tests {
             false,
             Some(base_url),
             None,
+            None,
         )
         .unwrap();
         let loaded = crate::commands::cmd_load_image(path.to_string_lossy().into()).unwrap();
