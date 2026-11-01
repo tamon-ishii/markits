@@ -753,6 +753,7 @@ pub async fn cmd_save_to_history(
 #[tauri::command]
 pub fn cmd_load_image(file_path: String) -> Result<metadata::LoadedImageResult, String> {
     let bytes = fs::read(&file_path).map_err(|e| e.to_string())?;
+    let bytes = crate::image_export::to_editable_png(&bytes)?;
     metadata::load_image_with_metadata(&bytes).map_err(|e| e.to_string())
 }
 
@@ -790,6 +791,7 @@ pub fn cmd_compose_and_save(
     base_background_data_url: Option<String>,
     crop_info: Option<metadata::CropInfo>,
 ) -> Result<(), String> {
+    let output_format = crate::image_export::format_for_path(&save_path)?;
     let prefix = "data:";
     let base64_str = if background_data_url.starts_with(prefix) {
         if let Some(pos) = background_data_url.find(',') {
@@ -830,31 +832,13 @@ pub fn cmd_compose_and_save(
         composed_png
     };
 
-    // Embed annotations metadata and UI elements into PNG tEXt chunks for re-editing
-    let final_png = metadata::embed_metadata(
-        &final_png_bytes,
-        Some(&scene_json),
-        ui_elements.as_deref(),
-        crop_info.as_ref(),
-    )
-    .map_err(|e| e.to_string())?;
-    let final_png = metadata::embed_text_chunk(
-        &final_png,
-        metadata::MARKITS_SOURCE_KEYWORD,
-        &background_data_url,
-    )
-    .map_err(|e| e.to_string())?;
+    // File exports contain only the composed, cropped pixels. Editable originals,
+    // crop state, UIMap and recordings stay in the internal history instead.
+    let _ = (base_background_data_url, crop_info);
+    let final_png = markits::image_metadata::strip_markits_metadata(&final_png_bytes)?;
 
-    let final_png = crate::playback::copy_metadata(&final_png, &bg_bytes).map_err(|e| e.to_string())?;
-    let final_png = if let Some(base) = base_background_data_url {
-        let final_png = crate::playback::copy_metadata(&final_png, &decode_data_url(&base)?).map_err(|e| e.to_string())?;
-        metadata::embed_text_chunk(&final_png, "markits:base_image", &base)
-            .map_err(|e| e.to_string())?
-    } else {
-        final_png
-    };
-
-    fs::write(&save_path, &final_png).map_err(|e| e.to_string())?;
+    let output = crate::image_export::encode(&final_png, &output_format)?;
+    fs::write(&save_path, &output).map_err(|e| e.to_string())?;
 
     if reproduction_json {
         let spec = create_reproduction_spec(&scene_json, ui_elements.as_deref())?;
@@ -1109,7 +1093,7 @@ mod tests {
     }
 
     #[test]
-    fn test_cmd_compose_and_save_with_metadata_cycle() {
+    fn test_cmd_compose_and_save_strips_metadata_and_can_write_reproduction_json() {
         let bg_url = create_test_bg_data_url(200, 150);
         let scene_json = r#"{"canvas":{"width":200,"height":150},"annotations":[{"type":"callout","target":[20,20,80,40],"text":"Test Note","style":"primary"}]}"#;
 
@@ -1141,21 +1125,14 @@ mod tests {
         );
         assert!(save_res.is_ok(), "compose_and_save failed: {:?}", save_res);
 
-        // Verify that load_image restores image dimensions, annotations, and UI elements
+        // File exports reopen as flattened pixels without editable source data.
         let loaded = cmd_load_image(test_output_str.clone()).unwrap();
         assert_eq!(loaded.width, 200);
         assert_eq!(loaded.height, 150);
-        assert_eq!(loaded.image_data_url, create_test_bg_data_url(200, 150));
-        assert!(loaded.annotations_json.is_some());
-        assert!(loaded.ui_elements.is_some());
-        let loaded_uis = loaded.ui_elements.unwrap();
-        assert_eq!(loaded_uis.len(), 1);
-        assert_eq!(loaded_uis[0].role, "button");
-        assert_eq!(loaded_uis[0].name.as_deref(), Some("OK"));
-
-        let restored_json = loaded.annotations_json.unwrap();
-        assert!(restored_json.contains("Test Note"));
-        assert!(restored_json.contains("callout"));
+        assert_ne!(loaded.image_data_url, create_test_bg_data_url(200, 150));
+        assert!(loaded.annotations_json.is_none());
+        assert!(loaded.ui_elements.is_none());
+        assert!(loaded.base_image_data_url.is_none());
 
         let reproduction_path = std::path::Path::new(&test_output_str).with_extension("json");
         let reproduction: serde_json::Value =
@@ -1165,6 +1142,37 @@ mod tests {
         // Clean up
         let _ = fs::remove_file(test_output_path);
         let _ = fs::remove_file(reproduction_path);
+    }
+
+    #[test]
+    fn file_exports_strip_originals_and_operations_in_all_formats() {
+        let bg = create_test_bg_data_url(40, 30);
+        let png = decode_data_url(&bg).unwrap();
+        let png = metadata::embed_text_chunk(&png, crate::playback::OPERATIONS_KEY, "private recorded operations").unwrap();
+        let png = metadata::embed_text_chunk(&png, metadata::MARKITS_UI_ELEMENTS_KEYWORD, "[]").unwrap();
+        let bg = format!("data:image/png;base64,{}", base64::engine::general_purpose::STANDARD.encode(&png));
+        let scene = r#"{"canvas":{"width":40,"height":30},"annotations":[{"type":"mosaic","target":[5,5,20,10]},{"type":"rect","target":[10,10,20,10]}]}"#;
+        let mut expected = None;
+        for format in ["png", "webp", "jxl"] {
+            let path = std::env::temp_dir().join(format!("markits_clean_export_{}.{}", std::process::id(), format));
+            cmd_compose_and_save(bg.clone(), scene.into(), path.to_string_lossy().into(), None,
+                Some(80), Some(60), false, Some(create_test_bg_data_url(100, 90)),
+                Some(metadata::CropInfo { is_auto_cropped: false, offset_x: 10.0, offset_y: 20.0, base_width: 100, base_height: 90 })).unwrap();
+            let bytes = fs::read(&path).unwrap();
+            assert_eq!(markits::image_metadata::strip_markits_metadata(&bytes).unwrap(), bytes);
+            let normalized = crate::image_export::to_editable_png(&bytes).unwrap();
+            let pixels = image::load_from_memory(&normalized).unwrap().into_rgba8();
+            assert_eq!(pixels.dimensions(), (80, 60));
+            if let Some(expected) = &expected { assert_eq!(&pixels, expected, "{format}"); }
+            else { expected = Some(pixels); }
+            let loaded = cmd_load_image(path.to_string_lossy().into()).unwrap();
+            assert!(loaded.annotations_json.is_none());
+            assert!(loaded.ui_elements.is_none());
+            assert!(loaded.crop_info.is_none());
+            assert!(loaded.base_image_data_url.is_none());
+            assert!(!crate::playback::extract(&decode_data_url(&loaded.image_data_url).unwrap()).unwrap().is_some());
+            fs::remove_file(path).unwrap();
+        }
     }
 
     #[test]
@@ -1193,9 +1201,8 @@ mod tests {
         let exported = image::open(&test_output_path).unwrap();
         assert_eq!((exported.width(), exported.height()), (800, 600));
         let loaded = cmd_load_image(test_output_str).unwrap();
-        // Editing uses the original scene coordinate system.
-        assert_eq!((loaded.width, loaded.height), (400, 300));
-        assert_eq!(loaded.image_data_url, create_test_bg_data_url(400, 300));
+        assert_eq!((loaded.width, loaded.height), (800, 600));
+        assert!(loaded.annotations_json.is_none());
 
         let _ = fs::remove_file(test_output_path);
     }

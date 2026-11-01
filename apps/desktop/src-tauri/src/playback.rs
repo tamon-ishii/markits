@@ -1350,7 +1350,7 @@ mod tests {
     }
 
     #[test]
-    fn cropped_export_reloads_the_recording_with_the_editable_background() {
+    fn cropped_file_export_excludes_recording_and_editable_background() {
         let mut png = Cursor::new(Vec::new());
         image::RgbaImage::new(16, 16)
             .write_to(&mut png, image::ImageFormat::Png)
@@ -1397,15 +1397,8 @@ mod tests {
         .unwrap();
         let loaded = crate::commands::cmd_load_image(path.to_string_lossy().into()).unwrap();
         std::fs::remove_file(path).unwrap();
-        assert_eq!(
-            extract(&decode(&loaded.image_data_url).unwrap())
-                .unwrap()
-                .unwrap()
-                .recording
-                .events
-                .len(),
-            1
-        );
+        assert!(extract(&decode(&loaded.image_data_url).unwrap()).unwrap().is_none());
+        assert!(loaded.base_image_data_url.is_none());
     }
 
     #[test]

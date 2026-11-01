@@ -20,6 +20,14 @@ struct Cli {
 
 #[derive(Subcommand, Debug)]
 enum Commands {
+    /// Remove MarkIts edit metadata from PNG, WebP, or JPEG XL without changing pixels
+    StripMetadata {
+        /// Image containing MarkIts metadata
+        image: std::path::PathBuf,
+        /// Destination image (same format, different file)
+        #[arg(short, long)]
+        output: std::path::PathBuf,
+    },
     /// Render annotation JSON into SVG or an annotated PNG
     Render {
         /// Path to JSON file, or '-' to read from standard input
@@ -260,6 +268,15 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     let cli = Cli::parse();
 
     match cli.command {
+        Commands::StripMetadata { image, output } => {
+            if image.canonicalize().ok().zip(output.canonicalize().ok()).is_some_and(|(a, b)| a == b) {
+                return Err("Choose an output path different from the original image".into());
+            }
+            let source = fs::read(&image)?;
+            let stripped = markits::image_metadata::strip_markits_metadata(&source)?;
+            fs::write(&output, stripped)?;
+            println!("Saved image without MarkIts metadata: {}", output.display());
+        }
         Commands::Render {
             input,
             layout_json,

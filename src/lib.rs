@@ -8,6 +8,7 @@ pub mod error;
 pub mod layout;
 pub mod model;
 pub mod raster;
+pub mod image_metadata;
 pub mod renderer;
 pub mod semantic;
 pub mod theme;

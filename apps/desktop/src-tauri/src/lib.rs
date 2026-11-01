@@ -1,5 +1,6 @@
 pub mod capture;
 pub mod commands;
+mod image_export;
 pub mod history;
 pub mod metadata;
 pub mod ui_elements;

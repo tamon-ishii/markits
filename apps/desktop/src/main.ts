@@ -574,7 +574,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         const { open } = await import('@tauri-apps/plugin-dialog');
         const selected = await open({
           multiple: false,
-          filters: [{ name: 'Image', extensions: ['png', 'jpg', 'jpeg'] }],
+          filters: [{ name: 'Image', extensions: ['png', 'jpg', 'jpeg', 'webp', 'jxl'] }],
         });
 
         if (selected && typeof selected === 'string') {
@@ -756,9 +756,15 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     try {
       const { save } = await import('@tauri-apps/plugin-dialog');
+      const format = (document.getElementById('save-image-format') as HTMLSelectElement).value;
+      const formats = [
+        { name: 'PNG', extensions: ['png'] },
+        { name: 'WebP', extensions: ['webp'] },
+        { name: 'JPEG XL', extensions: ['jxl'] },
+      ];
       const savePath = manualStudioSession?.output ?? await save({
-        filters: [{ name: 'PNG Image', extensions: ['png'] }],
-        defaultPath: `markits_${Date.now()}.png`,
+        filters: [...formats.filter(item => item.extensions[0] === format), ...formats.filter(item => item.extensions[0] !== format)],
+        defaultPath: `markits_${Date.now()}.${format}`,
       });
 
       if (savePath) {
@@ -782,8 +788,8 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
         await autoSaveToHistory();
         alert(exportReproduction
-          ? t('PNGと同じ場所に再現用JSONを保存しました。UI名の対象は、新しい画像のUI情報を使って再現できます。')
-          : t('PNGファイルとして保存しました（再編集メタデータ付き）。'));
+          ? t('画像と再現用JSONを保存しました。画像には再編集メタデータを含めません。')
+          : t('画像を保存しました（再編集メタデータなし）。'));
       }
     } catch (e: any) {
       alert(t`保存に失敗しました: ${e?.message ?? e}`);

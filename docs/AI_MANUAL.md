@@ -4,6 +4,27 @@ For agents that can view images and run local commands. MarkIts draws annotation
 
 ## Screen Capture & Image Workflow
 
+### Remove MarkIts edit metadata (`markits strip-metadata`)
+
+```sh
+markits strip-metadata private.png -o share.png
+markits strip-metadata private.webp -o share.webp
+markits strip-metadata private.jxl -o share.jxl
+```
+
+Removes MarkIts original/base images, annotations, crop state, UIMap, capture
+identity, operation recordings, and operation groups. Compressed pixel data is
+copied without decoding/re-encoding; visible annotations and mosaic stay in the
+image. Other applications' metadata and color profiles are retained. Supported
+containers are PNG, WebP and JPEG XL. Bare JXL codestreams have no metadata and
+are copied unchanged. Use a different output file; in-place writes are rejected.
+The output remains in the input format, regardless of its filename extension.
+
+Desktop **Save** exports flattened PNG, lossless WebP, or lossless JPEG XL
+without edit metadata. Editable source images, UIMap, crop state and operations
+remain in desktop history. CLI capture/render commands retain their existing
+metadata behavior; use `strip-metadata` when exporting those images for sharing.
+
 ### 1. Standalone Screen Capture (`markits capture`)
 Take screenshots directly using MarkIts CLI:
 ```bash

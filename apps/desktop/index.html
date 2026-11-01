@@ -45,7 +45,7 @@
           <button id="btn-copy-clipboard" class="btn" title="クリップボードにコピー">
             📋 コピー
           </button>
-          <button id="btn-save-file" class="btn btn-success" title="PNGとして保存 (解像度・アスペクト比設定)">
+          <button id="btn-save-file" class="btn btn-success" title="画像として保存 (PNG・WebP・JPEG XL)">
             💾 保存
           </button>
           <div class="divider-v"></div>
@@ -240,6 +240,13 @@
             <label>高さ (px)<input id="editor-export-height" type="number" min="10" max="10000" step="1" aria-label="出力高さ" /></label>
           </div>
           <div class="output-size-hint">このサイズと縦横比でプレビュー・保存します</div>
+          <label for="save-image-format">保存形式</label>
+          <select id="save-image-format" class="form-control">
+            <option value="png">PNG (.png)</option>
+            <option value="webp">WebP (.webp)</option>
+            <option value="jxl">JPEG XL (.jxl)</option>
+          </select>
+          <div class="output-size-hint">保存画像には元画像・UI情報・操作記録を含めません。再編集は履歴から行えます。</div>
           <label class="reproduction-json-option"><input id="save-reproduction-json" type="checkbox" /> 再現用テキスト（JSON）も保存</label>
           <div class="output-size-hint">UIスナップした対象はUI名で記録します。再現時は新しい画像のUI情報を指定してください。</div>
         </div>
