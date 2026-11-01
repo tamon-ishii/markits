@@ -108,9 +108,16 @@ pub fn cmd_playback_capture_wait(state: tauri::State<'_, PlaybackState>, index: 
 }
 
 #[tauri::command]
-pub fn cmd_playback_control(state: tauri::State<'_, PlaybackState>, action: String) -> Result<(), String> {
+pub fn cmd_playback_control(state: tauri::State<'_, PlaybackState>, action: String, shorten_waits: Option<bool>) -> Result<(), String> {
     let mut mode = state.4.lock().map_err(|e| e.to_string())?;
-    *mode = match action.as_str() { "pause" => 1, "resume" => 0, "step" => 2, _ => return Err(crate::i18n::text("不明な操作です", "Unknown operation").into()) };
+    let next_mode = match action.as_str() { "pause" => 1, "resume" => 0, "step" => 2, _ => return Err(crate::i18n::text("不明な操作です", "Unknown operation").into()) };
+    // Commit the displayed delay mode before releasing the playback worker.
+    if next_mode != 1 {
+        if let Some(shorten_waits) = shorten_waits {
+            state.2.lock().map_err(|e| e.to_string())?.shorten_waits = shorten_waits;
+        }
+    }
+    *mode = next_mode;
     Ok(())
 }
 
@@ -319,6 +326,7 @@ pub async fn cmd_playback(
     app: tauri::AppHandle,
     image_data_url: String,
     max_wait_ms: Option<u64>,
+    shorten_waits: Option<bool>,
 ) -> Result<Vec<metadata::LoadedImageResult>, String> {
     let saved = extract(&decode(&image_data_url)?)?.ok_or(crate::i18n::text("この画像には操作記録がありません", "This image has no recorded operations"))?;
     let _ = max_wait_ms;
@@ -331,7 +339,7 @@ pub async fn cmd_playback(
         .1
         .store(false, Ordering::SeqCst);
     progress(&app, |value| {
-        let shorten_waits = value.shorten_waits;
+        let shorten_waits = shorten_waits.unwrap_or(value.shorten_waits);
         let cursor_override = value.cursor_override;
         let recorded_cursor = saved.recording.events.iter().any(|event|
             matches!(event, RecordedEvent::Screenshot { include_cursor: true, .. }));
@@ -1100,6 +1108,26 @@ mod tests {
         assert_eq!(screenshot_settle_wait(true, false, false), 1000);
         assert_eq!(screenshot_settle_wait(true, true, false), 1000);
         assert!(PlaybackState::default().2.lock().unwrap().shorten_waits);
+    }
+
+    #[test]
+    fn shortened_playback_skips_recorded_delays_including_the_capture_gap() {
+        let events: Vec<RecordedEvent> = serde_json::from_str(r#"[
+            {"kind":"click","elapsed_ms":0,"x":10,"y":20},
+            {"kind":"click","elapsed_ms":2048,"x":10,"y":20},
+            {"kind":"screenshot","elapsed_ms":15806}
+        ]"#).unwrap();
+        let configured = recorded_waits(&events);
+        assert_eq!(configured, vec![0, 2048, 13758]);
+        let mut waits = Vec::new();
+        let mut executed = 0;
+        play_events(&events, u64::MAX, |_, index| {
+            waits.push(operation_wait(configured[index], true,
+                matches!(events[index], RecordedEvent::Screenshot { .. })));
+            Ok(())
+        }, |_| { executed += 1; Ok(()) }).unwrap();
+        assert_eq!(waits, vec![0, 0, 0]);
+        assert_eq!(executed, 3);
     }
 
     #[test]

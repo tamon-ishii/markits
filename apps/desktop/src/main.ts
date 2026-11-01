@@ -248,13 +248,13 @@ document.addEventListener('DOMContentLoaded', async () => {
     } catch (error) { console.warn('Could not read operation recording', error); }
   });
   let replaySource = '';
-  const replayCapture = async (imageDataUrl: string) => {
+  const replayCapture = async (imageDataUrl: string, shortenWaits?: boolean) => {
     if (playbackBusy) return;
     replaySource = imageDataUrl;
     playbackBusy = true; playButton.disabled = true;
     try {
       await autoSaveToHistory();
-      const images = await invokeTauri<LoadedImageResult[]>('cmd_playback', { imageDataUrl });
+      const images = await invokeTauri<LoadedImageResult[]>('cmd_playback', { imageDataUrl, shortenWaits });
       const image = images.at(-1);
       if (image) {
         editor.setBackgroundImage(image.image_data_url, image.width, image.height, image.annotations_json, image.ui_elements);
@@ -271,8 +271,8 @@ document.addEventListener('DOMContentLoaded', async () => {
   playButton.onclick = () => { void replayCapture(playbackImageDataUrl); };
   if (isTauri) {
     const { listen } = await import('@tauri-apps/api/event');
-    await listen('restart-playback', () => {
-      if (replaySource) void replayCapture(replaySource);
+    await listen<{ shortenWaits: boolean }>('restart-playback', (event) => {
+      if (replaySource) void replayCapture(replaySource, event.payload.shortenWaits);
     });
   }
 

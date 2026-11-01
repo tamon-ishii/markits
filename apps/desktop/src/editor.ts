@@ -953,7 +953,7 @@ export class AnnotationEditor {
         el.width > 800 ||
         el.height > 600 ||
         (cw > 200 && ch > 200 && el.width * el.height > cw * ch * 0.45);
-      if (isGiant) continue;
+      if (isGiant && this.activeTool !== 'mosaic') continue;
 
       // 1. Proximity of corners:
       // Does (x1, y1) start near top-left of el AND (x2, y2) near bottom-right?
@@ -1040,7 +1040,7 @@ export class AnnotationEditor {
         el.width > 800 ||
         el.height > 600 ||
         (cw > 200 && ch > 200 && el.width * el.height > cw * ch * 0.45);
-      if (isGiant) continue;
+      if (isGiant && this.activeTool !== 'mosaic') continue;
 
       const elCenterX = el.x + el.width / 2;
       const elCenterY = el.y + el.height / 2;
@@ -1079,7 +1079,8 @@ export class AnnotationEditor {
     if (!this.isSnapEnabled || this.isCropMode) return { snapped: false };
     const area = this.scene.canvas.width * this.scene.canvas.height;
     const candidates = this.uiElements.filter(el => el.width > 0 && el.height > 0
-      && el.width <= 800 && el.height <= 600 && el.width * el.height < area * 0.45
+      && (this.activeTool === 'mosaic'
+        || (el.width <= 800 && el.height <= 600 && el.width * el.height < area * 0.45))
       && x >= el.x && x <= el.x + el.width && y >= el.y && y <= el.y + el.height);
     candidates.sort((a, b) => a.width * a.height - b.width * b.height);
     const element = candidates[0];
@@ -1117,8 +1118,9 @@ export class AnnotationEditor {
     if (snap.snapped && snap.element && 'target' in annotation) {
       const el = snap.element;
       const { width, height } = this.scene.canvas;
-      if (el.width <= 650 && el.height <= 450 && (width < 200 || height < 200 || (
-        el.width < width * 0.65 && el.height < height * 0.65 && el.width * el.height < width * height * 0.40))) {
+      // Mosaic must cover the selected region, including large panels and windows.
+      if (type === 'mosaic' || (el.width <= 650 && el.height <= 450 && (width < 200 || height < 200 || (
+        el.width < width * 0.65 && el.height < height * 0.65 && el.width * el.height < width * height * 0.40)))) {
         annotation.target = [Math.round(el.x), Math.round(el.y), Math.round(el.width), Math.round(el.height)];
       }
     }

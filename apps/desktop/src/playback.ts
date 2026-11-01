@@ -68,7 +68,12 @@ export function showPlaybackControls(invoke: Invoke) {
     finally { changingCursor = false; }
   };
   let changingMode = false;
+  let modeRevision = 0;
+  // Wait for the backend's initial settings before allowing playback.
+  resume.disabled = true;
+  step.disabled = true;
   waitMode.onchange = async () => {
+    modeRevision++;
     changingMode = true;
     waitMode.disabled = true;
     try { await invoke('cmd_playback_wait_mode', { shortenWaits: waitMode.checked }); }
@@ -81,8 +86,8 @@ export function showPlaybackControls(invoke: Invoke) {
       try {
         if (action === 'resume' && !running) {
           const { emitTo } = await import('@tauri-apps/api/event');
-          await emitTo('main', 'restart-playback');
-        } else await invoke('cmd_playback_control', { action });
+          await emitTo('main', 'restart-playback', { shortenWaits: waitMode.checked });
+        } else await invoke('cmd_playback_control', { action, shortenWaits: waitMode.checked });
       }
       catch (cause) { error.hidden = false; error.textContent = String(cause); }
     };
@@ -107,7 +112,11 @@ export function showPlaybackControls(invoke: Invoke) {
   };
   const poll = async () => {
     try {
+      const requestedModeRevision = modeRevision;
       const status = await invoke<PlaybackProgress>('cmd_playback_status');
+      // A response requested before a checkbox change may contain the old mode.
+      // Discard it even if the setting command has already finished.
+      if (requestedModeRevision !== modeRevision || changingMode) return;
       running = status.running;
       if (!changingCursor) {
         cursor.checked = status.include_cursor;
@@ -180,8 +189,9 @@ export function showPlaybackControls(invoke: Invoke) {
       stop.disabled = !running || stopping;
     } catch (cause) {
       error.hidden = false; error.textContent = t`進捗を取得できませんでした：${cause}`;
+    } finally {
+      window.setTimeout(() => { void poll(); }, 200);
     }
-    window.setTimeout(() => { void poll(); }, 200);
   };
   void poll();
 }

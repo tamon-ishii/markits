@@ -83,3 +83,47 @@ test('identical hovers reuse the preview and stale async renders cannot restore 
   assert.equal(editor.svgLayerEl.innerHTML, '');
   assert.equal(editor.hoverPreview, null);
 });
+
+test('mosaic previews and creation preserve large target bounds', async () => {
+  // Exercise absolute size, relative size, and canvas coverage limits.
+  for (const [width, height] of [[200, 80], [651, 300], [600, 451], [900, 650], [1800, 950]]) {
+    const { editor, hover } = fixture();
+    editor.scene.canvas = { width: 1920, height: 1080 };
+    editor.activeTool = 'mosaic';
+    editor.uiElements = [{ x: 50, y: 50, width, height, name: 'Panel', role: 'pane' }];
+    const expected = [50, 50, width, height];
+    for (const [x, y] of [[100, 90], [50 + width / 2, 50 + height / 2]]) {
+      hover(x, y);
+      assert.deepEqual(Array.from(editor.hoverPreview.target), expected);
+      const created = editor.createSnappedAnnotation('mosaic', editor.creationSnap(x, y, false));
+      assert.deepEqual(Array.from(created.target), expected);
+    }
+    let rendered;
+    editor.renderCallback = async json => { rendered = JSON.parse(json); return '<svg/>'; };
+    await editor.executeRender();
+    assert.deepEqual(rendered.annotations[0].target, expected);
+    assert.equal(editor.scene.annotations.length, 0);
+    hover(100, 90, true);
+    assert.equal(editor.hoverPreview, null);
+  }
+});
+
+test('large mosaic targets remain available while dragging and moving', () => {
+  const { editor } = fixture();
+  editor.scene.canvas = { width: 1920, height: 1080 };
+  editor.activeTool = 'mosaic';
+  editor.uiElements = [{ x: 50, y: 50, width: 900, height: 650, name: 'Panel', role: 'pane' }];
+  assert.deepEqual(Array.from(editor.findSnapElementForRect(52, 52, 948, 698).rect), [50, 50, 900, 650]);
+  assert.deepEqual(Array.from(editor.findSnapElementForMove(52, 52, 900, 650).rect), [50, 50, 900, 650]);
+  editor.activeTool = 'rect';
+  assert.equal(editor.findSnapElementForRect(52, 52, 948, 698).snapped, false);
+  assert.equal(editor.findSnapElementForMove(52, 52, 900, 650).snapped, false);
+});
+
+test('mosaic still prefers a smaller UI element inside a large panel', () => {
+  const { editor, hover } = fixture();
+  editor.activeTool = 'mosaic';
+  editor.uiElements.push({ x: 0, y: 0, width: 1000, height: 800, name: 'Panel', role: 'pane' });
+  hover();
+  assert.deepEqual(Array.from(editor.hoverPreview.target), [200, 200, 200, 80]);
+});
