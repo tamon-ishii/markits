@@ -416,7 +416,7 @@ impl SvgRenderer {
                         center.x, center.y, dot_radius, tokens.stroke_color
                     ));
                 }
-                ResolvedAnnotation::Arrow { start, end, text, style, shadow, stroke_width, line_style, arrowhead, arrow_skin, boxed, outline, text_placement } => {
+                ResolvedAnnotation::Arrow { start, end, text, style, shadow, stroke_width, line_style, arrowhead, arrow_skin, boxed, outline, text_placement, font_size } => {
                     let tokens = self.theme.tokens_for(*style);
                     let sw = stroke_width.unwrap_or(4.0);
                     let key = style_key(*style);
@@ -430,8 +430,7 @@ impl SvgRenderer {
                             let dx = end.x - start.x;
                             let dy = end.y - start.y;
                             let len = (dx * dx + dy * dy).sqrt().max(0.001);
-                            let font_size = self.theme.font_size;
-                            let text_dim = crate::layout::estimate_text_dimensions(txt, font_size);
+                            let text_dim = crate::layout::estimate_text_dimensions(txt, *font_size);
                             let pill_w = text_dim.width + 16.0;
                             let pill_h = text_dim.height + 8.0;
                             let rx = self.theme.corner_radius;
@@ -688,7 +687,7 @@ impl SvgRenderer {
 
                     svg.push_str("  </g>\n");
                 }
-                ResolvedAnnotation::BezierArrow { text, text_rect, style, shadow, outline, boxed, .. } => {
+                ResolvedAnnotation::BezierArrow { text, text_rect, style, shadow, outline, boxed, font_size, .. } => {
                     if let (Some(txt), Some(tr)) = (text, text_rect) {
                         let tokens = self.theme.tokens_for(*style);
                         let escaped = escape_xml(txt);
@@ -707,7 +706,7 @@ impl SvgRenderer {
                                 self.theme.corner_radius, self.theme.corner_radius,
                                 tokens.fill_color, stroke_color,
                                 tr.center_x(), tr.center_y(),
-                                tokens.text_color, self.theme.font_family, self.theme.font_size,
+                                tokens.text_color, self.theme.font_family, font_size,
                                 escaped
                             ));
                         } else {
@@ -723,7 +722,7 @@ impl SvgRenderer {
 "#,
                                 filter_attr,
                                 tr.center_x(), tr.center_y(),
-                                tokens.stroke_color, self.theme.font_family, self.theme.font_size,
+                                tokens.stroke_color, self.theme.font_family, font_size,
                                 outline_attr,
                                 escaped
                             ));

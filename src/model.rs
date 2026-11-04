@@ -310,6 +310,8 @@ pub enum Annotation {
         step: Option<u32>,
         #[serde(default)]
         text: Option<String>,
+        #[serde(default)]
+        font_size: Option<f64>,
         #[serde(
             default,
             alias = "text_placement",
@@ -514,6 +516,8 @@ pub enum Annotation {
         arrow_skin: ArrowSkin,
         #[serde(default)]
         text: Option<String>,
+        #[serde(default)]
+        font_size: Option<f64>,
         #[serde(default)]
         style: SemanticStyle,
         #[serde(default)]

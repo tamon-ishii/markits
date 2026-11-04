@@ -459,6 +459,7 @@ pub enum ResolvedAnnotation {
         start: Point,
         end: Point,
         text: Option<String>,
+        font_size: f64,
         style: SemanticStyle,
         shadow: bool,
         stroke_width: Option<f64>,
@@ -562,6 +563,7 @@ pub enum ResolvedAnnotation {
         control: Point,
         end: Point,
         text: Option<String>,
+        font_size: f64,
         text_rect: Option<TargetRect>,
         style: SemanticStyle,
         shadow: bool,
@@ -949,6 +951,7 @@ impl LayoutEngine {
                     arrow_skin,
                     step,
                     text,
+                    font_size,
                     text_placement,
                     style,
                     position,
@@ -978,6 +981,7 @@ impl LayoutEngine {
                                 start: arrow_start,
                                 end: arrow_end,
                                 text: text.clone(),
+                                font_size: font_size.unwrap_or(self.font_size),
                                 style: *style,
                                 shadow,
                                 stroke_width: *stroke_width,
@@ -1045,6 +1049,7 @@ impl LayoutEngine {
                                 start,
                                 end,
                                 text: text.clone(),
+                                font_size: font_size.unwrap_or(self.font_size),
                                 style: *style,
                                 shadow,
                                 stroke_width: *stroke_width,
@@ -1156,6 +1161,7 @@ impl LayoutEngine {
                     control,
                     end,
                     text,
+                    font_size,
                     text_placement,
                     stroke_width,
                     line_style,
@@ -1227,7 +1233,7 @@ impl LayoutEngine {
 
                     let (text_rect, text_val) = match text {
                         Some(txt) if !txt.trim().is_empty() => {
-                            let dim = estimate_text_dimensions(txt, self.font_size);
+                            let dim = estimate_text_dimensions(txt, font_size.unwrap_or(self.font_size));
                             let chord_y = (s.y + e.y) / 2.0;
                             let vy = c.y - chord_y;
 
@@ -1330,6 +1336,7 @@ impl LayoutEngine {
                         control: c,
                         end: e,
                         text: text_val,
+                        font_size: font_size.unwrap_or(self.font_size),
                         text_rect,
                         style: *style,
                         shadow,

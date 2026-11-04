@@ -2077,7 +2077,7 @@ export class AnnotationEditor {
     if (['callout','pin','badge','step-arrow','label','bezier-arrow'].includes(types[0])) fields.push(['position',t('配置'),['auto','top','bottom','left','right','center']]);
     if (types[0] === 'divider') fields.push(['position',t('配置'),['top','bottom','left','right']]);
     if (['arrow','bezier-arrow','step-arrow','rect','rounded-rect','circle','divider'].includes(types[0])) fields.push(['stroke_width',t('線の太さ'),null]);
-    if (['arrow','bezier-arrow'].includes(types[0])) fields.push(['line_style',t('線種'),['solid','dashed','dotted']],['arrowhead',t('矢印の先端'),['filled','open']],['arrow_skin',t('矢印の形'),['classic','sketch','bold']],['box',t('テキスト枠'),['true','false']],['text_placement',t('テキスト位置'),['middle','end']]);
+    if (['arrow','bezier-arrow'].includes(types[0])) fields.push(['line_style',t('線種'),['solid','dashed','dotted']],['arrowhead',t('矢印の先端'),['filled','open']],['arrow_skin',t('矢印の形'),['classic','sketch','bold']],['box',t('テキスト背景'),['true','false']],['text_placement',t('テキスト位置'),['middle','end']]);
     if (['arrow','bezier-arrow','callout','pin','badge','step-arrow','label'].includes(types[0])) fields.push(['text',t('テキスト'),null],['font_family',t('フォント'),['sans-serif','serif','monospace']]);
     if (['arrow','bezier-arrow','callout','label'].includes(types[0])) fields.push(['font_size',t('文字サイズ'),null]);
     for (const [key,title,options] of fields) {
