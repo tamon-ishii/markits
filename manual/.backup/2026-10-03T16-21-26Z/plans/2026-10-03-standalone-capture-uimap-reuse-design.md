@@ -20,7 +20,7 @@ This design introduces:
 2. `--detect-ui`: Optional UI element detection embedded into PNG metadata.
 3. `--uimap <PATH>`: Reusing UIMap metadata from an existing `.png` image or `.json` file during capture and annotation without rescanning AT-SPI.
 4. UI Targeting and "囲む" (surround/box): Enabling LLMs to specify `--target "保存ボタン" --mark rect` (or `rounded-rect`), with smart target matching and one-shot capture + annotate.
-5. `README.md` and `AI_MANUAL.md` overhaul: Dedicating a major top-level section explaining UI targeting, UIMap metadata embedding, and AI agent workflows.
+5. `index.md` and `AI_MANUAL.md` overhaul: Dedicating a major top-level section explaining UI targeting, UIMap metadata embedding, and AI agent workflows.
 
 ---
 
@@ -86,7 +86,7 @@ LLM agents identify UI elements and specify annotations:
    - `raster::load_uimap_from_path(path: &Path)`:
      If file ends in `.png` (or format is PNG), call `extract_png_uimap`. Otherwise, parse as JSON.
 3. **Documentation**:
-   - Add a major section in `README.md` and update `docs/AI_MANUAL.md`.
+   - Add a major section in `index.md` and update `docs/AI_MANUAL.md`.
 
 ---
 

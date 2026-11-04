@@ -2,9 +2,9 @@
 
 > **For Antigravity:** REQUIRED WORKFLOW: Use `.agent/workflows/execute-plan.md` to execute this plan in single-flow mode.
 
-**Goal:** Provide `markits capture` for standalone screenshot capture with UI detection, enable UIMap reuse from PNG metadata, support UI element targeting (e.g., boxing "保存ボタン"), and add a prominent UI targeting guide to `README.md`.
+**Goal:** Provide `markits capture` for standalone screenshot capture with UI detection, enable UIMap reuse from PNG metadata, support UI element targeting (e.g., boxing "保存ボタン"), and add a prominent UI targeting guide to `index.md`.
 
-**Architecture:** Expose screen capture and AT-SPI/X11 UI detection in the root `markits` crate. Implement `raster::load_uimap_from_path` supporting both `.png` (extracting embedded metadata) and `.json`. Implement `markits capture` in `src/main.rs` with `--detect-ui`, `--uimap`, and optional inline annotation (`--target`, `--mark`). Expand `README.md` with a major chapter on UI targeting.
+**Architecture:** Expose screen capture and AT-SPI/X11 UI detection in the root `markits` crate. Implement `raster::load_uimap_from_path` supporting both `.png` (extracting embedded metadata) and `.json`. Implement `markits capture` in `src/main.rs` with `--detect-ui`, `--uimap`, and optional inline annotation (`--target`, `--mark`). Expand `index.md` with a major chapter on UI targeting.
 
 **Tech Stack:** Rust 2024, `clap`, `screenshots`, `image`, `resvg`, `xa11y`, `x11-dl`, `zbus`.
 
@@ -207,13 +207,13 @@ git commit -m "feat: add markits capture CLI subcommand with UI detection and in
 
 ---
 
-### Task 4: Overhaul `README.md` and `docs/AI_MANUAL.md` with major UI targeting section
+### Task 4: Overhaul `index.md` and `docs/AI_MANUAL.md` with major UI targeting section
 
 **Files:**
-- Modify: `README.md`
+- Modify: `index.md`
 - Modify: `docs/AI_MANUAL.md`
 
-**Step 1: Write draft content in `README.md`**
+**Step 1: Write draft content in `index.md`**
 Add a major section:
 `# UI要素指定とAI自律連携 (UI Targeting & AI Automation)`
 Covering:
@@ -231,6 +231,6 @@ Expected: All tests PASS.
 
 **Step 4: Commit**
 ```bash
-git add README.md docs/AI_MANUAL.md
+git add index.md docs/AI_MANUAL.md
 git commit -m "docs: add prominent UI element targeting and AI automation section to README"
 ```

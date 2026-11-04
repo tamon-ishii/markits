@@ -414,13 +414,13 @@ git commit -m "feat(cli): add --list-screens, --list-windows, --screen, --window
 ### Task 5: Full Verification and Documentation Update
 
 **Files:**
-- Modify: `README.md`
+- Modify: `index.md`
 - Run: `cargo test --workspace`
 - Run: `npm run build` in `apps/desktop`
 
 **Step 1: Update README.md with CLI options and examples**
 
-Add `--list-screens`, `--list-windows`, `--screen`, `--window`, and `--pid` to `README.md`.
+Add `--list-screens`, `--list-windows`, `--screen`, `--window`, and `--pid` to `index.md`.
 
 **Step 2: Run full workspace test suite**
 
@@ -435,6 +435,6 @@ Expected: PASS
 **Step 4: Commit**
 
 ```bash
-git add README.md docs/plans/task.md
+git add index.md docs/plans/task.md
 git commit -m "docs: document window capture, multi-screen, and DPI scaling features"
 ```

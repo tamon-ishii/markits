@@ -162,11 +162,11 @@ git commit -m "feat(desktop): add crop to annotations action in desktop editor"
 ### Task 5: Documentation Update and Workspace Verification
 
 **Files:**
-- Modify: `README.md`
+- Modify: `index.md`
 - Modify: `docs/AI_MANUAL.md`
 
 **Step 1: Update Documentation**
-- Add explanation and examples of `--crop` and `--crop-margin <PX>` in `README.md` (under CLI usage and AI UI workflow sections).
+- Add explanation and examples of `--crop` and `--crop-margin <PX>` in `index.md` (under CLI usage and AI UI workflow sections).
 - Add `--crop` flags and tips in `docs/AI_MANUAL.md`.
 
 **Step 2: Full Workspace Verification**
@@ -179,6 +179,6 @@ Expected: All tests pass (85+ tests).
 
 **Step 3: Commit**
 ```bash
-git add README.md docs/AI_MANUAL.md
+git add index.md docs/AI_MANUAL.md
 git commit -m "docs: document --crop and --crop-margin in README and AI_MANUAL"
 ```
