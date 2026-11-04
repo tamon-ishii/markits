@@ -21,6 +21,8 @@ pub enum CaptureError {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CapturedImage {
     #[serde(default)]
+    pub include_cursor: bool,
+    #[serde(default)]
     pub capture_shortcut: Option<String>,
     #[serde(default)]
     pub recording_mode: bool,
@@ -44,6 +46,7 @@ pub fn rgba_to_captured_image(img: &RgbaImage) -> Result<CapturedImage, CaptureE
     let data_url = format!("data:image/png;base64,{}", b64);
 
     Ok(CapturedImage {
+        include_cursor: false,
         capture_shortcut: None,
         recording_mode: false,
         width: img.width(),
@@ -77,6 +80,28 @@ pub fn crop_rgba_image(img: &RgbaImage, x: u32, y: u32, width: u32, height: u32)
 }
 
 /// Capture the primary screen (or first detected screen).
+#[cfg(target_os = "windows")]
+pub fn capture_selection_desktop() -> Result<(CapturedImage, i32, i32), CaptureError> {
+    let screens = Screen::all().map_err(|e| CaptureError::CaptureFailed(e.to_string()))?;
+    let left = screens.iter().map(|s| s.display_info.x).min().ok_or(CaptureError::NoScreensFound)?;
+    let top = screens.iter().map(|s| s.display_info.y).min().unwrap();
+    let mut frames = Vec::new();
+    let (mut right, mut bottom) = (left, top);
+    for screen in screens {
+        let raw = screen.capture().map_err(|e| CaptureError::CaptureFailed(e.to_string()))?;
+        let (width, height) = (raw.width(), raw.height());
+        right = right.max(screen.display_info.x + width as i32);
+        bottom = bottom.max(screen.display_info.y + height as i32);
+        frames.push((screen.display_info.x, screen.display_info.y,
+            RgbaImage::from_raw(width, height, raw.into_raw()).ok_or(CaptureError::InvalidRegion)?));
+    }
+    let mut desktop = RgbaImage::new((right - left) as u32, (bottom - top) as u32);
+    for (x, y, frame) in frames {
+        imageops::replace(&mut desktop, &frame, (x - left) as i64, (y - top) as i64);
+    }
+    Ok((rgba_to_captured_image(&desktop)?, left, top))
+}
+
 pub fn capture_primary_screen() -> Result<CapturedImage, CaptureError> {
     let screens = Screen::all().map_err(|e| CaptureError::CaptureFailed(e.to_string()))?;
     let screen = screens.first().ok_or(CaptureError::NoScreensFound)?;

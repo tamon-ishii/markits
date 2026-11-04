@@ -185,6 +185,7 @@ export interface DetectedUiElement {
 }
 
 export interface CapturedImage {
+  include_cursor?: boolean;
   capture_shortcut?: string;
   recording_mode?: boolean;
   width: number;

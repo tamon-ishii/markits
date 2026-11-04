@@ -137,13 +137,14 @@ document.addEventListener('DOMContentLoaded', async () => {
                 : { kind: 'fullscreen' };
               await invokeTauri('cmd_arm_cursor_capture', { target });
             } catch (error) {
-              await invokeTauri('cmd_cancel_capture').catch(() => {});
-              const { emitTo } = await import('@tauri-apps/api/event');
-              await emitTo('main', 'capture-error', t`カーソル付き撮影を準備できませんでした: ${error}`);
+              await invokeTauri('cmd_recover_cursor_capture', {
+                error: t`カーソル付き撮影を準備できませんでした: ${error}`,
+              });
             }
           },
           captured.recording_mode ?? false,
-          captured.capture_shortcut ?? 'PrintScreen'
+          captured.capture_shortcut ?? 'Control+Shift+E',
+          captured.include_cursor ?? false
         );
       });
       await invokeTauri('cmd_overlay_ready');
@@ -162,7 +163,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   const openButton = document.getElementById('btn-open-file')!;
   const historyGrid = document.getElementById('history-grid')!;
   const historyCount = document.getElementById('history-count')!;
-  const shortcutSelect = document.getElementById('capture-shortcut') as HTMLSelectElement | null;
+  const shortcutSelect = document.getElementById('capture-shortcut') as HTMLInputElement | null;
   const shortcutStatus = document.getElementById('capture-shortcut-status');
   const toolbarSettings = document.getElementById('toolbar-settings') as HTMLDetailsElement;
   const languageSelect = document.getElementById('app-language') as HTMLSelectElement;
@@ -192,7 +193,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     };
     invokeTauri<ShortcutStatus>('cmd_get_capture_shortcut').then(showShortcutStatus)
       .catch((error) => { if (shortcutStatus) shortcutStatus.textContent = String(error); });
-    shortcutSelect.addEventListener('change', async () => {
+    document.getElementById('capture-shortcut-apply')?.addEventListener('click', async () => {
       try {
         showShortcutStatus(await invokeTauri<ShortcutStatus>('cmd_set_capture_shortcut', { shortcut: shortcutSelect.value }));
       } catch (error) {

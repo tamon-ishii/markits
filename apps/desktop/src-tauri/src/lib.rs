@@ -20,9 +20,11 @@ use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut};
 
 #[derive(Default)]
 pub struct AppState {
+    pub launch_capture_options: LaunchCaptureOptions,
     pub cursor_target: Mutex<Option<cursor_capture::CursorCaptureTarget>>,
     pub cursor_guide: Mutex<Option<cursor_capture::CursorGuideStatus>>,
     pub cursor_capture_busy: std::sync::atomic::AtomicBool,
+    pub capture_shortcut_down: std::sync::atomic::AtomicBool,
     pub last_capture_data_url: Mutex<Option<String>>,
     pub overlay_ready: Mutex<bool>,
     pub pending_capture: Mutex<Option<capture::CapturedImage>>,
@@ -33,11 +35,41 @@ pub struct AppState {
     pub manual_studio: Mutex<Option<ManualStudioSession>>,
 }
 
+#[derive(Default, Clone, Debug, PartialEq)]
+pub struct LaunchCaptureOptions {
+    pub include_cursor: bool,
+    pub shortcut: Option<String>,
+}
+
+impl LaunchCaptureOptions {
+    pub fn parse(args: &[String]) -> Result<Self, String> {
+        let mut options = Self::default();
+        let mut args = args.iter();
+        while let Some(arg) = args.next() {
+            match arg.as_str() {
+                "--include-cursor" => options.include_cursor = true,
+                "--no-cursor" => options.include_cursor = false,
+                "--capture-shortcut" => {
+                    let key = args.next().ok_or("--capture-shortcut requires a key combination")?;
+                    if !valid_capture_shortcut(key) { return Err(format!("Invalid capture shortcut: {key}")); }
+                    options.shortcut = Some(key.clone());
+                }
+                _ => {}
+            }
+        }
+        Ok(options)
+    }
+}
+
 #[derive(Clone, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ManualStudioSession { pub input: String, pub output: String, pub completion: String }
 
 impl AppState {
+    fn accept_capture_shortcut(&self, pressed: bool) -> bool {
+        let was_down = self.capture_shortcut_down.swap(pressed, std::sync::atomic::Ordering::SeqCst);
+        pressed && !was_down
+    }
     pub(crate) fn exit_on_capture_cancel(&self) -> Result<bool, String> {
         let capture_handoff = self.manual_studio.lock().map_err(|e| e.to_string())?
             .as_ref().is_some_and(|session| session.input.is_empty());
@@ -70,6 +102,20 @@ fn cmd_take_startup_capture(state: tauri::State<'_, StartupCapture>) -> bool {
 mod startup_capture_tests {
     use super::StartupCapture;
     use std::sync::atomic::AtomicBool;
+
+    #[test]
+    fn launch_capture_options_reach_selection_without_losing_cursor_setting() {
+        let args = ["--capture", "--include-cursor", "--capture-shortcut", "Control+Shift+E",
+            "--manual-studio-output", "out.png", "--manual-studio-completion", "done"]
+            .into_iter().map(String::from).collect::<Vec<_>>();
+        let options = super::LaunchCaptureOptions::parse(&args).unwrap();
+        assert!(options.include_cursor);
+        assert_eq!(options.shortcut.as_deref(), Some("Control+Shift+E"));
+        assert!(super::launch_session(&args).unwrap().input.is_empty());
+        assert!(!super::LaunchCaptureOptions::parse(&[]).unwrap().include_cursor);
+        assert!(super::LaunchCaptureOptions::parse(&["--capture-shortcut".into()]).is_err());
+        assert!(super::LaunchCaptureOptions::parse(&["--capture-shortcut".into(), "bad-key".into()]).is_err());
+    }
 
     #[test]
     fn launch_capture_is_consumed_once_and_normal_launch_does_not_capture() {
@@ -122,7 +168,45 @@ fn cmd_manual_studio_complete(app: AppHandle) -> Result<(), String> {
     Ok(())
 }
 
-const CAPTURE_SHORTCUTS: &[&str] = &["PrintScreen", "Alt+PrintScreen", "Control+Shift+S"];
+const DEFAULT_CAPTURE_SHORTCUT: &str = "Control+Shift+E";
+
+#[cfg(test)]
+#[test]
+fn holding_capture_key_does_not_take_multiple_screenshots() {
+    let state = AppState::default();
+    assert!(state.accept_capture_shortcut(true));
+    assert!(!state.accept_capture_shortcut(true));
+    assert!(!state.accept_capture_shortcut(true));
+    assert!(!state.accept_capture_shortcut(false));
+    assert!(state.accept_capture_shortcut(true));
+}
+
+fn valid_capture_shortcut(value: &str) -> bool {
+    let special_key = value.split('+').next_back().is_some_and(|key| key == "PrintScreen"
+        || key.strip_prefix('F').and_then(|number| number.parse::<u8>().ok()).is_some_and(|number| (1..=24).contains(&number)));
+    (value.contains("Control+") || value.contains("Alt+") || value.contains("Super+") || value.contains("Meta+") || special_key)
+        && value.parse::<Shortcut>().is_ok()
+}
+
+pub fn saved_capture_shortcut() -> String { read_shortcut() }
+
+#[cfg(test)]
+#[test]
+fn capture_shortcuts_accept_custom_keys_without_stealing_plain_typing() {
+    for key in ["Control+Shift+E", "Control+Alt+P", "PrintScreen", "Shift+F9"] {
+        assert!(valid_capture_shortcut(key), "{key}");
+    }
+    for key in ["", "E", "Shift+E", "Control+", "not-a-key"] {
+        assert!(!valid_capture_shortcut(key), "{key}");
+    }
+}
+
+pub fn save_capture_shortcut(shortcut: &str) -> Result<(), String> {
+    if !valid_capture_shortcut(shortcut) { return Err("Use a modifier key or a function key for capture".into()); }
+    let path = shortcut_config_path();
+    if let Some(parent) = path.parent() { std::fs::create_dir_all(parent).map_err(|e| e.to_string())?; }
+    std::fs::write(path, shortcut).map_err(|e| e.to_string())
+}
 
 fn shortcut_config_path() -> std::path::PathBuf {
     dirs::config_dir()
@@ -159,8 +243,8 @@ fn read_shortcut() -> String {
     std::fs::read_to_string(shortcut_config_path())
         .ok()
         .map(|value| value.trim().to_string())
-        .filter(|value| CAPTURE_SHORTCUTS.contains(&value.as_str()))
-        .unwrap_or_else(|| CAPTURE_SHORTCUTS[0].to_string())
+        .filter(|value| valid_capture_shortcut(value))
+        .unwrap_or_else(|| DEFAULT_CAPTURE_SHORTCUT.to_string())
 }
 
 #[derive(serde::Serialize)]
@@ -184,12 +268,13 @@ fn cmd_get_capture_shortcut(app: AppHandle) -> Result<ShortcutStatus, String> {
 
 #[tauri::command]
 fn cmd_set_capture_shortcut(app: AppHandle, shortcut: String) -> Result<ShortcutStatus, String> {
-    if !CAPTURE_SHORTCUTS.contains(&shortcut.as_str()) {
+    if !valid_capture_shortcut(&shortcut) {
         return Err("Unsupported capture shortcut".to_string());
     }
     let state = app.state::<AppState>();
     let previous = state.shortcut.lock().map_err(|e| e.to_string())?.clone();
     if previous != shortcut {
+        state.capture_shortcut_down.store(false, std::sync::atomic::Ordering::SeqCst);
         if let Ok(old) = previous.parse::<Shortcut>() {
             let _ = app.global_shortcut().unregister(old);
         }
@@ -259,7 +344,8 @@ fn register_capture_shortcuts(app: &AppHandle) -> Result<(), String> {
     let result = app
         .global_shortcut()
         .on_shortcut(shortcut, move |_app, _sc, event| {
-            if event.state() == tauri_plugin_global_shortcut::ShortcutState::Pressed {
+            let state = handle.state::<AppState>();
+            if state.accept_capture_shortcut(event.state() == tauri_plugin_global_shortcut::ShortcutState::Pressed) {
                 trigger_capture(&handle);
             }
         })
@@ -271,6 +357,10 @@ fn register_capture_shortcuts(app: &AppHandle) -> Result<(), String> {
 pub fn run() {
     let _ = ui_elements::set_exploration_depth(read_exploration_depth());
     let args: Vec<String> = std::env::args().skip(1).collect();
+    let launch_capture_options = match LaunchCaptureOptions::parse(&args) {
+        Ok(options) => options,
+        Err(error) => { eprintln!("{error}"); std::process::exit(2); }
+    };
     if args.first().is_some_and(|arg| arg == "--manual-studio-record-input") {
         let result = args.get(1).ok_or_else(|| "Recorder output path is required".to_string())
             .and_then(|path| markits::recording::run_helper(std::path::Path::new(path)));
@@ -286,7 +376,8 @@ pub fn run() {
         .manage(recording::RecordingState::default())
         .manage(playback::PlaybackState::default())
         .manage(AppState {
-            shortcut: Mutex::new(read_shortcut()),
+            shortcut: Mutex::new(launch_capture_options.shortcut.clone().unwrap_or_else(read_shortcut)),
+            launch_capture_options,
             manual_studio: Mutex::new(manual_studio),
             ..AppState::default()
         })
@@ -319,6 +410,8 @@ pub fn run() {
             cursor_capture::cmd_cursor_capture_supported,
             cursor_capture::cmd_arm_cursor_capture,
             cursor_capture::cmd_cursor_guide_status,
+            cursor_capture::cmd_retry_cursor_capture_shortcut,
+            cursor_capture::cmd_recover_cursor_capture,
             commands::cmd_overlay_ready,
             commands::cmd_finish_capture,
             commands::cmd_cancel_capture,
@@ -380,6 +473,19 @@ pub fn run() {
             _ => {}
         })
         .setup(move |app| {
+            let shortcut_app = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                if shortcut_app.state::<AppState>().launch_capture_options.shortcut.is_some() { return; }
+                let mut last = shortcut_app.state::<AppState>().shortcut.lock().map(|key| key.clone()).unwrap_or_default();
+                loop {
+                    tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+                    let next = read_shortcut();
+                    if next != last {
+                        last = next.clone();
+                        let _ = cmd_set_capture_shortcut(shortcut_app.clone(), next);
+                    }
+                }
+            });
             // Build system tray menu
             let show_item = MenuItem::with_id(app, "show", "Show Editor", true, None::<&str>)?;
             let capture_item = MenuItem::with_id(

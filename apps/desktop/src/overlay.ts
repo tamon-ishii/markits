@@ -26,7 +26,7 @@ export class CaptureOverlay {
   private onCursorCallback?: (selection: CursorCaptureSelection) => void;
   private recordingMode = false;
   private includeCursor = false;
-  private captureShortcut = 'PrintScreen';
+  private captureShortcut = 'Control+Shift+E';
 
   public setCursorSupported(supported: boolean) {
     const option = document.getElementById('capture-cursor-option');
@@ -147,7 +147,8 @@ export class CaptureOverlay {
     onRecord?: (window: DetectedUiElement, includeCursor: boolean) => void,
     onCursor?: (selection: CursorCaptureSelection) => void,
     recordingMode = false,
-    captureShortcut = 'PrintScreen'
+    captureShortcut = 'Control+Shift+E',
+    includeCursor = false
   ) {
     this.bgImgEl.src = fullDataUrl;
     this.uiElements = uiElements;
@@ -156,8 +157,7 @@ export class CaptureOverlay {
     this.onRecordCallback = onRecord;
     this.onCursorCallback = onCursor;
     this.captureShortcut = captureShortcut;
-    this.includeCursor = false;
-    (document.getElementById('capture-include-cursor') as HTMLInputElement).checked = false;
+    this.setCursorIncluded(includeCursor);
     this.setRecordingMode(recordingMode);
     this.hoveredElement = null;
 
