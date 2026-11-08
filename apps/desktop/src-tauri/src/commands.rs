@@ -51,6 +51,12 @@ pub async fn cmd_capture_screen(app: tauri::AppHandle) -> Result<capture::Captur
 
 #[tauri::command]
 pub async fn cmd_start_capture(app: tauri::AppHandle) -> Result<(), String> {
+    if app.state::<crate::AppState>().launch_capture_options.include_cursor {
+        app.state::<crate::AppState>().capture_ready_for_editing.store(false, Ordering::SeqCst);
+        crate::cursor_capture::cancel(&app);
+        app.state::<crate::AppState>().capture_generation.fetch_add(1, Ordering::SeqCst);
+        return crate::cursor_capture::cmd_arm_cursor_capture(app, crate::cursor_capture::CursorCaptureTarget::UnderCursor).await;
+    }
     start_window_selection(app, false).await
 }
 
@@ -76,8 +82,11 @@ async fn start_window_selection(app: tauri::AppHandle, recording_mode: bool) -> 
         || -> Result<capture::CapturedImage, capture::CaptureError> {
             // Wait for OS window manager fade-out/unmap animation to completely finish (e.g. GNOME Mutter ~250ms)
             std::thread::sleep(std::time::Duration::from_millis(350));
-            let mut cap = capture::capture_primary_screen()?;
-            let elements = crate::ui_elements::capture_desktop_windows(0, 0);
+            #[cfg(target_os = "windows")]
+            let (mut cap, origin_x, origin_y) = capture::capture_selection_desktop()?;
+            #[cfg(not(target_os = "windows"))]
+            let (mut cap, origin_x, origin_y) = (capture::capture_primary_screen()?, 0, 0);
+            let elements = crate::ui_elements::capture_desktop_windows(origin_x, origin_y);
             cap.ui_elements = elements;
             Ok(cap)
         },
@@ -110,6 +119,16 @@ async fn start_window_selection(app: tauri::AppHandle, recording_mode: bool) -> 
     };
 
     captured.recording_mode = recording_mode;
+    captured.include_cursor = app.state::<crate::AppState>().launch_capture_options.include_cursor;
+    #[cfg(target_os = "windows")]
+    if let Some(overlay) = app.get_webview_window("overlay") {
+        let monitors = overlay.available_monitors().map_err(|e| e.to_string())?;
+        if let (Some(left), Some(top)) = (monitors.iter().map(|m| m.position().x).min(), monitors.iter().map(|m| m.position().y).min()) {
+            overlay.set_fullscreen(false).map_err(|e| e.to_string())?;
+            overlay.set_position(tauri::PhysicalPosition::new(left, top)).map_err(|e| e.to_string())?;
+            overlay.set_size(tauri::PhysicalSize::new(captured.width, captured.height)).map_err(|e| e.to_string())?;
+        }
+    }
     captured.capture_shortcut = Some(app.state::<crate::AppState>().shortcut.lock().map_err(|e| e.to_string())?.clone());
     if let Some(overlay_win) = app.get_webview_window("overlay") {
         let state = app.state::<crate::AppState>();
@@ -469,8 +488,16 @@ pub async fn cmd_finish_capture(
                         // Keep the slot occupied until the blocking call actually exits,
                         // including after the async timeout or a panic.
                         let _guard = DetailScanGuard;
+                        #[cfg(target_os = "windows")]
+                        let (origin_x, origin_y) = {
+                            let screens = screenshots::Screen::all().unwrap_or_default();
+                            (screens.iter().map(|s| s.display_info.x).min().unwrap_or(0),
+                             screens.iter().map(|s| s.display_info.y).min().unwrap_or(0))
+                        };
+                        #[cfg(not(target_os = "windows"))]
+                        let (origin_x, origin_y) = (0, 0);
                         crate::ui_elements::capture_desktop_detailed_elements_for_window(
-                            0, 0, &target,
+                            origin_x, origin_y, &target,
                         )
                     });
                     let scan_result = tokio::time::timeout(Duration::from_secs(3), scan).await;

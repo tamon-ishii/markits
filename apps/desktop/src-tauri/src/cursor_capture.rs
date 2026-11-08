@@ -10,8 +10,18 @@ pub fn cmd_cursor_capture_supported() -> bool {
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize, PartialEq)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum CursorCaptureTarget {
+    UnderCursor,
     Window { window_id: String },
     Fullscreen,
+    Region { x: u32, y: u32, width: u32, height: u32 },
+}
+
+fn resolve_capture_target(target: CursorCaptureTarget) -> Result<CursorCaptureTarget, String> {
+    if target != CursorCaptureTarget::UnderCursor { return Ok(target); }
+    #[cfg(target_os = "windows")]
+    { Ok(CursorCaptureTarget::Window { window_id: windows::window_under_cursor()? }) }
+    #[cfg(not(target_os = "windows"))]
+    { Err("Cursor capture is only supported on Windows".into()) }
 }
 
 impl CursorCaptureTarget {
@@ -23,6 +33,7 @@ impl CursorCaptureTarget {
     }
 
     pub fn bounds(&self) -> Result<markits::window_capture::WindowInfo, String> {
+        if self == &Self::UnderCursor { return resolve_capture_target(self.clone())?.bounds(); }
         if let Some(id) = self.window_id() {
             return markits::window_capture::list_windows()?
                 .into_iter()
@@ -34,6 +45,15 @@ impl CursorCaptureTarget {
             .first()
             .ok_or(crate::i18n::text("撮影する画面が見つかりません", "No screen available to capture"))?
             .display_info;
+        if let Self::Region { x, y, width, height } = self {
+            if *width == 0 || *height == 0 || x.checked_add(*width).is_none_or(|right| right > screen.width) || y.checked_add(*height).is_none_or(|bottom| bottom > screen.height) {
+                return Err("Invalid capture region".into());
+            }
+            return Ok(markits::window_capture::WindowInfo {
+                id: "region".into(), title: crate::i18n::text("選択範囲", "Selected region").into(),
+                x: screen.x + *x as i32, y: screen.y + *y as i32, width: *width, height: *height,
+            });
+        }
         Ok(markits::window_capture::WindowInfo {
             id: "screen".into(),
             title: crate::i18n::text("全画面", "Full screen").into(),
@@ -50,6 +70,9 @@ pub struct CursorGuideStatus {
     shortcut: String,
     window_title: String,
     error: Option<String>,
+    warning: Option<String>,
+    cancel_shortcut_available: bool,
+    capture_shortcut_available: bool,
 }
 
 #[tauri::command]
@@ -60,6 +83,19 @@ pub fn cmd_cursor_guide_status(app: tauri::AppHandle) -> Result<CursorGuideStatu
         .map_err(|e| e.to_string())?
         .clone()
         .ok_or_else(|| crate::i18n::text("撮影の準備が完了していません", "Capture is not ready").into())
+}
+
+#[tauri::command]
+pub fn cmd_retry_cursor_capture_shortcut(app: tauri::AppHandle) -> Result<CursorGuideStatus, String> {
+    let warning=register_waiting_shortcut(&app)?;
+    let state=app.state::<crate::AppState>();
+    let key=state.shortcut.lock().map_err(|e|e.to_string())?.clone();
+    let available=key.parse::<Shortcut>().is_ok_and(|key|app.global_shortcut().is_registered(key));
+    let mut guide=state.cursor_guide.lock().map_err(|e|e.to_string())?;
+    let status=guide.as_mut().ok_or("Cursor capture is not active")?;
+    status.capture_shortcut_available=available;
+    status.warning=warning;
+    Ok(status.clone())
 }
 
 pub fn cancel(app: &tauri::AppHandle) {
@@ -75,6 +111,17 @@ pub fn cancel(app: &tauri::AppHandle) {
     if let Ok(key) = "Escape".parse::<Shortcut>() {
         let _ = app.global_shortcut().unregister(key);
     }
+}
+
+#[tauri::command]
+pub fn cmd_recover_cursor_capture(app: tauri::AppHandle, error: String) -> Result<(), String> {
+    cancel(&app);
+    if let Some(overlay) = app.get_webview_window("overlay") { let _ = overlay.hide(); }
+    if let Some(main) = app.get_webview_window("main") {
+        crate::commands::force_raise_window(&main);
+        main.emit("capture-error", error).map_err(|e| e.to_string())?;
+    }
+    Ok(())
 }
 
 #[tauri::command]
@@ -129,100 +176,61 @@ async fn arm_cursor_capture(
             .map_err(|e| crate::localized!("選択画面のマウス入力を解除できません: {e}", "Cannot release mouse input from the selection overlay: {e}"))?;
         }
     }
-    crate::register_capture_shortcuts(&app)?;
-    let selected = target.clone();
-    let window = tauri::async_runtime::spawn_blocking(move || {
-        let window = selected.bounds()?;
-        // Windows may refuse foreground activation. A visible window can still
-        // be hovered and captured; refusal must not cancel keyboard capture.
-        if let Some(id) = selected.window_id() {
-            let _ = markits::window_capture::activate_window(id);
-        }
-        Ok::<_, String>(window)
-    })
-    .await
-    .map_err(|e| e.to_string())??;
+    let mut shortcut_warning = register_waiting_shortcut(app)?;
     let escape = "Escape".parse::<Shortcut>().map_err(|e| e.to_string())?;
-    app.global_shortcut()
+    let cancel_shortcut_available = app.global_shortcut()
         .on_shortcut(escape, |app, _, event| {
             if event.state() == tauri_plugin_global_shortcut::ShortcutState::Pressed {
                 let _ = crate::commands::cmd_cancel_capture(app.clone());
             }
-        })
-        .map_err(|e| crate::localized!("撮影の取消キーを登録できません: {e}", "Cannot register the capture cancel key: {e}"))?;
+        }).is_ok();
+    if !cancel_shortcut_available {
+        let note=crate::i18n::text("Escは他のアプリで使用中です。取り消す場合はキャンセルボタンを押してください。", "Esc is in use by another application. Use the Cancel button to cancel.");
+        shortcut_warning=Some(shortcut_warning.map(|warning|format!("{warning}\n{note}")).unwrap_or_else(||note.into()));
+    }
     let activate_id = target.window_id().map(str::to_owned);
-    *app.state::<crate::AppState>()
-        .cursor_target
-        .lock()
-        .map_err(|e| e.to_string())? = Some(target);
+    if let Some(id) = activate_id.clone() {
+        let _ = tauri::async_runtime::spawn_blocking(move || markits::window_capture::activate_window(&id)).await;
+    }
+    let bounds = target.bounds().ok();
+    let shortcut = app.state::<crate::AppState>().shortcut.lock().map_err(|e| e.to_string())?.clone();
+    let capture_shortcut_available = shortcut.parse::<Shortcut>().is_ok_and(|key|app.global_shortcut().is_registered(key));
     let status = CursorGuideStatus {
-        shortcut: app
-            .state::<crate::AppState>()
-            .shortcut
-            .lock()
-            .map_err(|e| e.to_string())?
-            .clone(),
-        window_title: window.title,
-        error: None,
+        shortcut,
+        window_title: if target == CursorCaptureTarget::UnderCursor {
+            crate::i18n::text("キーを押した時点のカーソル下のウインドウ", "Window under the cursor when the key is pressed").into()
+        } else { bounds.as_ref().map(|window| window.title.clone()).unwrap_or_default() },
+        error: None, warning: shortcut_warning, cancel_shortcut_available,
+        capture_shortcut_available,
     };
-    *app.state::<crate::AppState>()
-        .cursor_guide
-        .lock()
-        .map_err(|e| e.to_string())? = Some(status.clone());
-    let guide = if let Some(guide) = app.get_webview_window("cursor-guide") {
-        guide
-    } else {
-        let guide = tauri::WebviewWindowBuilder::new(
-            app,
-            "cursor-guide",
-            tauri::WebviewUrl::App("index.html".into()),
-        )
-        .title(crate::i18n::text("MarkIts — マウスカーソル付き撮影", "MarkIts — Capture with cursor"))
-        .inner_size(440.0, 260.0)
-        .resizable(false)
-        .always_on_top(true)
-        .focused(false)
-        .focusable(false)
-        .skip_taskbar(true)
-        .visible(false)
-        .build();
-        let guide = match guide {
-            Ok(guide) => guide,
-            Err(error) => {
-                cancel(app);
-                return Err(crate::localized!("撮影操作ウィンドウを表示できません: {error}", "Cannot show the capture controls: {error}"));
-            }
-        };
-        guide
+    *app.state::<crate::AppState>().cursor_guide.lock().map_err(|e| e.to_string())? = Some(status.clone());
+    *app.state::<crate::AppState>().cursor_target.lock().map_err(|e| e.to_string())? = Some(target);
+    if let Some(main) = app.get_webview_window("main") { main.hide().map_err(|e| e.to_string())?; }
+    let guide = if let Some(guide) = app.get_webview_window("cursor-guide") { guide } else {
+        tauri::WebviewWindowBuilder::new(app,"cursor-guide",tauri::WebviewUrl::App("index.html".into()))
+            .title(crate::i18n::text("MarkIts — 撮影キー待機", "MarkIts — Waiting for capture key"))
+            .inner_size(480.0,330.0).resizable(false).always_on_top(true)
+            .focused(false).focusable(false).skip_taskbar(true).visible(false)
+            .build().map_err(|e| e.to_string())?
     };
-    if let Ok(Some(monitor)) = guide.primary_monitor() {
+    let monitor = guide.available_monitors().ok().and_then(|monitors| bounds.as_ref().and_then(|bounds| {
+        let x = bounds.x as i64 + bounds.width as i64 / 2;
+        let y = bounds.y as i64 + bounds.height as i64 / 2;
+        monitors.into_iter().find(|monitor| {
+            let p=monitor.position();let size=monitor.size();
+            x>=p.x as i64&&x<p.x as i64+size.width as i64&&y>=p.y as i64&&y<p.y as i64+size.height as i64
+        })
+    })).or_else(||guide.primary_monitor().ok().flatten());
+    if let Some(monitor) = monitor {
         if let Ok(size) = guide.outer_size() {
-            let position = monitor.position();
-            let screen = monitor.size();
-            let _ = guide.set_position(tauri::Position::Physical(tauri::PhysicalPosition::new(
-                position.x + (screen.width as i32 - size.width as i32 - 24).max(0),
-                position.y + (screen.height as i32 - size.height as i32 - 72).max(0),
-            )));
+            let p=monitor.position();let screen=monitor.size();
+            guide.set_position(tauri::PhysicalPosition::new(p.x+(screen.width as i32-size.width as i32-24).max(0),p.y+(screen.height as i32-size.height as i32-72).max(0))).map_err(|e|e.to_string())?;
         }
     }
+    guide.show().map_err(|e|e.to_string())?;
     let _ = guide.emit("cursor-guide-update", &status);
-    if let Err(error) = guide.show() {
-        cancel(app);
-        return Err(error.to_string());
-    }
-    if let Some(overlay) = app.get_webview_window("overlay") {
-        let _ = overlay.hide();
-    }
-    if let Some(main) = app.get_webview_window("main") {
-        let _ = main.hide();
-    }
-    // Creating/showing WebView2 can change focus despite focused(false). Return
-    // it to the target only after the guide is visible, so live hover works.
     if let Some(id) = activate_id {
-        let _ = tauri::async_runtime::spawn_blocking(move || {
-            markits::window_capture::activate_window(&id)
-        })
-        .await;
+        let _=tauri::async_runtime::spawn_blocking(move||markits::window_capture::activate_window(&id)).await;
     }
     #[cfg(target_os = "windows")]
     {
@@ -232,6 +240,16 @@ async fn arm_cursor_capture(
     Ok(())
 }
 
+fn register_waiting_shortcut(app: &tauri::AppHandle) -> Result<Option<String>, String> {
+    let requested = app.state::<crate::AppState>().shortcut.lock().map_err(|e| e.to_string())?.clone();
+    match crate::register_capture_shortcuts(app) {
+        Ok(()) => Ok(None),
+        Err(error) => Ok(Some(crate::localized!(
+            "設定された {requested} を登録できません。他のMarkItsなどが使用していないか確認してください。キーは変更していません。\n{error}",
+            "Cannot register the configured {requested}. Check whether another MarkIts instance is using it. The key has not been changed.\n{error}"
+        ))),
+    }
+}
 /// Returns true while a pending pointer capture is handled, so repeated key presses
 /// cannot reopen the selection overlay during capture.
 pub async fn capture_pending(app: &tauri::AppHandle) -> Result<bool, String> {
@@ -256,7 +274,7 @@ pub async fn capture_pending(app: &tauri::AppHandle) -> Result<bool, String> {
             }
             let captured = tauri::async_runtime::spawn_blocking(move || {
                 std::thread::sleep(std::time::Duration::from_millis(80));
-                single_capture(&capture_id)
+                single_capture(&resolve_capture_target(capture_id)?)
             })
             .await
             .map_err(|e| e.to_string())??;
@@ -281,20 +299,16 @@ pub async fn capture_pending(app: &tauri::AppHandle) -> Result<bool, String> {
             Err(error) => {
                 *state.cursor_target.lock().map_err(|e| e.to_string())? = Some(id);
                 let status = {
-                    let mut guide = state.cursor_guide.lock().map_err(|e| e.to_string())?;
-                    if let Some(status) = guide.as_mut() {
-                        status.error = Some(error);
-                    }
+                    let mut guide=state.cursor_guide.lock().map_err(|e|e.to_string())?;
+                    if let Some(status)=guide.as_mut(){status.error=Some(error.clone());}
                     guide.clone()
                 };
-                if let Some(main) = app.get_webview_window("main") {
-                    let _ = main.hide();
-                }
-                if let Some(guide) = app.get_webview_window("cursor-guide") {
-                    if let Some(status) = status {
-                        let _ = guide.emit("cursor-guide-update", &status);
-                    }
-                    let _ = guide.show();
+                if let Some(guide)=app.get_webview_window("cursor-guide") {
+                    if let Some(status)=status {let _=guide.emit("cursor-guide-update",status);}
+                    let _=guide.show();
+                } else if let Some(main) = app.get_webview_window("main") {
+                    crate::commands::force_raise_window(&main);
+                    let _ = main.emit("capture-error", &error);
                 }
             }
         }
@@ -325,6 +339,7 @@ pub fn snapshot_target(
 }
 
 pub fn snapshot_target_with_cursor(target: &CursorCaptureTarget, include_cursor: bool) -> Result<crate::capture::CapturedImage, String> {
+    if target == &CursorCaptureTarget::UnderCursor { return snapshot_target_with_cursor(&resolve_capture_target(target.clone())?, include_cursor); }
     if let Some(id) = target.window_id() {
         return capture_window(id, include_cursor);
     }
@@ -526,6 +541,16 @@ mod windows {
         ptr::{copy_nonoverlapping, null_mut},
     };
     use windows_sys::Win32::{Graphics::Gdi::*, UI::WindowsAndMessaging::*};
+
+    pub fn window_under_cursor() -> Result<String, String> {
+        unsafe {
+            let mut point = windows_sys::Win32::Foundation::POINT { x: 0, y: 0 };
+            if GetCursorPos(&mut point) == 0 { return Err(error()); }
+            let window = GetAncestor(WindowFromPoint(point), GA_ROOT);
+            if window.is_null() { return Err("No window under the cursor".into()); }
+            Ok(format!("0x{:x}", window as usize as u32))
+        }
+    }
 
     fn error() -> String {
         format!(

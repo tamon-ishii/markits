@@ -8,7 +8,7 @@ export interface CropRect {
   width: number;
   height: number;
 }
-export type CursorCaptureSelection = { kind: 'window'; window: DetectedUiElement } | { kind: 'fullscreen' };
+export type CursorCaptureSelection = { kind: 'window'; window: DetectedUiElement } | { kind: 'fullscreen' } | { kind: 'region'; rect: CropRect };
 
 export class CaptureOverlay {
   private overlayEl: HTMLElement;
@@ -25,8 +25,50 @@ export class CaptureOverlay {
   private onRecordCallback?: (window: DetectedUiElement, includeCursor: boolean) => void;
   private onCursorCallback?: (selection: CursorCaptureSelection) => void;
   private recordingMode = false;
+  private regionMode = false;
+  private dragStart: { x: number; y: number } | null = null;
+
+  private setRegionMode() {
+    this.setRecordingMode(false);
+    this.regionMode = true;
+    this.hoveredElement = null;
+    this.hoverBoxEl.style.display = 'none';
+    this.updateDimming(null);
+    this.overlayEl.style.cursor = 'crosshair';
+    document.getElementById('btn-mode-region')?.classList.add('btn-primary');
+    document.getElementById('btn-mode-region')?.setAttribute('aria-pressed', 'true');
+    document.getElementById('btn-mode-capture')?.classList.remove('btn-primary');
+    document.getElementById('btn-mode-capture')?.setAttribute('aria-pressed', 'false');
+    this.updateCaptureHint();
+  }
+
+  private regionRect(e: MouseEvent): CropRect {
+    const start = this.dragStart!;
+    const point = this.screenToImage(e.clientX, e.clientY);
+    const x = Math.max(0, Math.min(this.bgImgEl.naturalWidth, Math.round(point.x)));
+    const y = Math.max(0, Math.min(this.bgImgEl.naturalHeight, Math.round(point.y)));
+    return { x: Math.min(start.x, x), y: Math.min(start.y, y), width: Math.abs(x - start.x), height: Math.abs(y - start.y) };
+  }
+
+  private startRegion(e: MouseEvent) {
+    if (!this.regionMode || this.overlayEl.classList.contains('hidden') || e.button !== 0) return;
+    if ((e.target as HTMLElement).closest('.overlay-toolbar')) return;
+    const point = this.screenToImage(e.clientX, e.clientY);
+    this.dragStart = { x: Math.max(0, Math.min(this.bgImgEl.naturalWidth, Math.round(point.x))), y: Math.max(0, Math.min(this.bgImgEl.naturalHeight, Math.round(point.y))) };
+    e.preventDefault();
+  }
+
+  private finishRegion(e: MouseEvent) {
+    if (!this.dragStart || e.button !== 0) return;
+    const rect = this.regionRect(e);
+    this.dragStart = null;
+    if (rect.width < 2 || rect.height < 2) { this.updateDimming(null); return; }
+    this.hide();
+    if (this.includeCursor) this.onCursorCallback?.({ kind: 'region', rect });
+    else this.onCompleteCallback?.(rect, this.uiElements);
+  }
   private includeCursor = false;
-  private captureShortcut = 'PrintScreen';
+  private captureShortcut = 'Control+Shift+E';
 
   public setCursorSupported(supported: boolean) {
     const option = document.getElementById('capture-cursor-option');
@@ -52,6 +94,10 @@ export class CaptureOverlay {
   }
 
   private setRecordingMode(recording: boolean) {
+    this.regionMode = false;
+    this.dragStart = null;
+    document.getElementById('btn-mode-region')?.classList.remove('btn-primary');
+    document.getElementById('btn-mode-region')?.setAttribute('aria-pressed', 'false');
     this.recordingMode = recording;
     this.overlayEl.style.cursor = 'default';
     for (const [id, active] of [['btn-mode-capture', !recording], ['btn-mode-record', recording]] as const) {
@@ -71,6 +117,12 @@ export class CaptureOverlay {
 
   private updateCaptureHint() {
     const key = this.captureShortcut.replace('Control', 'Ctrl');
+    if (this.regionMode) {
+      document.querySelector('.overlay-hint')!.textContent = this.includeCursor
+        ? t`ドラッグで範囲を選択後、${key}キーでカーソルを含めて撮影します。`
+        : t('ドラッグで撮影範囲を指定してください。Escでキャンセル。');
+      return;
+    }
     document.getElementById('ui-element-action-hint')!.textContent = this.recordingMode ? t('クリックで操作記録を開始') : this.includeCursor ? t('クリックで撮影対象を選択') : t('クリックで撮影');
     document.querySelector('.overlay-hint')!.textContent = this.recordingMode
       ? t`記録対象をクリックしてください。記録中は${key}キーで撮影できます。`
@@ -99,6 +151,10 @@ export class CaptureOverlay {
   }
 
   private bindEvents() {
+    document.getElementById('btn-mode-region')?.addEventListener('click', () => this.setRegionMode());
+    this.overlayEl.addEventListener('mousedown', e => this.startRegion(e));
+    window.addEventListener('mouseup', e => this.finishRegion(e));
+    this.bgImgEl.addEventListener('dragstart', e => e.preventDefault());
     document.getElementById('btn-mode-capture')?.addEventListener('click', () => this.setRecordingMode(false));
     document.getElementById('btn-mode-record')?.addEventListener('click', () => this.setRecordingMode(true));
     document.getElementById('capture-include-cursor')?.addEventListener('change', event => this.setCursorIncluded((event.target as HTMLInputElement).checked));
@@ -128,6 +184,7 @@ export class CaptureOverlay {
         e.preventDefault();
         this.cancel();
       } else if (e.key === 'Enter') {
+        if (this.regionMode) return;
         // Let focused buttons handle Enter without capturing the window first.
         if ((e.target as HTMLElement).closest('.overlay-toolbar, .ui-element-header')) return;
         if (this.recordingMode) { this.recordWindow(this.hoveredElement); return; }
@@ -147,7 +204,8 @@ export class CaptureOverlay {
     onRecord?: (window: DetectedUiElement, includeCursor: boolean) => void,
     onCursor?: (selection: CursorCaptureSelection) => void,
     recordingMode = false,
-    captureShortcut = 'PrintScreen'
+    captureShortcut = 'Control+Shift+E',
+    includeCursor = false
   ) {
     this.bgImgEl.src = fullDataUrl;
     this.uiElements = uiElements;
@@ -156,8 +214,7 @@ export class CaptureOverlay {
     this.onRecordCallback = onRecord;
     this.onCursorCallback = onCursor;
     this.captureShortcut = captureShortcut;
-    this.includeCursor = false;
-    (document.getElementById('capture-include-cursor') as HTMLInputElement).checked = false;
+    this.setCursorIncluded(includeCursor);
     this.setRecordingMode(recordingMode);
     this.hoveredElement = null;
 
@@ -186,6 +243,7 @@ export class CaptureOverlay {
   }
 
   public hide() {
+    this.dragStart = null;
     this.overlayEl.style.cursor = 'default';
     this.overlayEl.classList.add('hidden');
     this.hoverBoxEl.style.display = 'none';
@@ -244,6 +302,10 @@ export class CaptureOverlay {
 
   private handleMouseMove(e: MouseEvent) {
     if (this.overlayEl.classList.contains('hidden')) return;
+    if (this.regionMode) {
+      if (this.dragStart) this.updateDimming(this.regionRect(e));
+      return;
+    }
     if ((e.target as HTMLElement).closest('.overlay-toolbar, .ui-element-header')) return;
     const imgPt = this.screenToImage(e.clientX, e.clientY);
 
@@ -282,6 +344,7 @@ export class CaptureOverlay {
   }
 
   private handleWindowClick(e: MouseEvent) {
+    if (this.regionMode) return;
     if (this.overlayEl.classList.contains('hidden') || e.button !== 0) return;
     if ((e.target as HTMLElement).closest('.overlay-toolbar, .ui-element-header')) return;
     const point = this.screenToImage(e.clientX, e.clientY);

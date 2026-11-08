@@ -1,14 +1,16 @@
 import { t } from './i18n.ts';
 type Invoke = <T>(command: string, args?: Record<string, unknown>) => Promise<T>;
-interface GuideStatus { shortcut: string; window_title: string; error: string | null }
+interface GuideStatus { shortcut: string; window_title: string; error: string | null; warning?: string | null; cancel_shortcut_available?: boolean; capture_shortcut_available?: boolean }
 
 export function showCursorGuide(invoke: Invoke) {
   document.body.innerHTML = t(`<main class="cursor-guide">
     <h1>マウスカーソル付き撮影</h1>
     <p id="cursor-guide-target" class="cursor-guide-target"></p>
     <p>カーソルを撮りたい位置へ動かしてください。</p>
-    <p class="cursor-guide-key"><kbd id="cursor-guide-key">準備中…</kbd><span>キーをもう一度押して撮影してください。</span></p>
-    <p class="cursor-guide-footer">Esc で取消 <button id="cursor-guide-cancel" class="btn">キャンセル</button></p>
+    <p class="cursor-guide-key"><kbd id="cursor-guide-key">準備中…</kbd><span id="cursor-guide-key-hint">このキーを押して撮影してください。</span></p>
+    <p id="cursor-guide-warning" role="status" hidden></p>
+    <button id="cursor-guide-retry-key" class="btn" hidden>同じキーで再登録</button>
+    <p class="cursor-guide-footer"><span id="cursor-guide-cancel-hint">Esc で取消</span><button id="cursor-guide-cancel" class="btn">キャンセル</button></p>
     <p id="cursor-guide-error" role="alert" hidden></p>
   </main>`);
   const error = document.getElementById('cursor-guide-error')!;
@@ -21,15 +23,26 @@ export function showCursorGuide(invoke: Invoke) {
     target.title = status.window_title;
     error.hidden = !status.error;
     error.textContent = status.error ? t`撮影できませんでした：${status.error}。${status.shortcut.replace('Control', 'Ctrl')}キーをもう一度押して再試行できます。` : '';
+    const warning=document.getElementById('cursor-guide-warning')!;
+    warning.hidden=!status.warning;warning.textContent=status.warning||'';
+    document.getElementById('cursor-guide-cancel-hint')!.hidden=status.cancel_shortcut_available===false;
+    document.getElementById('cursor-guide-retry-key')!.hidden=status.capture_shortcut_available!==false;
+    document.getElementById('cursor-guide-key-hint')!.textContent=status.capture_shortcut_available===false?t('キーの競合を解消してから、再登録してください。'):t('このキーを押して撮影してください。');
   };
   const refreshStatus = async () => {
-    try { renderStatus(await invoke<GuideStatus>('cmd_cursor_guide_status')); }
+    try {
+      renderStatus(await invoke<GuideStatus>('cmd_cursor_guide_status'));
+    }
     catch (cause) { error.hidden = false; error.textContent = String(cause); }
   };
   cancel.onclick = async () => {
     cancel.disabled = true;
     try { await invoke('cmd_cancel_capture'); }
     catch (cause) { error.hidden = false; error.textContent = String(cause); cancel.disabled = false; }
+  };
+  document.getElementById('cursor-guide-retry-key')!.onclick=async()=>{
+    try {renderStatus(await invoke<GuideStatus>('cmd_retry_cursor_capture_shortcut'));}
+    catch(cause){error.hidden=false;error.textContent=String(cause);}
   };
   void (async () => {
     try {

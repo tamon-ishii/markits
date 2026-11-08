@@ -404,6 +404,12 @@ pub enum Annotation {
     Badge {
         target: TargetRect,
         #[serde(default)]
+        target_box: bool,
+        #[serde(default)]
+        target_style: Option<SemanticStyle>,
+        #[serde(default)]
+        stroke_width: Option<f64>,
+        #[serde(default)]
         step: Option<u32>,
         #[serde(default)]
         text: Option<String>,

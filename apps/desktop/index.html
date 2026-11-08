@@ -70,11 +70,7 @@
           </div>
           <div class="capture-shortcut-settings">
             <label for="capture-shortcut">撮影ショートカット</label>
-            <select id="capture-shortcut" aria-label="撮影ショートカット">
-              <option value="PrintScreen">PrintScreen</option>
-              <option value="Alt+PrintScreen">Alt+PrintScreen</option>
-              <option value="Control+Shift+S">Ctrl+Shift+S</option>
-            </select>
+            <input id="capture-shortcut" aria-label="撮影ショートカット" placeholder="Control+Shift+E" /><button type="button" id="capture-shortcut-apply">保存</button>
             <span id="capture-shortcut-status" role="status" aria-live="polite"></span>
           </div>
           </div>
@@ -278,6 +274,7 @@
         </div>
       </div>
       <div class="overlay-toolbar">
+        <button id="btn-mode-region" class="btn btn-sm" aria-pressed="false">▧ 選択範囲をキャプチャ</button>
         <button id="btn-mode-capture" class="btn btn-sm btn-primary" aria-pressed="true">📷 撮影</button>
         <label id="capture-cursor-option" class="capture-cursor-option" hidden><input id="capture-include-cursor" type="checkbox"> マウスカーソルを含める</label>
         <button id="btn-mode-record" class="btn btn-sm" aria-pressed="false">⏺ 操作を記録</button>
