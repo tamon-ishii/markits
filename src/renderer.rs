@@ -166,7 +166,15 @@ fn element_geometry(annotation: &ResolvedAnnotation) -> ([f64; 4], Option<Vec<[f
             let path = if let ResolvedAnnotation::StepArrow { arrow_start, arrow_end, .. } = annotation {
                 Some(vec![point(arrow_start), point(arrow_end)])
             } else { None };
-            ([center.x-radius, center.y-radius, 2.0*radius, 2.0*radius], path)
+            let mut bounds = [center.x-radius, center.y-radius, 2.0*radius, 2.0*radius];
+            if let ResolvedAnnotation::Badge { target_box: Some(target), .. } = annotation {
+                let left = bounds[0].min(target.x);
+                let top = bounds[1].min(target.y);
+                let right = (bounds[0] + bounds[2]).max(target.right());
+                let bottom = (bounds[1] + bounds[3]).max(target.bottom());
+                bounds = [left, top, right - left, bottom - top];
+            }
+            (bounds, path)
         }
         ResolvedAnnotation::Pin { head_center, head_radius, text_rect, .. } => {
             let mut bounds = [head_center.x-head_radius, head_center.y-head_radius, 2.0*head_radius, 2.0*head_radius];
@@ -365,6 +373,14 @@ impl SvgRenderer {
         // Layer 2: Dividers, Rectangles, Circles, Arrows, Bullseyes
         for ann in &scene.annotations {
             match ann {
+                ResolvedAnnotation::Badge { target_box: Some(rect), target_style, stroke_width, .. } => {
+                    let tokens = self.theme.tokens_for(*target_style);
+                    let sw = stroke_width.unwrap_or(tokens.stroke_width);
+                    svg.push_str(&format!(
+                        "  <rect data-badge-target=\"true\" x=\"{}\" y=\"{}\" width=\"{}\" height=\"{}\" fill=\"{}\" stroke=\"{}\" stroke-width=\"{}\"/>\n",
+                        rect.x, rect.y, rect.width, rect.height, tokens.light_fill, tokens.stroke_color, sw
+                    ));
+                }
                 ResolvedAnnotation::Divider { start, end, style, stroke_width } => {
                     let tokens = self.theme.tokens_for(*style);
                     svg.push_str(&format!(
@@ -568,7 +584,7 @@ impl SvgRenderer {
                         escaped
                     ));
                 }
-                ResolvedAnnotation::Badge { center, radius, label, style, shadow } => {
+                ResolvedAnnotation::Badge { center, radius, label, style, shadow, .. } => {
                     let tokens = self.theme.tokens_for(*style);
                     let escaped = escape_xml(label);
                     let filter_attr = if *shadow { r#" filter="url(#markits-shadow)""# } else { "" };

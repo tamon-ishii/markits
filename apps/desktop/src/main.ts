@@ -134,7 +134,7 @@ document.addEventListener('DOMContentLoaded', async () => {
                 ? { kind: 'window', window_id: selection.window.window_id!.startsWith('hwnd:')
                     ? `0x${BigInt.asUintN(32, BigInt(selection.window.window_id!.slice(5))).toString(16)}`
                     : `0x${BigInt(selection.window.window_id!).toString(16)}` }
-                : { kind: 'fullscreen' };
+                : selection.kind === 'region' ? { kind: 'region', ...selection.rect } : { kind: 'fullscreen' };
               await invokeTauri('cmd_arm_cursor_capture', { target });
             } catch (error) {
               await invokeTauri('cmd_recover_cursor_capture', {

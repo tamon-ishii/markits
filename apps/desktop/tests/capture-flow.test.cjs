@@ -58,6 +58,50 @@ function fixture() {
   return { overlay, elements, target, shots, pending, recordings, check, event, clickWindow, cancelled: () => cancelled };
 }
 
+test('region mode captures a reverse drag without choosing a window at HiDPI scale', () => {
+  const f = fixture();
+  Object.assign(f.elements.get('overlay-bg'), { naturalWidth: 2400, naturalHeight: 1600 });
+  f.elements.get('btn-mode-region').emit('click');
+  f.overlay.startRegion({ ...f.event(400, 300), preventDefault() {} });
+  f.overlay.handleMouseMove(f.event(100, 80));
+  f.overlay.finishRegion(f.event(100, 80));
+  assert.deepEqual(JSON.parse(JSON.stringify(f.shots)), [{ x: 200, y: 160, width: 600, height: 440 }]);
+  f.clickWindow();
+  assert.equal(f.shots.length, 1);
+});
+
+test('region mode ignores clicks and toolbar drags and Escape cancels a drag', () => {
+  const f = fixture();
+  f.elements.get('btn-mode-region').emit('click');
+  f.overlay.startRegion({ ...f.event(20, 20), preventDefault() {} });
+  f.overlay.finishRegion(f.event(20, 20));
+  assert.equal(f.shots.length, 0);
+  f.overlay.startRegion({ ...f.event(20, 20), target: { closest: () => ({}) }, preventDefault() { throw Error('toolbar drag'); } });
+  f.overlay.finishRegion(f.event(60, 60));
+  assert.equal(f.shots.length, 0);
+  f.overlay.startRegion({ ...f.event(20, 20), preventDefault() {} });
+  f.overlay.cancel();
+  f.overlay.finishRegion(f.event(60, 60));
+  assert.equal(f.shots.length, 0);
+  assert.equal(f.cancelled(), 1);
+});
+
+test('region with cursor uses the selected bounds and can switch back to window mode', () => {
+  const f = fixture();
+  f.elements.get('btn-mode-region').emit('click');
+  f.check(true);
+  f.overlay.startRegion({ ...f.event(10, 20), preventDefault() {} });
+  f.overlay.finishRegion(f.event(80, 100));
+  assert.equal(f.pending[0].kind, 'region');
+  assert.deepEqual(JSON.parse(JSON.stringify(f.pending[0].rect)), { x: 10, y: 20, width: 70, height: 80 });
+  assert.equal(f.shots.length, 0);
+  const g = fixture();
+  g.elements.get('btn-mode-region').emit('click');
+  g.elements.get('btn-mode-capture').emit('click');
+  g.clickWindow();
+  assert.equal(g.shots.length, 1);
+});
+
 test('checking the cursor option does not select even a highlighted window or enter capture waiting', () => {
   const f = fixture();
   f.overlay.handleMouseMove(f.event(150, 150));
@@ -88,7 +132,10 @@ test('moving the pointer does not create a region or enter capture waiting', () 
   f.overlay.handleMouseMove(f.event(300, 240));
   assert.equal(f.pending.length, 0);
   assert.equal(f.shots.length, 0);
-  assert.equal(f.elements.get('capture-overlay').listeners.has('mousedown'), false);
+  f.overlay.startRegion({ ...f.event(100, 100), preventDefault() { throw Error('window mode must not drag'); } });
+  f.overlay.finishRegion(f.event(300, 240));
+  assert.equal(f.pending.length, 0);
+  assert.equal(f.shots.length, 0);
   assert.equal(f.elements.get('capture-overlay').listeners.has('mouseup'), false);
   f.clickWindow();
   assert.equal(f.pending[0].kind, 'window');

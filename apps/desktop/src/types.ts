@@ -85,6 +85,8 @@ export interface PinAnnotation extends BaseAnnotation {
 
 export interface BadgeAnnotation extends BaseAnnotation {
   type: 'badge';
+  target_box?: boolean;
+  target_style?: SemanticStyle;
   target: [number, number, number, number];
   step?: number | string;
   text?: string;

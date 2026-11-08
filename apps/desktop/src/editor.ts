@@ -567,6 +567,9 @@ export class AnnotationEditor {
       }
       case 'badge': {
         const res: any = { ...base };
+        if (anno.target_box !== undefined) res.target_box = Boolean(anno.target_box);
+        if (anno.target_style) res.target_style = anno.target_style;
+        if (anno.stroke_width !== undefined) res.stroke_width = Number(anno.stroke_width);
         res.target = [
           Math.round(anno.target[0]),
           Math.round(anno.target[1]),
@@ -1656,6 +1659,8 @@ export class AnnotationEditor {
         return {
           type: 'badge',
           target: defaultTarget,
+          target_box: true,
+          target_style: 'primary',
           step: nextStep(),
           style: 'step',
           position: 'top',
@@ -2161,7 +2166,14 @@ export class AnnotationEditor {
     `);
 
     // Stroke width (線の太さ) controls for arrows and shapes
-    const supportsStrokeWidth = ['arrow', 'bezier-arrow', 'step-arrow', 'rect', 'rounded-rect', 'circle', 'divider'].includes(anno.type);
+    if (anno.type === 'badge') {
+      html += `<div class="form-group">
+        <label><input id="prop-target-box" type="checkbox" ${anno.target_box ? 'checked' : ''} /> ${t('対象の四角い枠を表示')}</label>
+        <label for="prop-target-style">${t('対象枠の色')}</label>
+        <select id="prop-target-style" class="form-control">${(Object.keys(STYLE_LABELS) as SemanticStyle[]).map(style => `<option value="${style}" ${(anno.target_style ?? 'primary') === style ? 'selected' : ''}>${STYLE_LABELS[style]}</option>`).join('')}</select>
+      </div>`;
+    }
+    const supportsStrokeWidth = ['arrow', 'bezier-arrow', 'step-arrow', 'badge', 'rect', 'rounded-rect', 'circle', 'divider'].includes(anno.type);
     if (supportsStrokeWidth) {
       const currentStroke = (anno as any).stroke_width ?? (anno.type === 'arrow' || anno.type === 'bezier-arrow' ? 4 : 2.5);
       html += t`
@@ -2339,6 +2351,16 @@ export class AnnotationEditor {
     }
 
     // Bind inspector events
+    if (anno.type === 'badge') {
+      document.getElementById('prop-target-box')?.addEventListener('change', event => {
+        anno.target_box = (event.target as HTMLInputElement).checked;
+        this.pushState(); this.scheduleRender();
+      });
+      document.getElementById('prop-target-style')?.addEventListener('change', event => {
+        anno.target_style = (event.target as HTMLSelectElement).value as SemanticStyle;
+        this.pushState(); this.scheduleRender();
+      });
+    }
     const mosaicStrength = document.getElementById('prop-mosaic-strength') as HTMLInputElement | null;
     if (mosaicStrength && anno.type === 'mosaic') {
       mosaicStrength.addEventListener('input', () => {

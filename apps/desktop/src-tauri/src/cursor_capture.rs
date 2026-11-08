@@ -13,6 +13,7 @@ pub enum CursorCaptureTarget {
     UnderCursor,
     Window { window_id: String },
     Fullscreen,
+    Region { x: u32, y: u32, width: u32, height: u32 },
 }
 
 fn resolve_capture_target(target: CursorCaptureTarget) -> Result<CursorCaptureTarget, String> {
@@ -44,6 +45,15 @@ impl CursorCaptureTarget {
             .first()
             .ok_or(crate::i18n::text("撮影する画面が見つかりません", "No screen available to capture"))?
             .display_info;
+        if let Self::Region { x, y, width, height } = self {
+            if *width == 0 || *height == 0 || x.checked_add(*width).is_none_or(|right| right > screen.width) || y.checked_add(*height).is_none_or(|bottom| bottom > screen.height) {
+                return Err("Invalid capture region".into());
+            }
+            return Ok(markits::window_capture::WindowInfo {
+                id: "region".into(), title: crate::i18n::text("選択範囲", "Selected region").into(),
+                x: screen.x + *x as i32, y: screen.y + *y as i32, width: *width, height: *height,
+            });
+        }
         Ok(markits::window_capture::WindowInfo {
             id: "screen".into(),
             title: crate::i18n::text("全画面", "Full screen").into(),

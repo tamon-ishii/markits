@@ -1,4 +1,9 @@
 {
+  "▧ 選択範囲をキャプチャ": "▧ Capture region",
+  "対象の四角い枠を表示": "Show target rectangle",
+  "対象枠の色": "Target rectangle color",
+  "ドラッグで撮影範囲を指定してください。Escでキャンセル。": "Drag to select a capture region. Esc to cancel.",
+  "ドラッグで範囲を選択後、{0}キーでカーソルを含めて撮影します。": "Drag to select a region, then press {0} to capture with the cursor.",
   "「キャプチャ」ボタンを押すか、設定した撮影ショートカットで画面を切り取れます。": "Use Capture or your capture shortcut to take a screenshot.",
   "「画面をキャプチャ」ボタンまたは設定した撮影ショートカットで撮影してみましょう。": "Take a screenshot using Capture or your configured shortcut.",
   "」／種類：": " / Role: ",
