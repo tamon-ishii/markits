@@ -486,6 +486,9 @@ pub fn run() {
                     }
                 }
             });
+            if let Some(window) = app.get_webview_window("main") {
+                window.set_title(&format!("Markits ver{}", app.package_info().version))?;
+            }
             // Build system tray menu
             let show_item = MenuItem::with_id(app, "show", "Show Editor", true, None::<&str>)?;
             let capture_item = MenuItem::with_id(

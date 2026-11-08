@@ -120,14 +120,14 @@ export class CaptureOverlay {
     if (this.regionMode) {
       document.querySelector('.overlay-hint')!.textContent = this.includeCursor
         ? t`ドラッグで範囲を選択後、${key}キーでカーソルを含めて撮影します。`
-        : t('ドラッグで撮影範囲を指定してください。Escでキャンセル。');
+        : t('ドラッグして範囲を選択すると撮影します。');
       return;
     }
     document.getElementById('ui-element-action-hint')!.textContent = this.recordingMode ? t('クリックで操作記録を開始') : this.includeCursor ? t('クリックで撮影対象を選択') : t('クリックで撮影');
     document.querySelector('.overlay-hint')!.textContent = this.recordingMode
       ? t`記録対象をクリックしてください。記録中は${key}キーで撮影できます。`
       : this.includeCursor ? t`対象を選択後、カーソルを動かし、${key}キーをもう一度押して撮影します。`
-      : t('ウィンドウをクリックして撮影。範囲の調整は撮影後にクロップできます。');
+      : t('撮影するウィンドウをクリックしてください。');
   }
 
   private recordWindow(win: DetectedUiElement | null) {

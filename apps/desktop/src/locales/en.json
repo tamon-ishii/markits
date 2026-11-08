@@ -373,5 +373,11 @@
   "保存形式": "Save format",
   "保存画像には元画像・UI情報・操作記録を含めません。再編集は履歴から行えます。": "Saved images exclude source images, UI data, and recordings. Re-edit from history.",
   "画像と再現用JSONを保存しました。画像には再編集メタデータを含めません。": "Saved image and reproduction JSON. The image contains no editing metadata.",
-  "画像を保存しました（再編集メタデータなし）。": "Saved image without editing metadata."
+  "画像を保存しました（再編集メタデータなし）。": "Saved image without editing metadata.",
+  "キャプチャモード": "Capture mode",
+  "ウィンドウ": "Window",
+  "選択範囲": "Region",
+  "全画面を撮影": "Capture full screen",
+  "ドラッグして範囲を選択すると撮影します。": "Drag to select a region and capture it.",
+  "撮影するウィンドウをクリックしてください。": "Click the window you want to capture."
 }

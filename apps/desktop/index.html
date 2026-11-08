@@ -274,13 +274,21 @@
         </div>
       </div>
       <div class="overlay-toolbar">
-        <button id="btn-mode-region" class="btn btn-sm" aria-pressed="false">▧ 選択範囲をキャプチャ</button>
-        <button id="btn-mode-capture" class="btn btn-sm btn-primary" aria-pressed="true">📷 撮影</button>
-        <label id="capture-cursor-option" class="capture-cursor-option" hidden><input id="capture-include-cursor" type="checkbox"> マウスカーソルを含める</label>
-        <button id="btn-mode-record" class="btn btn-sm" aria-pressed="false">⏺ 操作を記録</button>
-        <span class="overlay-hint">ウィンドウをクリックして撮影</span>
-        <button id="btn-capture-fullscreen" class="btn btn-sm btn-primary">🖥️ 全画面キャプチャ</button>
-        <button id="btn-cancel-capture" class="btn btn-sm btn-danger">✕ キャンセル (Esc)</button>
+        <div class="capture-toolbar-row">
+          <div class="capture-modes" role="group" aria-label="キャプチャモード">
+            <button id="btn-mode-capture" class="btn btn-sm btn-primary" aria-pressed="true">ウィンドウ</button>
+            <button id="btn-mode-region" class="btn btn-sm" aria-pressed="false">選択範囲</button>
+            <button id="btn-mode-record" class="btn btn-sm" aria-pressed="false">操作を記録</button>
+          </div>
+          <div class="capture-actions">
+            <button id="btn-capture-fullscreen" class="btn btn-sm">全画面を撮影</button>
+            <button id="btn-cancel-capture" class="btn btn-sm capture-cancel">キャンセル <kbd>Esc</kbd></button>
+          </div>
+        </div>
+        <div class="capture-toolbar-footer">
+          <span class="overlay-hint" role="status">ウィンドウをクリックして撮影</span>
+          <label id="capture-cursor-option" class="capture-cursor-option" hidden><input id="capture-include-cursor" type="checkbox"> マウスカーソルを含める</label>
+        </div>
       </div>
     </div>
 

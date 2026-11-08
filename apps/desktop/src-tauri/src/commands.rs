@@ -635,7 +635,7 @@ pub fn force_raise_window(window: &tauri::WebviewWindow) {
     }
     let _ = window.set_focus();
 
-    crate::ui_elements::activate_x11_window(Some("MarkIts Editor"));
+    crate::ui_elements::activate_x11_window(Some("Markits ver"));
 }
 
 pub fn show_overlay_window(window: &tauri::WebviewWindow) {
