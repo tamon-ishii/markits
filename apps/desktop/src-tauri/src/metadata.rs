@@ -23,6 +23,8 @@ pub enum MetadataError {
     Utf8(#[from] std::string::FromUtf8Error),
     #[error("JSON error: {0}")]
     Json(#[from] serde_json::Error),
+    #[error("Annotation error: {0}")]
+    Annotation(String),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -382,6 +384,9 @@ pub fn load_image_with_metadata(bytes: &[u8]) -> Result<LoadedImageResult, Metad
     let base_ui_elements = base_bytes
         .as_deref()
         .and_then(|bytes| extract_ui_elements(bytes).ok().flatten());
+    let annotations_json = annotations_json
+        .map(|scene| editor_annotations_json(&scene))
+        .transpose()?;
     Ok(LoadedImageResult {
         width,
         height,
@@ -395,6 +400,26 @@ pub fn load_image_with_metadata(bytes: &[u8]) -> Result<LoadedImageResult, Metad
         base_ui_elements,
         crop_info,
     })
+}
+
+// The editor manipulates coordinate arrays. AI/CLI scenes can instead use UI
+// names or rectangle objects, which must be resolved before reaching the editor.
+fn editor_annotations_json(json: &str) -> Result<String, MetadataError> {
+    let scene: serde_json::Value = serde_json::from_str(json)?;
+    let needs_resolution = scene["annotations"].as_array().is_some_and(|annotations| {
+        annotations.iter().any(|annotation| annotation.get("target").is_some_and(|target| target.is_string() || target.is_object()))
+    });
+    if !needs_resolution { return Ok(json.to_string()); }
+    let mut prepared = markits::semantic::prepare(json)
+        .map_err(|e| MetadataError::Annotation(e.to_string()))?.scene;
+    if let Some(annotations) = prepared["annotations"].as_array_mut() {
+        for annotation in annotations {
+            if let Some(target) = annotation.get_mut("target").filter(|target| target.is_object()) {
+                *target = serde_json::json!([target["x"], target["y"], target["width"], target["height"]]);
+            }
+        }
+    }
+    Ok(serde_json::to_string(&prepared)?)
 }
 
 fn image_dimensions(bytes: &[u8]) -> Option<(u32, u32)> {
@@ -412,6 +437,39 @@ fn image_dimensions(bytes: &[u8]) -> Option<(u32, u32)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn ai_named_marks_reopen_as_editable_coordinates_without_painting_the_background() {
+        let mut png = Cursor::new(Vec::new());
+        image::DynamicImage::new_rgb8(200, 120).write_to(&mut png, image::ImageFormat::Png).unwrap();
+        let original = png.into_inner();
+        let scene = serde_json::json!({"canvas":{"width":200,"height":120},"uimap":[
+            {"role":"button","name":"Save","x":30,"y":50,"width":80,"height":30}
+        ],"annotations":[{"type":"badge","target":"Save","step":1,"style":"step","target_box":true}],"hidden_annotations":[]});
+        let rendered = markits::render_composed_png_bytes(&scene.to_string(), &original).unwrap();
+        let tagged = embed_annotations(&rendered, &scene.to_string()).unwrap();
+        let tagged = embed_text_chunk(&tagged, MARKITS_SOURCE_KEYWORD, &format!("data:image/png;base64,{}", base64::engine::general_purpose::STANDARD.encode(&original))).unwrap();
+        let loaded = load_image_with_metadata(&tagged).unwrap();
+        let editable: serde_json::Value = serde_json::from_str(loaded.annotations_json.as_ref().unwrap()).unwrap();
+        assert_eq!(editable["annotations"][0]["target"], serde_json::json!([30.0,50.0,80.0,30.0]));
+        let background = base64::engine::general_purpose::STANDARD.decode(loaded.image_data_url.split_once(',').unwrap().1).unwrap();
+        assert_eq!(image::load_from_memory(&background).unwrap().to_rgba8(), image::load_from_memory(&original).unwrap().to_rgba8());
+        let repainted = markits::render_composed_png_bytes(loaded.annotations_json.as_ref().unwrap(), &background).unwrap();
+        assert_eq!(image::load_from_memory(&repainted).unwrap().to_rgba8(), image::load_from_memory(&rendered).unwrap().to_rgba8());
+        let saved = embed_annotations(&tagged, loaded.annotations_json.as_ref().unwrap()).unwrap();
+        let reopened = load_image_with_metadata(&saved).unwrap();
+        assert_eq!(reopened.annotations_json, loaded.annotations_json);
+        let cleared = markits::render_composed_png_bytes(r#"{"canvas":{"width":200,"height":120},"annotations":[]}"#, &background).unwrap();
+        assert_eq!(image::load_from_memory(&cleared).unwrap().to_rgba8(), image::load_from_memory(&original).unwrap().to_rgba8());
+    }
+
+    #[test]
+    fn object_targets_are_converted_and_unresolvable_names_report_an_error() {
+        let scene = r#"{"canvas":{"width":100,"height":80},"annotations":[{"type":"rect","target":{"x":10,"y":20,"width":30,"height":40}}]}"#;
+        let editable: serde_json::Value = serde_json::from_str(&editor_annotations_json(scene).unwrap()).unwrap();
+        assert_eq!(editable["annotations"][0]["target"], serde_json::json!([10,20,30,40]));
+        assert!(editor_annotations_json(r#"{"canvas":{"width":100,"height":80},"annotations":[{"type":"badge","target":"missing"}]}"#).is_err());
+    }
 
     #[test]
     fn rejects_chunk_length_larger_than_remaining_input() {
