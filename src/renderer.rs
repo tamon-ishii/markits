@@ -373,8 +373,8 @@ impl SvgRenderer {
         // Layer 2: Dividers, Rectangles, Circles, Arrows, Bullseyes
         for ann in &scene.annotations {
             match ann {
-                ResolvedAnnotation::Badge { target_box: Some(rect), target_style, stroke_width, .. } => {
-                    let tokens = self.theme.tokens_for(*target_style);
+                ResolvedAnnotation::Badge { target_box: Some(rect), style, stroke_width, .. } => {
+                    let tokens = self.theme.tokens_for(*style);
                     let sw = stroke_width.unwrap_or(tokens.stroke_width);
                     svg.push_str(&format!(
                         "  <rect data-badge-target=\"true\" x=\"{}\" y=\"{}\" width=\"{}\" height=\"{}\" fill=\"{}\" stroke=\"{}\" stroke-width=\"{}\"/>\n",
@@ -820,6 +820,17 @@ pub fn render_with_layout_from_json(json_str: &str) -> Result<RenderResult> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn badge_target_uses_badge_style_even_with_legacy_target_style() {
+        let scene = r#"{"canvas":{"width":200,"height":120},"annotations":[{"type":"badge","target":[30,50,80,30],"target_box":true,"style":"danger","target_style":"primary"}]}"#;
+        let legacy_svg = render_from_json(scene).unwrap();
+        let unified_svg = render_from_json(&scene.replace(",\"target_style\":\"primary\"", "")).unwrap();
+        assert_eq!(legacy_svg, unified_svg);
+        let tokens = Theme::default().tokens_for(SemanticStyle::Danger);
+        let target = legacy_svg.lines().find(|line| line.contains("data-badge-target=")).unwrap();
+        assert!(target.contains(&format!("stroke=\"{}\"", tokens.stroke_color)));
+    }
 
     #[test]
     fn arrow_line_and_head_styles_render() {

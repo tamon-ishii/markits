@@ -512,7 +512,6 @@ pub enum ResolvedAnnotation {
     Badge {
         center: Point,
         target_box: Option<TargetRect>,
-        target_style: SemanticStyle,
         stroke_width: Option<f64>,
         radius: f64,
         label: String,
@@ -829,7 +828,6 @@ impl LayoutEngine {
                 Annotation::Badge {
                     target,
                     target_box,
-                    target_style,
                     stroke_width,
                     step,
                     text,
@@ -892,7 +890,6 @@ impl LayoutEngine {
                         resolved.push(ResolvedAnnotation::Badge {
                             center,
                             target_box: target_box.then_some(*target),
-                            target_style: target_style.unwrap_or(SemanticStyle::Primary),
                             stroke_width: *stroke_width,
                             radius: self.badge_radius,
                             label: badge_label,

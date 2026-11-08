@@ -568,7 +568,6 @@ export class AnnotationEditor {
       case 'badge': {
         const res: any = { ...base };
         if (anno.target_box !== undefined) res.target_box = Boolean(anno.target_box);
-        if (anno.target_style) res.target_style = anno.target_style;
         if (anno.stroke_width !== undefined) res.stroke_width = Number(anno.stroke_width);
         res.target = [
           Math.round(anno.target[0]),
@@ -1660,7 +1659,6 @@ export class AnnotationEditor {
           type: 'badge',
           target: defaultTarget,
           target_box: true,
-          target_style: 'primary',
           step: nextStep(),
           style: 'step',
           position: 'top',
@@ -2153,7 +2151,7 @@ export class AnnotationEditor {
       </div>
     `;
 
-    html += t(`
+    if (anno.type !== 'badge') html += t(`
       <div class="form-group">
         <label>マークのスタイル</label>
         <div class="stroke-presets">
@@ -2169,8 +2167,6 @@ export class AnnotationEditor {
     if (anno.type === 'badge') {
       html += `<div class="form-group">
         <label><input id="prop-target-box" type="checkbox" ${anno.target_box ? 'checked' : ''} /> ${t('対象の四角い枠を表示')}</label>
-        <label for="prop-target-style">${t('対象枠の色')}</label>
-        <select id="prop-target-style" class="form-control">${(Object.keys(STYLE_LABELS) as SemanticStyle[]).map(style => `<option value="${style}" ${(anno.target_style ?? 'primary') === style ? 'selected' : ''}>${STYLE_LABELS[style]}</option>`).join('')}</select>
       </div>`;
     }
     const supportsStrokeWidth = ['arrow', 'bezier-arrow', 'step-arrow', 'badge', 'rect', 'rounded-rect', 'circle', 'divider'].includes(anno.type);
@@ -2178,13 +2174,7 @@ export class AnnotationEditor {
       const currentStroke = (anno as any).stroke_width ?? (anno.type === 'arrow' || anno.type === 'bezier-arrow' ? 4 : 2.5);
       html += t`
         <div class="form-group">
-          <label>線の太さ (Stroke Width): <span id="stroke-width-val">${currentStroke}px</span></label>
-          <div class="stroke-presets">
-            <button type="button" class="stroke-preset-btn ${currentStroke === 1.5 ? 'active' : ''}" data-stroke="1.5">細い (1.5px)</button>
-            <button type="button" class="stroke-preset-btn ${currentStroke === 2.5 ? 'active' : ''}" data-stroke="2.5">標準 (2.5px)</button>
-            <button type="button" class="stroke-preset-btn ${currentStroke === 4.5 ? 'active' : ''}" data-stroke="4.5">太い (4.5px)</button>
-            <button type="button" class="stroke-preset-btn ${currentStroke === 7 ? 'active' : ''}" data-stroke="7">特太 (7px)</button>
-          </div>
+          <label for="prop-stroke-width">線の太さ (Stroke Width): <span id="stroke-width-val">${currentStroke}px</span></label>
           <input id="prop-stroke-width" type="range" class="form-control" min="1" max="16" step="0.5" value="${currentStroke}" style="margin-top: 6px;" />
         </div>
       `;
@@ -2356,10 +2346,6 @@ export class AnnotationEditor {
         anno.target_box = (event.target as HTMLInputElement).checked;
         this.pushState(); this.scheduleRender();
       });
-      document.getElementById('prop-target-style')?.addEventListener('change', event => {
-        anno.target_style = (event.target as HTMLSelectElement).value as SemanticStyle;
-        this.pushState(); this.scheduleRender();
-      });
     }
     const mosaicStrength = document.getElementById('prop-mosaic-strength') as HTMLInputElement | null;
     if (mosaicStrength && anno.type === 'mosaic') {
@@ -2409,23 +2395,6 @@ export class AnnotationEditor {
       });
     });
 
-    // Stroke width presets
-    this.inspectorEl.querySelectorAll('.stroke-preset-btn').forEach((btn) => {
-      btn.addEventListener('click', () => {
-        const val = parseFloat(btn.getAttribute('data-stroke') || '2.5');
-        (anno as any).stroke_width = val;
-        const strokeWidthEl = document.getElementById('prop-stroke-width') as HTMLInputElement | null;
-        if (strokeWidthEl) strokeWidthEl.value = val.toString();
-        const valLabel = document.getElementById('stroke-width-val');
-        if (valLabel) valLabel.textContent = `${val}px`;
-        this.inspectorEl.querySelectorAll('.stroke-preset-btn').forEach((b) => {
-          b.classList.toggle('active', b === btn);
-        });
-        this.pushState();
-        this.scheduleRender();
-      });
-    });
-
     // Stroke width slider
     const strokeWidthEl = document.getElementById('prop-stroke-width') as HTMLInputElement | null;
     if (strokeWidthEl) {
@@ -2434,10 +2403,6 @@ export class AnnotationEditor {
         (anno as any).stroke_width = val;
         const valLabel = document.getElementById('stroke-width-val');
         if (valLabel) valLabel.textContent = `${val}px`;
-        this.inspectorEl.querySelectorAll('.stroke-preset-btn').forEach((btn) => {
-          const btnVal = parseFloat(btn.getAttribute('data-stroke') || '0');
-          btn.classList.toggle('active', Math.abs(btnVal - val) < 0.05);
-        });
         this.scheduleRender();
       });
       strokeWidthEl.addEventListener('change', () => this.pushState());

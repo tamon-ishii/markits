@@ -962,38 +962,11 @@ textarea.form-control {
   margin-bottom: 12px;
 }
 
-/* Stroke Width Presets */
+/* Property presets */
 .stroke-presets {
   display: flex;
   gap: 6px;
   margin-top: 6px;
-}
-
-.stroke-preset-btn {
-  flex: 1;
-  background-color: var(--bg-panel);
-  border: 1px solid var(--border-color);
-  color: var(--text-muted);
-  font-size: 11px;
-  padding: 5px 4px;
-  border-radius: 4px;
-  cursor: pointer;
-  transition: all 0.15s ease;
-  white-space: nowrap;
-  text-align: center;
-}
-
-.stroke-preset-btn:hover {
-  background-color: var(--bg-hover);
-  color: var(--text-main);
-  border-color: #555566;
-}
-
-.stroke-preset-btn.active {
-  background-color: var(--primary);
-  border-color: var(--primary);
-  color: white;
-  font-weight: 600;
 }
 
 /* Zoom Controls */
