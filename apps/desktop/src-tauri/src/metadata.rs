@@ -405,12 +405,29 @@ pub fn load_image_with_metadata(bytes: &[u8]) -> Result<LoadedImageResult, Metad
 // The editor manipulates coordinate arrays. AI/CLI scenes can instead use UI
 // names or rectangle objects, which must be resolved before reaching the editor.
 fn editor_annotations_json(json: &str) -> Result<String, MetadataError> {
-    let scene: serde_json::Value = serde_json::from_str(json)?;
+    let mut scene: serde_json::Value = serde_json::from_str(json)?;
+    let mut changed = false;
+    if let Some(annotations) = scene["annotations"].as_array() {
+        let kept: Vec<usize> = annotations.iter().enumerate().filter_map(|(index, annotation)| {
+            matches!(annotation["type"].as_str(), Some("arrow" | "bezier-arrow" | "badge" | "step-arrow" | "step_arrow" |
+                "label" | "callout" | "rect" | "rounded-rect" | "rounded_rect" | "circle" | "ellipse" | "mosaic" | "spotlight" | "instruction"))
+                .then_some(index)
+        }).collect();
+        if kept.len() != annotations.len() {
+            let filtered: Vec<_> = kept.iter().map(|&index| annotations[index].clone()).collect();
+            let hidden = scene["hidden_annotations"].as_array().cloned().unwrap_or_default();
+            let remapped: Vec<_> = kept.iter().enumerate().filter_map(|(new, &old)|
+                hidden.iter().any(|value| value.as_u64() == Some(old as u64)).then_some(new)).collect();
+            scene["annotations"] = serde_json::json!(filtered);
+            if scene.get("hidden_annotations").is_some() { scene["hidden_annotations"] = serde_json::json!(remapped); }
+            changed = true;
+        }
+    }
     let needs_resolution = scene["annotations"].as_array().is_some_and(|annotations| {
         annotations.iter().any(|annotation| annotation.get("target").is_some_and(|target| target.is_string() || target.is_object()))
     });
-    if !needs_resolution { return Ok(json.to_string()); }
-    let mut prepared = markits::semantic::prepare(json)
+    if !needs_resolution { return if changed { Ok(serde_json::to_string(&scene)?) } else { Ok(json.to_string()) }; }
+    let mut prepared = markits::semantic::prepare(&serde_json::to_string(&scene)?)
         .map_err(|e| MetadataError::Annotation(e.to_string()))?.scene;
     if let Some(annotations) = prepared["annotations"].as_array_mut() {
         for annotation in annotations {
@@ -469,6 +486,16 @@ mod tests {
         let editable: serde_json::Value = serde_json::from_str(&editor_annotations_json(scene).unwrap()).unwrap();
         assert_eq!(editable["annotations"][0]["target"], serde_json::json!([10,20,30,40]));
         assert!(editor_annotations_json(r#"{"canvas":{"width":100,"height":80},"annotations":[{"type":"badge","target":"missing"}]}"#).is_err());
+    }
+
+    #[test]
+    fn old_removed_and_unknown_marks_are_ignored_before_resolving_targets() {
+        let input = r#"{"canvas":{"width":100,"height":80},"annotations":[{"type":"pin","target":"missing"},{"type":"rect","target":[10,20,30,40]},{"type":"future-mark","target":"missing"},{"type":"bullseye"},{"type":"divider"},{"type":"label","target":[10,20,30,40],"text":"Label"}],"hidden_annotations":[0,5]}"#;
+        let output: serde_json::Value = serde_json::from_str(&editor_annotations_json(input).unwrap()).unwrap();
+        assert_eq!(output["annotations"].as_array().unwrap().len(), 2);
+        assert_eq!(output["annotations"][0]["type"], "rect");
+        assert_eq!(output["annotations"][1]["type"], "label");
+        assert_eq!(output["hidden_annotations"], serde_json::json!([1]));
     }
 
     #[test]

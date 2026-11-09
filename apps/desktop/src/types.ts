@@ -65,6 +65,7 @@ export interface BezierArrowAnnotation extends BaseAnnotation {
 
 export interface CalloutAnnotation extends BaseAnnotation {
   type: 'callout';
+  target_box?: boolean;
   target: [number, number, number, number];
   text: string;
   position?: PositionHint;
@@ -85,6 +86,7 @@ export interface PinAnnotation extends BaseAnnotation {
 
 export interface BadgeAnnotation extends BaseAnnotation {
   type: 'badge';
+  arrow?: boolean;
   target_box?: boolean;
   target_style?: SemanticStyle;
   target: [number, number, number, number];
@@ -105,6 +107,7 @@ export interface StepArrowAnnotation extends BaseAnnotation {
 
 export interface LabelAnnotation extends BaseAnnotation {
   type: 'label';
+  at?: [number, number];
   target: [number, number, number, number];
   text: string;
   position?: PositionHint;
@@ -114,11 +117,18 @@ export interface LabelAnnotation extends BaseAnnotation {
 }
 
 export interface RectAnnotation extends BaseAnnotation {
+  line_style?: 'solid' | 'dashed' | 'dotted';
+  fill_style?: 'none' | 'light' | 'solid';
   type: 'rect';
+  rounded?: boolean;
+  rx?: number;
+  ry?: number;
   target: [number, number, number, number];
 }
 
 export interface RoundedRectAnnotation extends BaseAnnotation {
+  line_style?: 'solid' | 'dashed' | 'dotted';
+  fill_style?: 'none' | 'light' | 'solid';
   type: 'rounded-rect';
   target: [number, number, number, number];
   rx?: number;
@@ -126,6 +136,8 @@ export interface RoundedRectAnnotation extends BaseAnnotation {
 }
 
 export interface CircleAnnotation extends BaseAnnotation {
+  line_style?: 'solid' | 'dashed' | 'dotted';
+  fill_style?: 'none' | 'light' | 'solid';
   type: 'circle';
   target: [number, number, number, number];
 }

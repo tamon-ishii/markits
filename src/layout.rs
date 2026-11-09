@@ -1,4 +1,4 @@
-use crate::model::{Annotation, ArrowSkin, ArrowTextPlacement, ArrowheadStyle, Canvas, LineStyle, PositionHint, Scene, SemanticStyle, TargetRect};
+use crate::model::{Annotation, ArrowSkin, ArrowTextPlacement, ArrowheadStyle, Canvas, FillStyle, LineStyle, PositionHint, Scene, SemanticStyle, TargetRect};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Point {
@@ -471,12 +471,16 @@ pub enum ResolvedAnnotation {
         text_placement: ArrowTextPlacement,
     },
     Rect {
+        line_style: LineStyle,
+        fill_style: FillStyle,
         rect: TargetRect,
         style: SemanticStyle,
         shadow: bool,
         stroke_width: Option<f64>,
     },
     RoundedRect {
+        line_style: LineStyle,
+        fill_style: FillStyle,
         rect: TargetRect,
         rx: f64,
         ry: f64,
@@ -485,6 +489,8 @@ pub enum ResolvedAnnotation {
         stroke_width: Option<f64>,
     },
     Circle {
+        line_style: LineStyle,
+        fill_style: FillStyle,
         cx: f64,
         cy: f64,
         rx: f64,
@@ -501,6 +507,7 @@ pub enum ResolvedAnnotation {
         outline: bool,
     },
     Callout {
+        target_box: Option<TargetRect>,
         box_rect: TargetRect,
         text: String,
         arrow_start: Point,
@@ -519,6 +526,7 @@ pub enum ResolvedAnnotation {
         shadow: bool,
     },
     StepArrow {
+        target_box: Option<TargetRect>,
         center: Point,
         radius: f64,
         label: String,
@@ -714,8 +722,10 @@ impl LayoutEngine {
             let outline = ann.outline_override().unwrap_or(true);
 
             match ann {
-                Annotation::Rect { target, style, stroke_width, .. } => {
+                Annotation::Rect { target, style, stroke_width, line_style, fill_style, .. } => {
                     resolved.push(ResolvedAnnotation::Rect {
+                        line_style: *line_style,
+                        fill_style: *fill_style,
                         rect: *target,
                         style: *style,
                         shadow,
@@ -729,11 +739,14 @@ impl LayoutEngine {
                     ry,
                     style,
                     stroke_width,
+                    line_style, fill_style,
                     ..
                 } => {
                     let rx_val = rx.unwrap_or(8.0);
                     let ry_val = ry.unwrap_or(8.0);
                     resolved.push(ResolvedAnnotation::RoundedRect {
+                        line_style: *line_style,
+                        fill_style: *fill_style,
                         rect: *target,
                         rx: rx_val,
                         ry: ry_val,
@@ -743,8 +756,10 @@ impl LayoutEngine {
                     });
                     occupied_rects.push(*target);
                 }
-                Annotation::Circle { target, style, stroke_width, .. } => {
+                Annotation::Circle { target, style, stroke_width, line_style, fill_style, .. } => {
                     resolved.push(ResolvedAnnotation::Circle {
+                        line_style: *line_style,
+                        fill_style: *fill_style,
                         cx: target.center_x(),
                         cy: target.center_y(),
                         rx: target.width / 2.0,
@@ -767,6 +782,7 @@ impl LayoutEngine {
                 }
                 Annotation::Label {
                     target,
+                    at,
                     text,
                     max_width,
                     style,
@@ -783,9 +799,10 @@ impl LayoutEngine {
                         *position,
                         &occupied_rects,
                     );
-                    occupied_rects.push(best.rect);
+                    let box_rect = at.map(|point| TargetRect::new(point.x, point.y, dim.width, dim.height)).unwrap_or(best.rect);
+                    occupied_rects.push(box_rect);
                     resolved.push(ResolvedAnnotation::Label {
-                        box_rect: best.rect,
+                        box_rect,
                         text: wrapped,
                         style: *style,
                         shadow,
@@ -794,6 +811,7 @@ impl LayoutEngine {
                 }
                 Annotation::Callout {
                     target,
+                    target_box,
                     text,
                     max_width,
                     style,
@@ -816,6 +834,7 @@ impl LayoutEngine {
                     occupied_rects.push(best.rect);
                     occupied_arrows.push((arrow_start, arrow_end));
                     resolved.push(ResolvedAnnotation::Callout {
+                        target_box: target_box.then_some(*target),
                         box_rect: best.rect,
                         text: wrapped,
                         arrow_start,
@@ -867,6 +886,7 @@ impl LayoutEngine {
                         );
                         occupied_rects.push(best.rect);
                         resolved.push(ResolvedAnnotation::StepArrow {
+                            target_box: target_box.then_some(*target),
                             center,
                             radius: self.badge_radius,
                             label: badge_label,
@@ -874,7 +894,7 @@ impl LayoutEngine {
                             arrow_end,
                             style: *style,
                             shadow,
-                            stroke_width: None,
+                            stroke_width: *stroke_width,
                         });
                     } else {
                         let candidates = generate_candidates(target, dim, 8.0);
@@ -937,6 +957,7 @@ impl LayoutEngine {
                     );
                     occupied_rects.push(best.rect);
                     resolved.push(ResolvedAnnotation::StepArrow {
+                            target_box: None,
                         center,
                         radius: self.badge_radius,
                         label: badge_label,
@@ -973,6 +994,7 @@ impl LayoutEngine {
                         let arrow_end = Point::new(e.x, e.y);
                         if let Some(s_num) = step {
                             resolved.push(ResolvedAnnotation::StepArrow {
+                            target_box: None,
                                 center: arrow_start,
                                 radius: self.badge_radius,
                                 label: s_num.to_string(),
@@ -1031,6 +1053,7 @@ impl LayoutEngine {
                             );
                             occupied_rects.push(best.rect);
                             resolved.push(ResolvedAnnotation::StepArrow {
+                            target_box: None,
                                 center,
                                 radius: self.badge_radius,
                                 label: badge_label,

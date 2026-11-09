@@ -77,7 +77,7 @@ fn skin_arrow(points: &[Point], color: &str, width: f64, skin: ArrowSkin, key: &
     if length < 5.0 { return None; }
     let sketch_outline = (width * 0.2).clamp(1.0, 2.0);
     let (head_length, head_half) = match skin {
-        ArrowSkin::Bold => ((length * 0.26).clamp(18.0, 90.0).min(length * 0.45), (length * 0.12).clamp(10.0, 65.0).min(length * 0.25)),
+        ArrowSkin::Bold => ((width * 3.5).clamp(18.0, 30.0).min(length * 0.45), (width * 2.3).clamp(10.0, 22.0).min(length * 0.25)),
         ArrowSkin::Sketch => ((width * 3.5).clamp(18.0, 30.0).min(length * 0.45), ((width * 2.3).clamp(10.0, 22.0) - sketch_outline * 0.5).min(length * 0.26)),
         ArrowSkin::Classic => return None,
     };
@@ -104,7 +104,7 @@ fn skin_arrow(points: &[Point], color: &str, width: f64, skin: ArrowSkin, key: &
         let ny = dx / direction_length;
         let progress = (body[i].1 / neck_distance).clamp(0.0, 1.0);
         let half_width = match skin {
-            ArrowSkin::Bold => 0.6 + ((width * 1.7).max(head_half * 0.36) - 0.6) * progress,
+            ArrowSkin::Bold => width * 0.1 + width * 0.4 * progress,
             ArrowSkin::Sketch => ((width - sketch_outline) * 0.5).max(0.5).min(head_half * 0.65),
             ArrowSkin::Classic => return None,
         };
@@ -373,12 +373,20 @@ impl SvgRenderer {
         // Layer 2: Dividers, Rectangles, Circles, Arrows, Bullseyes
         for ann in &scene.annotations {
             match ann {
-                ResolvedAnnotation::Badge { target_box: Some(rect), style, stroke_width, .. } => {
+                ResolvedAnnotation::Badge { target_box: Some(rect), style, stroke_width, .. }
+                | ResolvedAnnotation::StepArrow { target_box: Some(rect), style, stroke_width, .. } => {
                     let tokens = self.theme.tokens_for(*style);
                     let sw = stroke_width.unwrap_or(tokens.stroke_width);
                     svg.push_str(&format!(
                         "  <rect data-badge-target=\"true\" x=\"{}\" y=\"{}\" width=\"{}\" height=\"{}\" fill=\"{}\" stroke=\"{}\" stroke-width=\"{}\"/>\n",
                         rect.x, rect.y, rect.width, rect.height, tokens.light_fill, tokens.stroke_color, sw
+                    ));
+                }
+                ResolvedAnnotation::Callout { target_box: Some(rect), style, .. } => {
+                    let tokens = self.theme.tokens_for(*style);
+                    svg.push_str(&format!(
+                        "  <rect data-callout-target=\"true\" x=\"{}\" y=\"{}\" width=\"{}\" height=\"{}\" fill=\"{}\" stroke=\"{}\" stroke-width=\"{}\"/>\n",
+                        rect.x, rect.y, rect.width, rect.height, tokens.light_fill, tokens.stroke_color, tokens.stroke_width
                     ));
                 }
                 ResolvedAnnotation::Divider { start, end, style, stroke_width } => {
@@ -389,31 +397,46 @@ impl SvgRenderer {
                         start.x, start.y, end.x, end.y, tokens.stroke_color, stroke_width
                     ));
                 }
-                ResolvedAnnotation::Rect { rect, style, stroke_width, .. } => {
+                ResolvedAnnotation::Rect { rect, style, stroke_width, line_style, fill_style, .. } => {
                     let tokens = self.theme.tokens_for(*style);
                     let sw = stroke_width.unwrap_or(tokens.stroke_width);
+                    let fill = match fill_style {
+                        crate::model::FillStyle::None => "none",
+                        crate::model::FillStyle::Light => &tokens.light_fill,
+                        crate::model::FillStyle::Solid => &tokens.stroke_color,
+                    };
                     svg.push_str(&format!(
-                        r#"  <rect x="{}" y="{}" width="{}" height="{}" fill="{}" stroke="{}" stroke-width="{}"/>
+                        r#"  <rect x="{}" y="{}" width="{}" height="{}" fill="{}" stroke="{}" stroke-width="{}" stroke-linecap="round"{}/>
 "#,
-                        rect.x, rect.y, rect.width, rect.height, tokens.light_fill, tokens.stroke_color, sw
+                        rect.x, rect.y, rect.width, rect.height, fill, tokens.stroke_color, sw, arrow_dash(*line_style)
                     ));
                 }
-                ResolvedAnnotation::RoundedRect { rect, rx, ry, style, stroke_width, .. } => {
+                ResolvedAnnotation::RoundedRect { rect, rx, ry, style, stroke_width, line_style, fill_style, .. } => {
                     let tokens = self.theme.tokens_for(*style);
                     let sw = stroke_width.unwrap_or(tokens.stroke_width);
+                    let fill = match fill_style {
+                        crate::model::FillStyle::None => "none",
+                        crate::model::FillStyle::Light => &tokens.light_fill,
+                        crate::model::FillStyle::Solid => &tokens.stroke_color,
+                    };
                     svg.push_str(&format!(
-                        r#"  <rect x="{}" y="{}" width="{}" height="{}" rx="{}" ry="{}" fill="{}" stroke="{}" stroke-width="{}"/>
+                        r#"  <rect x="{}" y="{}" width="{}" height="{}" rx="{}" ry="{}" fill="{}" stroke="{}" stroke-width="{}" stroke-linecap="round"{}/>
 "#,
-                        rect.x, rect.y, rect.width, rect.height, rx, ry, tokens.light_fill, tokens.stroke_color, sw
+                        rect.x, rect.y, rect.width, rect.height, rx, ry, fill, tokens.stroke_color, sw, arrow_dash(*line_style)
                     ));
                 }
-                ResolvedAnnotation::Circle { cx, cy, rx, ry, style, stroke_width, .. } => {
+                ResolvedAnnotation::Circle { cx, cy, rx, ry, style, stroke_width, line_style, fill_style, .. } => {
                     let tokens = self.theme.tokens_for(*style);
                     let sw = stroke_width.unwrap_or(tokens.stroke_width);
+                    let fill = match fill_style {
+                        crate::model::FillStyle::None => "none",
+                        crate::model::FillStyle::Light => &tokens.light_fill,
+                        crate::model::FillStyle::Solid => &tokens.stroke_color,
+                    };
                     svg.push_str(&format!(
-                        r#"  <ellipse cx="{}" cy="{}" rx="{}" ry="{}" fill="{}" stroke="{}" stroke-width="{}"/>
+                        r#"  <ellipse cx="{}" cy="{}" rx="{}" ry="{}" fill="{}" stroke="{}" stroke-width="{}" stroke-linecap="round"{}/>
 "#,
-                        cx, cy, rx, ry, tokens.light_fill, tokens.stroke_color, sw
+                        cx, cy, rx, ry, fill, tokens.stroke_color, sw, arrow_dash(*line_style)
                     ));
                 }
                 ResolvedAnnotation::Bullseye { center, outer_radius, inner_radius, dot_radius, style, shadow } => {
@@ -553,7 +576,7 @@ impl SvgRenderer {
                         escaped
                     ));
                 }
-                ResolvedAnnotation::Callout { box_rect, text, arrow_start, arrow_end, style, shadow, outline } => {
+                ResolvedAnnotation::Callout { box_rect, text, arrow_start, arrow_end, style, shadow, outline, .. } => {
                     let tokens = self.theme.tokens_for(*style);
                     let key = style_key(*style);
                     let escaped = multiline_text(text, box_rect.center_x(), self.theme.font_size);
@@ -570,7 +593,7 @@ impl SvgRenderer {
                     // Label Box and Text
                     svg.push_str(&format!(
                         r#"  <g{}>
-    <rect x="{}" y="{}" width="{}" height="{}" rx="{}" ry="{}" fill="{}" stroke="{}" stroke-width="1.5"/>
+    <rect data-callout-index="{annotation_index}" x="{}" y="{}" width="{}" height="{}" rx="{}" ry="{}" fill="{}" stroke="{}" stroke-width="1.5"/>
     <text x="{}" y="{}" fill="{}" font-family="{}" font-size="{}" font-weight="600" text-anchor="middle" dominant-baseline="central">{}</text>
   </g>
 "#,
@@ -611,6 +634,7 @@ impl SvgRenderer {
                     style,
                     shadow,
                     stroke_width,
+                    ..
                 } => {
                     let tokens = self.theme.tokens_for(*style);
                     let sw = stroke_width.unwrap_or(tokens.stroke_width);
@@ -896,6 +920,104 @@ mod tests {
         let svg = scene.render_svg().unwrap();
         assert!(svg.starts_with(r#"<svg xmlns="http://www.w3.org/2000/svg" width="1920" height="1080" viewBox="0 0 1920 1080">"#));
         assert!(svg.ends_with("</svg>\n"));
+    }
+
+    #[test]
+    fn standalone_label_position_ignores_legacy_target_and_occupied_areas() {
+        let input = serde_json::json!({
+            "canvas": {"width": 500, "height": 300},
+            "annotations": [
+                {"type":"rect", "target":[10,20,150,80]},
+                {"type":"label", "target":[300,200,150,60], "at":[20,30], "text":"Label", "position":"bottom"}
+            ]
+        });
+        let scene: Scene = serde_json::from_value(input).unwrap();
+        let svg = render_from_json(&serde_json::to_string(&scene).unwrap()).unwrap();
+        let label = svg.lines().find(|line| line.contains("data-label-index=")).unwrap();
+        assert!(label.contains("x=\"20\" y=\"30\""));
+    }
+
+    #[test]
+    fn tapered_arrow_size_tracks_stroke_width_instead_of_arrow_length() {
+        for width in [2.0_f64, 4.0, 8.0, 16.0] {
+            for length in [100.0, 400.0, 1000.0] {
+                let svg = skin_arrow(&[Point::new(0.0, 0.0), Point::new(length, 0.0)], "red", width, ArrowSkin::Bold, "primary", "").unwrap();
+                let path = svg.split("d=\"").nth(1).unwrap().split('"').next().unwrap();
+                let numbers: Vec<f64> = path.split_whitespace().filter_map(|token| token.parse().ok()).collect();
+                let half_height = numbers.chunks_exact(2).map(|pair| pair[1].abs()).fold(0.0_f64, f64::max);
+                assert!((half_height - (width * 2.3).clamp(10.0, 22.0)).abs() < 0.01);
+                // Body at the neck is as thick as the classic arrow shaft.
+                assert!((numbers[3] * 2.0 - width).abs() < 0.01);
+            }
+        }
+    }
+
+    #[test]
+    fn callout_target_box_defaults_visible_and_can_be_hidden() {
+        for visible in [None, Some(true), Some(false)] {
+            let mut input = serde_json::json!({
+                "canvas": {"width": 300, "height": 200},
+                "annotations": [{"type": "callout", "target": [80,80,80,40], "text": "Example"}]
+            });
+            if let Some(value) = visible { input["annotations"][0]["target_box"] = value.into(); }
+            let scene: Scene = serde_json::from_value(input).unwrap();
+            let svg = render_from_json(&serde_json::to_string(&scene).unwrap()).unwrap();
+            assert_eq!(svg.contains("data-callout-target="), visible != Some(false));
+            assert!(svg.contains("data-callout-index=\"0\""));
+            assert!(svg.contains("marker-end="));
+        }
+    }
+
+    #[test]
+    fn unified_badge_arrow_and_target_box_are_independent() {
+        for arrow in [false, true] {
+            for target_box in [false, true] {
+                let input = serde_json::json!({
+                    "canvas": {"width": 300, "height": 200},
+                    "annotations": [{"type": "badge", "target": [80,80,80,40],
+                        "step": 3, "arrow": arrow, "target_box": target_box, "stroke_width": 7}]
+                });
+                let svg = render_from_json(&input.to_string()).unwrap();
+                assert!(svg.contains("data-badge-index=\"0\""));
+                assert_eq!(svg.contains("marker-end=\"url(#arrowhead-"), arrow);
+                assert_eq!(svg.contains("data-badge-target="), target_box);
+                if arrow {
+                    let line = svg.lines().find(|line| line.contains("marker-end=")).unwrap();
+                    assert!(line.contains("stroke-width=\"7\""));
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn shape_line_and_fill_options_survive_save_and_render() {
+        for shape in ["rect", "rounded-rect", "circle"] {
+            for line in ["solid", "dashed", "dotted"] {
+                for fill in ["none", "light", "solid"] {
+                    let input = serde_json::json!({
+                        "canvas": {"width": 200, "height": 120},
+                        "annotations": [{"type": shape, "target": [20,20,80,40],
+                            "line_style": line, "fill_style": fill}]
+                    });
+                    let scene: Scene = serde_json::from_value(input).unwrap();
+                    let saved = serde_json::to_string(&scene).unwrap();
+                    let svg = render_from_json(&saved).unwrap();
+                    let tag = if shape == "circle" { "<ellipse " } else { "<rect " };
+                    let rendered = svg.lines().find(|row| row.contains(tag) && row.contains("stroke-linecap")).unwrap();
+                    assert_eq!(rendered.contains("stroke-dasharray"), line != "solid");
+                    if line == "dashed" { assert!(rendered.contains("9 6")); }
+                    if line == "dotted" { assert!(rendered.contains("2 5")); }
+                    let theme = Theme::default();
+                    let tokens = theme.tokens_for(SemanticStyle::Primary);
+                    let expected_fill = match fill {
+                        "none" => "none",
+                        "light" => &tokens.light_fill,
+                        _ => &tokens.stroke_color,
+                    };
+                    assert!(rendered.contains(&format!("fill=\"{expected_fill}\"")));
+                }
+            }
+        }
     }
 
     #[test]

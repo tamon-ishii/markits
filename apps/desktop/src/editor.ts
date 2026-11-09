@@ -1,5 +1,7 @@
 import { t } from './i18n.ts';
 import { Annotation, BezierArrowAnnotation, ArrowAnnotation, Scene, SemanticStyle, PositionHint, DetectedUiElement } from './types.ts';
+import { encodeAnnotations, decodeAnnotations, offsetAnnotations } from './annotation-clipboard.ts';
+import { importAnnotations } from './annotation-import.ts';
 
 const STYLE_LABELS: Record<SemanticStyle, string> = {
   primary: t('標準'), secondary: t('補助'), warning: t('注意'), danger: t('危険'),
@@ -106,22 +108,24 @@ export class AnnotationEditor {
     const visibleIndices = this.scene.annotations.map((_, i) => i)
       .filter(i => !this.scene.hidden_annotations?.includes(i));
     // Badges and labels can be automatically placed outside their targets.
-    for (const element of this.svgLayerEl.querySelectorAll<SVGGraphicsElement>('circle[data-badge-index], rect[data-label-index]')) {
-      const renderedIndex = Number(element.dataset.labelIndex ?? element.dataset.badgeIndex);
+    for (const element of this.svgLayerEl.querySelectorAll<SVGGraphicsElement>('circle[data-badge-index], rect[data-label-index], rect[data-callout-index]')) {
+      const renderedIndex = Number(element.dataset.labelIndex ?? element.dataset.calloutIndex ?? element.dataset.badgeIndex);
       if (visibleIndices[renderedIndex] === index) {
         const box = element.getBBox();
-        return { x: box.x, y: box.y, width: box.width, height: box.height };
+        return { x: a.type === 'label' && a.at ? a.at[0] : box.x, y: a.type === 'label' && a.at ? a.at[1] : box.y, width: box.width, height: box.height };
       }
     }
+    if (a.type === 'label') return { x: a.at?.[0] ?? 0, y: a.at?.[1] ?? 0, width: 0, height: 0 };
     const points: number[][] = a.start && a.end ? [a.start, a.end, ...(a.control ? [a.control] : [])] : a.target ? [[a.target[0],a.target[1]],[a.target[0]+a.target[2],a.target[1]+a.target[3]]] : [];
     const x = Math.min(...points.map(p=>p[0])), y = Math.min(...points.map(p=>p[1]));
     return {x,y,width:Math.max(...points.map(p=>p[0]))-x,height:Math.max(...points.map(p=>p[1]))-y};
   }
-  private selectionBox(x:number,y:number,width:number,height:number) {
+  private selectionBox(x:number,y:number,width:number,height:number, index?: number) {
     const box = document.createElementNS('http://www.w3.org/2000/svg','rect');
     for (const [key,value] of Object.entries({x,y,width,height})) box.setAttribute(key,String(value));
     box.setAttribute('fill','rgba(59,130,246,0.08)'); box.setAttribute('stroke','#3b82f6');
     box.setAttribute('stroke-dasharray','5 3'); box.setAttribute('pointer-events','none');
+    if (index !== undefined) box.dataset.selectionIndex = String(index);
     this.handlesLayerEl.appendChild(box);
   }
 
@@ -283,8 +287,7 @@ export class AnnotationEditor {
         this.scene = {
           canvas: { width, height },
           shadow: parsed.shadow ?? true,
-          annotations: parsed.annotations ?? [],
-          hidden_annotations: parsed.hidden_annotations ?? [],
+          ...importAnnotations(parsed.annotations, parsed.hidden_annotations),
         };
       } catch (e) {
         console.error('Failed to parse embedded annotations JSON', e);
@@ -526,7 +529,10 @@ export class AnnotationEditor {
         if (anno.stroke_width !== undefined && anno.stroke_width !== null && !isNaN(anno.stroke_width)) {
           res.stroke_width = Number(anno.stroke_width);
         }
-        if (anno.type === 'rounded-rect') {
+        if (anno.line_style) res.line_style = anno.line_style;
+        if (anno.fill_style) res.fill_style = anno.fill_style;
+        if (anno.type === 'rounded-rect' || (anno.type === 'rect' && anno.rounded)) {
+          res.type = 'rounded-rect';
           if (anno.rx !== undefined) res.rx = Number(anno.rx);
           if (anno.ry !== undefined) res.ry = Number(anno.ry);
         }
@@ -553,6 +559,8 @@ export class AnnotationEditor {
       case 'callout':
       case 'label': {
         const res: any = { ...base };
+        if (anno.type === 'label' && anno.at) res.at = anno.at.map((value: number) => Math.round(value));
+        if (anno.type === 'callout') res.target_box = anno.target_box !== false;
         res.target = [
           Math.round(anno.target[0]),
           Math.round(anno.target[1]),
@@ -752,7 +760,52 @@ export class AnnotationEditor {
     }
   }
 
+  private lastPastedMarks = '';
+  private pasteCount = 0;
+
+  public copySelectedMarks(): string | null {
+    if (this.isCropMode || this.isDraggingHandle || this.isDraggingAnnotation || this.isCreating) return null;
+    const annotations = this.scene.annotations.filter((_, index) => this.selection.has(index) && !this.scene.hidden_annotations?.includes(index));
+    if (!annotations.length) return null;
+    this.lastPastedMarks = '';
+    this.pasteCount = 0;
+    return encodeAnnotations(annotations.map(annotation => {
+      if (annotation.type !== 'label' || annotation.at) return annotation;
+      const box = this.bounds(this.scene.annotations.indexOf(annotation));
+      return { ...annotation, at: [box.x, box.y] as [number, number] };
+    }));
+  }
+
+  public pasteMarks(text: string): boolean {
+    if (!this.hasImage() || this.isCropMode || this.isDraggingHandle || this.isDraggingAnnotation || this.isCreating) return false;
+    const annotations = decodeAnnotations(text);
+    if (!annotations) return false;
+    this.pasteCount = this.lastPastedMarks === text ? this.pasteCount + 1 : 1;
+    this.lastPastedMarks = text;
+    const first = this.scene.annotations.length;
+    const copies = offsetAnnotations(annotations, this.pasteCount * 20);
+    this.scene.annotations.push(...copies);
+    this.setTool('select');
+    this.selectMany(copies.map((_, index) => first + index));
+    this.pushState();
+    this.scheduleRender();
+    return true;
+  }
+
   private bindEvents() {
+    const isTextEditing = (target: EventTarget | null) => target instanceof HTMLElement &&
+      (['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName) || target.isContentEditable);
+    window.addEventListener('copy', event => {
+      if (isTextEditing(event.target) || !event.clipboardData) return;
+      const text = this.copySelectedMarks();
+      if (!text) return;
+      event.clipboardData.setData('text/plain', text);
+      event.preventDefault();
+    });
+    window.addEventListener('paste', event => {
+      if (isTextEditing(event.target) || !event.clipboardData) return;
+      if (this.pasteMarks(event.clipboardData.getData('text/plain'))) event.preventDefault();
+    });
     this.handlesLayerEl.addEventListener('mousedown', (e) => this.handleMouseDown(e));
     this.handlesLayerEl.addEventListener('mouseleave', () => this.clearSnapGuide());
     this.viewportEl.addEventListener('mouseleave', () => this.clearSnapGuide());
@@ -1108,6 +1161,7 @@ export class AnnotationEditor {
   }
 
   private creationSnap(x: number, y: number, bypass: boolean) {
+    if (this.activeTool === 'label') return { x, y, snapped: false, element: undefined };
     if (bypass) return { x, y, snapped: false, element: undefined };
     const point = this.findSnapPoint(x, y);
     if (point.snapped) return point;
@@ -1120,7 +1174,7 @@ export class AnnotationEditor {
 
   private createSnappedAnnotation(type: string, snap: { x: number; y: number; snapped: boolean; element?: DetectedUiElement }): Annotation {
     const annotation = this.createDefaultAnnotation(type, snap.x, snap.y);
-    if (snap.snapped && snap.element && 'target' in annotation) {
+    if (annotation.type !== 'label' && snap.snapped && snap.element && 'target' in annotation) {
       const el = snap.element;
       const { width, height } = this.scene.canvas;
       // Mosaic must cover the selected region, including large panels and windows.
@@ -1144,7 +1198,8 @@ export class AnnotationEditor {
    */
   private renderAllSnapTargets(snap?: { x: number; y: number; snapped: boolean; element?: DetectedUiElement }) {
     if (!this.snapGuideLayerEl) return;
-    if (!this.isSnapEnabled || this.uiElements.length === 0 || this.isCropMode) {
+    if (!this.isSnapEnabled || this.uiElements.length === 0 || this.isCropMode || this.activeTool === 'label' ||
+        (this.isDraggingAnnotation && this.selectedIndex !== null && this.scene.annotations[this.selectedIndex]?.type === 'label')) {
       this.setHoverPreview(null);
       this.snapGuideLayerEl.innerHTML = '';
       this.activeSnapLayerEl = null;
@@ -1193,6 +1248,11 @@ export class AnnotationEditor {
     for (let i = this.scene.annotations.length - 1; i >= 0; i--) {
       if (this.scene.hidden_annotations?.includes(i)) continue;
       const anno = this.scene.annotations[i];
+      if (anno.type === 'label') {
+        const box = this.bounds(i);
+        if (box.width > 0 && box.height > 0 && x >= box.x && x <= box.x + box.width && y >= box.y && y <= box.y + box.height) return i;
+        continue;
+      }
       if (anno.type === 'arrow') {
         const arrow = anno as ArrowAnnotation;
         const start = arrow.start ?? [100, 100];
@@ -1241,6 +1301,15 @@ export class AnnotationEditor {
     return null;
   }
 
+  private annotationDragState(index: number) {
+    const state = JSON.parse(JSON.stringify(this.scene.annotations[index]));
+    if (state.type === 'label' && !state.at) {
+      const box = this.bounds(index);
+      state.at = [box.x, box.y];
+    }
+    return state;
+  }
+
   private handleMouseDown(e: MouseEvent) {
     if (e.button !== 0 || this.isCropMode) return;
     this.setHoverPreview(null);
@@ -1259,7 +1328,7 @@ export class AnnotationEditor {
         this.isDraggingAnnotation = true;
         this.dragStartX = coords.x;
         this.dragStartY = coords.y;
-        this.initialAnnotationState = JSON.parse(JSON.stringify(this.scene.annotations[idx]));
+        this.initialAnnotationState = this.annotationDragState(idx);
         this.updateHandles();
         this.updateInspector();
         e.stopPropagation();
@@ -1273,7 +1342,7 @@ export class AnnotationEditor {
       };
       this.dragStartX = coords.x;
       this.dragStartY = coords.y;
-      this.initialAnnotationState = JSON.parse(JSON.stringify(this.scene.annotations[idx]));
+      this.initialAnnotationState = this.annotationDragState(idx);
       e.stopPropagation();
       return;
     }
@@ -1306,7 +1375,7 @@ export class AnnotationEditor {
       this.isDraggingAnnotation = true;
       this.dragStartX = coords.x;
       this.dragStartY = coords.y;
-      this.initialAnnotationState = JSON.parse(JSON.stringify(this.scene.annotations[hitIdx]));
+      this.initialAnnotationState = this.annotationDragState(hitIdx);
       this.updateHandles();
       this.updateInspector();
       return;
@@ -1394,6 +1463,7 @@ export class AnnotationEditor {
         }
       }
 
+      this.updateDragHandles(idx);
       this.scheduleRender();
       return;
     }
@@ -1418,6 +1488,10 @@ export class AnnotationEditor {
         b.start = [Math.round(initial.start[0] + dx), Math.round(initial.start[1] + dy)];
         b.control = [Math.round(initial.control[0] + dx), Math.round(initial.control[1] + dy)];
         b.end = [Math.round(initial.end[0] + dx), Math.round(initial.end[1] + dy)];
+      } else if (anno.type === 'label') {
+        const origin = initial.at;
+        anno.at = [Math.round(origin[0] + dx), Math.round(origin[1] + dy)];
+        this.renderAllSnapTargets();
       } else if ('target' in anno && Array.isArray((anno as any).target)) {
         const target = (anno as any).target;
         const initTarget = initial.target;
@@ -1425,7 +1499,7 @@ export class AnnotationEditor {
         const rawY = Math.max(0, Math.round(initTarget[1] + dy));
 
         if (!e.altKey && this.isSnapEnabled) {
-          const isBadge = anno.type === 'badge' || anno.type === 'step-arrow' || anno.type === 'label';
+          const isBadge = anno.type === 'badge' || anno.type === 'step-arrow';
           const snap = isBadge
             ? this.findSnapElementAtPoint(coords.x, coords.y)
             : this.findSnapElementForMove(rawX, rawY, initTarget[2], initTarget[3]);
@@ -1449,6 +1523,7 @@ export class AnnotationEditor {
         }
       }
 
+      this.updateDragHandles(this.selectedIndex);
       this.scheduleRender();
       return;
     }
@@ -1477,6 +1552,8 @@ export class AnnotationEditor {
           Math.round((this.createStartX + endX) / 2),
           Math.round((this.createStartY + endY) / 2 - 50),
         ];
+      } else if (anno.type === 'label') {
+        anno.at = [Math.round(endX), Math.round(endY)];
       } else if ('target' in anno) {
         let rectSnapped = false;
         if (!e.altKey && this.isSnapEnabled) {
@@ -1522,7 +1599,7 @@ export class AnnotationEditor {
     this.stepBadgeClick = null;
     if (badgeClick && event && Math.hypot(event.clientX - badgeClick.x, event.clientY - badgeClick.y) < 4) {
       const annotation = this.scene.annotations[badgeClick.index];
-      if (annotation?.type === 'step-arrow') {
+      if (annotation?.type === 'step-arrow' || (annotation?.type === 'badge' && annotation.arrow)) {
         const positions: PositionHint[] = ['top', 'right', 'bottom', 'left'];
         annotation.position = positions[(positions.indexOf(badgeClick.position) + 1) % positions.length];
         this.scheduleRender();
@@ -1633,6 +1710,7 @@ export class AnnotationEditor {
       case 'callout':
         return {
           type: 'callout',
+          target_box: true,
           target: defaultTarget,
           text: t('説明テキスト'),
           position: 'auto',
@@ -1649,14 +1727,15 @@ export class AnnotationEditor {
       case 'label':
         return {
           type: 'label',
-          target: defaultTarget,
+          target: [Math.round(x), Math.round(y), 1, 1],
+          at: [Math.round(x), Math.round(y)],
           text: t('ラベル'),
-          position: 'top',
           style: 'primary',
         };
       case 'badge':
         return {
           type: 'badge',
+          arrow: false,
           target: defaultTarget,
           target_box: true,
           step: nextStep(),
@@ -1665,7 +1744,9 @@ export class AnnotationEditor {
         };
       case 'step-arrow':
         return {
-          type: 'step-arrow',
+          type: 'badge',
+          arrow: true,
+          target_box: false,
           target: defaultTarget,
           step: nextStep(),
           style: 'step',
@@ -1679,7 +1760,8 @@ export class AnnotationEditor {
         };
       case 'rounded-rect':
         return {
-          type: 'rounded-rect',
+          type: 'rect',
+          rounded: true,
           target: defaultTarget,
           rx: 12,
           ry: 12,
@@ -1770,6 +1852,8 @@ export class AnnotationEditor {
     // destroys the event target, breaking mouse tracking/capture and causing an apparent UI hang.
     if (!this.isDraggingHandle && !this.isDraggingAnnotation && !this.isCreating && !this.isCropMode) {
       this.updateHandles();
+    } else if (this.selectedIndex !== null && !this.isCropMode) {
+      this.updateDragHandles(this.selectedIndex);
     }
   }
 
@@ -1901,7 +1985,7 @@ export class AnnotationEditor {
           headHit.dataset.annotationIndex = i.toString();
           this.handlesLayerEl.appendChild(headHit);
         }
-      } else if ('target' in anno && Array.isArray((anno as any).target)) {
+      } else if (anno.type !== 'label' && 'target' in anno && Array.isArray((anno as any).target)) {
         const [x, y, w, h] = (anno as any).target;
         const hitRect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
         hitRect.setAttribute('x', (x - 4).toString());
@@ -1940,12 +2024,12 @@ export class AnnotationEditor {
     // badge away from its target rectangle to avoid other annotations.
     const visibleIndices = this.scene.annotations.map((_, index) => index)
       .filter(index => !this.scene.hidden_annotations?.includes(index));
-    for (const badge of this.svgLayerEl.querySelectorAll<SVGElement>('circle[data-badge-index], rect[data-label-index]')) {
-      const isLabel = badge.dataset.labelIndex !== undefined;
-      const index = visibleIndices[Number(isLabel ? badge.dataset.labelIndex : badge.dataset.badgeIndex)];
+    for (const badge of this.svgLayerEl.querySelectorAll<SVGElement>('circle[data-badge-index], rect[data-label-index], rect[data-callout-index]')) {
+      const isLabel = badge.dataset.labelIndex !== undefined || badge.dataset.calloutIndex !== undefined;
+      const index = visibleIndices[Number(isLabel ? (badge.dataset.labelIndex ?? badge.dataset.calloutIndex) : badge.dataset.badgeIndex)];
       if (index === undefined) continue;
       const annotation = this.scene.annotations[index];
-      if (annotation.type !== 'badge' && annotation.type !== 'step-arrow' && annotation.type !== 'label') continue;
+      if (annotation.type !== 'badge' && annotation.type !== 'step-arrow' && annotation.type !== 'label' && annotation.type !== 'callout') continue;
       const hit = document.createElementNS('http://www.w3.org/2000/svg', isLabel ? 'rect' : 'circle');
       if (isLabel) {
         for (const attribute of ['x', 'y', 'width', 'height', 'rx', 'ry']) hit.setAttribute(attribute, badge.getAttribute(attribute)!);
@@ -1955,10 +2039,11 @@ export class AnnotationEditor {
         hit.setAttribute('r', String(Number(badge.getAttribute('r')) + 3));
       }
       hit.setAttribute('fill', 'transparent');
-      hit.style.cursor = 'pointer';
+      hit.style.cursor = 'move';
       hit.dataset.handleType = 'select-anno';
       hit.dataset.annotationIndex = String(index);
-      if (annotation.type === 'step-arrow') {
+      if (annotation.type === 'label') hit.dataset.labelProxyIndex = String(index);
+      if (annotation.type === 'step-arrow' || (annotation.type === 'badge' && annotation.arrow)) {
         const [x, y, width, height] = annotation.target;
         const dx = Number(badge.getAttribute('cx')) - (x + width / 2);
         const dy = Number(badge.getAttribute('cy')) - (y + height / 2);
@@ -2003,6 +2088,8 @@ export class AnnotationEditor {
       selLine.setAttribute('stroke-width', '1.5');
       selLine.setAttribute('stroke-dasharray', '4 4');
       selLine.setAttribute('pointer-events', 'none');
+      selLine.dataset.guide = 'start-end';
+      selLine.dataset.annotationIndex = String(idx);
       this.handlesLayerEl.appendChild(selLine);
 
       // Show draggable start (green) and end (red) handle circles on the arrow
@@ -2010,12 +2097,15 @@ export class AnnotationEditor {
       this.addSvgHandle(end[0], end[1], 'end', idx, 'handle-point end');
     } else if (anno.type === 'bezier-arrow') {
       const b = anno as BezierArrowAnnotation;
-      this.addSvgLine(b.start[0], b.start[1], b.control[0], b.control[1], 'handle-line');
-      this.addSvgLine(b.control[0], b.control[1], b.end[0], b.end[1], 'handle-line');
+      this.addSvgLine(b.start[0], b.start[1], b.control[0], b.control[1], 'handle-line', idx, 'start-control');
+      this.addSvgLine(b.control[0], b.control[1], b.end[0], b.end[1], 'handle-line', idx, 'control-end');
 
       this.addSvgHandle(b.start[0], b.start[1], 'start', idx, 'handle-point start');
       this.addSvgHandle(b.control[0], b.control[1], 'control', idx, 'handle-point control');
       this.addSvgHandle(b.end[0], b.end[1], 'end', idx, 'handle-point end');
+    } else if (anno.type === 'label') {
+      const box = this.bounds(idx);
+      this.selectionBox(box.x, box.y, box.width, box.height, idx);
     } else if ('target' in anno) {
       const [x, y, w, h] = (anno as any).target;
 
@@ -2026,16 +2116,78 @@ export class AnnotationEditor {
       rect.setAttribute('width', w.toString());
       rect.setAttribute('height', h.toString());
       rect.setAttribute('class', 'handle-bbox');
+      rect.style.cursor = 'move';
       rect.dataset.handleType = 'move';
       rect.dataset.annotationIndex = idx.toString();
       this.handlesLayerEl.appendChild(rect);
 
-      if (anno.type !== 'badge' && anno.type !== 'step-arrow' && anno.type !== 'label') {
-        // Resize and move handles are unnecessary for numbered badges.
-        this.addSvgHandle(x + w, y + h, 'se', idx, 'handle-point');
-        this.addSvgHandle(x + w / 2, y + h / 2, 'move', idx, 'handle-point start');
-      }
+      this.addSvgHandle(x + w, y + h, 'se', idx, 'handle-point');
+      this.addSvgMoveHandle(x + w / 2, y + h / 2, idx);
     }
+  }
+
+  private updateDragHandles(index: number) {
+    const annotation = this.scene.annotations[index];
+    if (!annotation) return;
+    const set = (element: Element | null, attributes: Record<string, number>) => {
+      for (const [key, value] of Object.entries(attributes)) element?.setAttribute(key, String(value));
+    };
+    if (annotation.type === 'arrow' || annotation.type === 'bezier-arrow') {
+      const points: Record<string, number[] | undefined> = {
+        start: annotation.start, end: annotation.end,
+        control: annotation.type === 'bezier-arrow' ? annotation.control : undefined,
+      };
+      for (const [type, point] of Object.entries(points)) {
+        if (point) set(this.handlesLayerEl.querySelector(`circle[data-handle-type="${type}"][data-annotation-index="${index}"]`), { cx: point[0], cy: point[1] });
+      }
+      for (const guide of ['start-end', 'start-control', 'control-end']) {
+        const [from, to] = guide.split('-').map(key => points[key]);
+        if (from && to) set(this.handlesLayerEl.querySelector(`line[data-guide="${guide}"][data-annotation-index="${index}"]`), { x1: from[0], y1: from[1], x2: to[0], y2: to[1] });
+      }
+      return;
+    }
+    if (annotation.type === 'label') {
+      const box = this.bounds(index);
+      set(this.handlesLayerEl.querySelector(`[data-selection-index="${index}"]`), box);
+      set(this.handlesLayerEl.querySelector(`[data-label-proxy-index="${index}"]`), box);
+      return;
+    }
+    if (!('target' in annotation) || !annotation.target) return;
+    const [x, y, width, height] = annotation.target;
+    const box = this.handlesLayerEl.querySelector<SVGRectElement>(`.handle-bbox[data-annotation-index="${index}"]`);
+    if (box) {
+      for (const [key, value] of Object.entries({ x, y, width, height })) box.setAttribute(key, String(value));
+    }
+    const resize = this.handlesLayerEl.querySelector<SVGCircleElement>(`circle[data-handle-type="se"][data-annotation-index="${index}"]`);
+    resize?.setAttribute('cx', String(x + width));
+    resize?.setAttribute('cy', String(y + height));
+    const move = this.handlesLayerEl.querySelector<SVGGElement>(`g[data-move-handle-index="${index}"]`);
+    if (move) {
+      move.setAttribute('transform', `translate(${x + width / 2 - Number(move.dataset.centerX)} ${y + height / 2 - Number(move.dataset.centerY)})`);
+    }
+  }
+
+  private addSvgMoveHandle(cx: number, cy: number, index: number) {
+    const group = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+    group.dataset.moveHandleIndex = String(index);
+    group.dataset.centerX = String(cx);
+    group.dataset.centerY = String(cy);
+    group.style.cursor = 'move';
+    const hit = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+    hit.setAttribute('cx', String(cx));
+    hit.setAttribute('cy', String(cy));
+    hit.setAttribute('r', '12');
+    hit.setAttribute('fill', 'transparent');
+    hit.dataset.handleType = 'move';
+    hit.dataset.annotationIndex = String(index);
+    const arrows = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    arrows.setAttribute('d', `M ${cx - 8} ${cy} H ${cx + 8} M ${cx} ${cy - 8} V ${cy + 8} M ${cx - 5} ${cy - 3} L ${cx - 8} ${cy} L ${cx - 5} ${cy + 3} M ${cx + 5} ${cy - 3} L ${cx + 8} ${cy} L ${cx + 5} ${cy + 3} M ${cx - 3} ${cy - 5} L ${cx} ${cy - 8} L ${cx + 3} ${cy - 5} M ${cx - 3} ${cy + 5} L ${cx} ${cy + 8} L ${cx + 3} ${cy + 5}`);
+    arrows.setAttribute('fill', 'none');
+    arrows.setAttribute('stroke', '#2563eb');
+    arrows.setAttribute('stroke-width', '1.5');
+    arrows.setAttribute('pointer-events', 'none');
+    group.append(hit, arrows);
+    this.handlesLayerEl.appendChild(group);
   }
 
   private addSvgHandle(cx: number, cy: number, type: string, index: number, className: string) {
@@ -2044,19 +2196,67 @@ export class AnnotationEditor {
     circle.setAttribute('cy', cy.toString());
     circle.setAttribute('r', '6');
     circle.setAttribute('class', className);
+    circle.style.cursor = type === 'se' ? 'nwse-resize' : type === 'move' ? 'move' : 'crosshair';
     circle.dataset.handleType = type;
     circle.dataset.annotationIndex = index.toString();
     this.handlesLayerEl.appendChild(circle);
   }
 
-  private addSvgLine(x1: number, y1: number, x2: number, y2: number, className: string) {
+  private addSvgLine(x1: number, y1: number, x2: number, y2: number, className: string, index: number, guide: string) {
     const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
     line.setAttribute('x1', x1.toString());
     line.setAttribute('y1', y1.toString());
     line.setAttribute('x2', x2.toString());
     line.setAttribute('y2', y2.toString());
     line.setAttribute('class', className);
+    line.dataset.annotationIndex = String(index);
+    line.dataset.guide = guide;
     this.handlesLayerEl.appendChild(line);
+  }
+
+  private rectangleRoundness(annotation: Annotation): number {
+    if (annotation.type !== 'rect' || !annotation.rounded) return 0;
+    const maximum = Math.min(annotation.target[2], annotation.target[3]) / 2;
+    return maximum > 0 ? Math.round(Math.min(100, Math.max(0, (annotation.rx ?? 8) / maximum * 100))) : 0;
+  }
+
+  private cornerSliderHtml(annotations: Annotation[]): string {
+    const values = annotations.map(annotation => this.rectangleRoundness(annotation));
+    const common = values.every(value => value === values[0]);
+    return `<div class="form-group">
+      <label for="prop-corner-roundness">${t('角の丸み')}: <span id="corner-roundness-value">${common ? `${values[0]}%` : t('混在')}</span></label>
+      <input id="prop-corner-roundness" class="form-control" type="range" min="0" max="100" step="1" value="${values[0]}" />
+      <div class="arrow-placement-hint">0%: ${t('直角')} / 100%: ${t('最大')}</div>
+    </div>`;
+  }
+
+  private setRectangleRoundness(index: number, percent: number) {
+    const annotation = this.scene.annotations[index];
+    if (annotation?.type !== 'rect' || !Number.isFinite(percent)) return;
+    const value = Math.max(0, Math.min(100, percent));
+    const radius = Math.min(annotation.target[2], annotation.target[3]) / 2 * value / 100;
+    annotation.rounded = value > 0;
+    annotation.rx = radius;
+    annotation.ry = radius;
+  }
+
+  private bindCornerSlider(indices: number[], annotations: Annotation[]) {
+    const input = document.getElementById('prop-corner-roundness') as HTMLInputElement | null;
+    const current = () => annotations.every((annotation, index) => this.scene.annotations[indices[index]] === annotation && this.selection.has(indices[index]));
+    let changed = false;
+    input?.addEventListener('input', () => {
+      if (!current()) return;
+      const value = Number(input.value);
+      if (!Number.isFinite(value)) return;
+      indices.forEach(index => this.setRectangleRoundness(index, value));
+      const label = document.getElementById('corner-roundness-value');
+      if (label) label.textContent = `${value}%`;
+      changed = true;
+      this.scheduleRender();
+    });
+    input?.addEventListener('change', () => {
+      if (changed && current()) { this.pushState(); changed = false; }
+    });
   }
 
   private updateBulkInspector() {
@@ -2076,10 +2276,16 @@ export class AnnotationEditor {
     if (!['spotlight', 'divider', 'mosaic'].includes(types[0])) fields.push(['shadow',t('影'),['true','false']]);
     if (['arrow','bezier-arrow','callout','pin','label'].includes(types[0])) fields.push(['outline',t('縁取り'),['true','false']]);
     if (['badge','step-arrow'].includes(types[0])) fields.push(['step',t('手順番号'),null]);
-    if (types[0] === 'rounded-rect') fields.push(['rx',t('角丸の横半径'),null],['ry',t('角丸の縦半径'),null]);
-    if (['callout','pin','badge','step-arrow','label','bezier-arrow'].includes(types[0])) fields.push(['position',t('配置'),['auto','top','bottom','left','right','center']]);
+    if (types[0] === 'badge') fields.push(['arrow',t('矢印を表示'),['true','false']],['target_box',t('対象の四角い枠を表示'),['true','false']]);
+    if (types[0] === 'callout') fields.push(['target_box',t('対象の四角い枠を表示'),['true','false']]);
+    if (types[0] === 'rect') {
+      this.inspectorEl.insertAdjacentHTML('beforeend', this.cornerSliderHtml(annotations));
+      this.bindCornerSlider(indices, annotations);
+    }
+    if (['callout','pin','badge','step-arrow','bezier-arrow'].includes(types[0])) fields.push(['position',t('配置'),['auto','top','bottom','left','right','center']]);
     if (types[0] === 'divider') fields.push(['position',t('配置'),['top','bottom','left','right']]);
     if (['arrow','bezier-arrow','step-arrow','rect','rounded-rect','circle','divider'].includes(types[0])) fields.push(['stroke_width',t('線の太さ'),null]);
+    if (['rect','rounded-rect','circle'].includes(types[0])) fields.push(['line_style',t('線種'),['solid','dashed','dotted']],['fill_style',t('塗りつぶし'),['none','light','solid']]);
     if (['arrow','bezier-arrow'].includes(types[0])) fields.push(['line_style',t('線種'),['solid','dashed','dotted']],['arrowhead',t('矢印の先端'),['filled','open']],['arrow_skin',t('矢印の形'),['classic','sketch','bold']],['box',t('テキスト背景'),['true','false']],['text_placement',t('テキスト位置'),['middle','end']]);
     if (['arrow','bezier-arrow','callout','pin','badge','step-arrow','label'].includes(types[0])) fields.push(['text',t('テキスト'),null],['font_family',t('フォント'),['sans-serif','serif','monospace']]);
     if (['arrow','bezier-arrow','callout','label'].includes(types[0])) fields.push(['font_size',t('文字サイズ'),null]);
@@ -2109,7 +2315,7 @@ export class AnnotationEditor {
         if (annotations.some((a, i) => this.scene.annotations[indices[i]] !== a || !this.selection.has(indices[i]))) return;
         if(input instanceof HTMLSelectElement && input.value==='') return;
         if(input instanceof HTMLInputElement && input.type==='number' && (!input.validity.valid || input.value==='')) return;
-        const value=['shadow','box','outline'].includes(key) ? input.value==='true' : ['stroke_width','font_size','step','rx','ry'].includes(key) ? Number(input.value) : input.value;
+        const value=['shadow','box','outline','arrow','target_box','rounded'].includes(key) ? input.value==='true' : ['stroke_width','font_size','step','rx','ry'].includes(key) ? Number(input.value) : input.value;
         for(const a of annotations) {
           (a as any)[key]=value;
           if(key==='text' && String(value).trim()) (a as any).has_text=true;
@@ -2151,21 +2357,29 @@ export class AnnotationEditor {
       </div>
     `;
 
-    if (anno.type !== 'badge') html += t(`
-      <div class="form-group">
-        <label>マークのスタイル</label>
-        <div class="stroke-presets">
-          <button type="button" class="mark-style-preset" data-mark-style="standard">標準</button>
-          <button type="button" class="mark-style-preset" data-mark-style="bold">強調</button>
-          <button type="button" class="mark-style-preset" data-mark-style="subtle">控えめ</button>
-          <button type="button" class="mark-style-preset" data-mark-style="guide">手順</button>
-        </div>
-      </div>
-    `);
+    if (anno.type === 'rect') {
+      html += this.cornerSliderHtml([anno]);
+    }
+
+    if (['rect', 'rounded-rect', 'circle'].includes(anno.type)) {
+      html += '<div class="form-group"><label for="prop-shape-line-style">' + t('線種') + '</label><select id="prop-shape-line-style" class="form-control">' +
+        [['solid', t('実線')], ['dashed', t('破線')], ['dotted', t('点線')]].map(([value, label]) =>
+          `<option value="${value}" ${((anno as any).line_style ?? 'solid') === value ? 'selected' : ''}>${label}</option>`).join('') +
+        '</select><label for="prop-shape-fill-style">' + t('塗りつぶし') + '</label><select id="prop-shape-fill-style" class="form-control">' +
+        [['none', t('なし')], ['light', t('薄い色')], ['solid', t('単色')]].map(([value, label]) =>
+          `<option value="${value}" ${((anno as any).fill_style ?? 'light') === value ? 'selected' : ''}>${label}</option>`).join('') + '</select></div>';
+    }
+
+    if (anno.type === 'callout') {
+      html += `<div class="form-group">
+        <label><input id="prop-target-box" type="checkbox" ${anno.target_box !== false ? 'checked' : ''} /> ${t('対象の四角い枠を表示')}</label>
+      </div>`;
+    }
 
     // Stroke width (線の太さ) controls for arrows and shapes
     if (anno.type === 'badge') {
       html += `<div class="form-group">
+        <label><input id="prop-badge-arrow" type="checkbox" ${anno.arrow ? 'checked' : ''} /> ${t('矢印を表示')}</label>
         <label><input id="prop-target-box" type="checkbox" ${anno.target_box ? 'checked' : ''} /> ${t('対象の四角い枠を表示')}</label>
       </div>`;
     }
@@ -2287,7 +2501,7 @@ export class AnnotationEditor {
     // Position Hint affects the text around curved arrows and the placement of other anchored marks.
     const hasPositionHint = anno.type === 'bezier-arrow'
       ? Boolean((anno as any).has_text ?? ((anno as any).text && String((anno as any).text).trim().length > 0))
-      : !isArrowType && ('position' in anno || anno.type === 'badge' || anno.type === 'step-arrow' || anno.type === 'label');
+      : !isArrowType && anno.type !== 'label' && ('position' in anno || anno.type === 'badge' || anno.type === 'step-arrow');
     if (hasPositionHint) {
       const pos = (anno as any).position ?? 'auto';
       const isBezierArrow = anno.type === 'bezier-arrow';
@@ -2307,7 +2521,7 @@ export class AnnotationEditor {
       `;
     }
 
-    if (anno.type === 'badge' || anno.type === 'label') {
+    if (anno.type === 'badge') {
       html += t`<div class="form-group">
         <label for="prop-badge-x">対象位置 X (px)</label>
         <input id="prop-badge-x" class="form-control" type="number" step="1" value="${anno.target[0]}" />
@@ -2337,11 +2551,23 @@ export class AnnotationEditor {
     this.inspectorEl.innerHTML = html;
     if (anno.type === 'mosaic') {
       this.inspectorEl.querySelector('.style-palette')?.closest('.form-group')?.remove();
-      this.inspectorEl.querySelector('[data-mark-style]')?.closest('.form-group')?.remove();
     }
 
     // Bind inspector events
+    if (anno.type === 'rect') {
+      this.bindCornerSlider([idx], [anno]);
+    }
+    if (anno.type === 'callout') {
+      document.getElementById('prop-target-box')?.addEventListener('change', event => {
+        anno.target_box = (event.target as HTMLInputElement).checked;
+        this.pushState(); this.scheduleRender();
+      });
+    }
     if (anno.type === 'badge') {
+      document.getElementById('prop-badge-arrow')?.addEventListener('change', event => {
+        anno.arrow = (event.target as HTMLInputElement).checked;
+        this.pushState(); this.scheduleRender();
+      });
       document.getElementById('prop-target-box')?.addEventListener('change', event => {
         anno.target_box = (event.target as HTMLInputElement).checked;
         this.pushState(); this.scheduleRender();
@@ -2369,32 +2595,6 @@ export class AnnotationEditor {
       });
     });
 
-    const markStylePresets: Record<string, { style: SemanticStyle; stroke: number; shadow: boolean; outline: boolean }> = {
-      standard: { style: 'primary', stroke: 2.5, shadow: false, outline: true },
-      bold: { style: 'danger', stroke: 7, shadow: true, outline: true },
-      subtle: { style: 'secondary', stroke: 1.5, shadow: false, outline: false },
-      guide: { style: 'step', stroke: 4.5, shadow: true, outline: true },
-    };
-    const presetSupportsStroke = ['arrow', 'bezier-arrow', 'step-arrow', 'rect', 'rounded-rect', 'circle'].includes(anno.type);
-    const presetSupportsShadow = !['spotlight', 'divider'].includes(anno.type);
-    const presetSupportsOutline = ['arrow', 'bezier-arrow', 'callout', 'label', 'pin'].includes(anno.type);
-    this.inspectorEl.querySelectorAll('.mark-style-preset').forEach((button) => {
-      const key = button.getAttribute('data-mark-style') ?? '';
-      const preset = markStylePresets[key];
-      if (!preset) return;
-      if (anno.style === preset.style && (!presetSupportsStroke || (anno as any).stroke_width === preset.stroke) &&
-          (!presetSupportsShadow || anno.shadow === preset.shadow)) button.classList.add('active');
-      button.addEventListener('click', () => {
-        anno.style = preset.style;
-        if (presetSupportsStroke) (anno as any).stroke_width = preset.stroke;
-        if (presetSupportsShadow) anno.shadow = preset.shadow;
-        if (presetSupportsOutline) (anno as any).outline = preset.outline;
-        this.pushState();
-        this.scheduleRender();
-        this.updateInspector();
-      });
-    });
-
     // Stroke width slider
     const strokeWidthEl = document.getElementById('prop-stroke-width') as HTMLInputElement | null;
     if (strokeWidthEl) {
@@ -2418,7 +2618,7 @@ export class AnnotationEditor {
         this.scheduleRender();
       });
     });
-    for (const [id, key] of [['prop-arrow-line-style', 'line_style'], ['prop-arrowhead', 'arrowhead']] as const) {
+    for (const [id, key] of [['prop-arrow-line-style', 'line_style'], ['prop-arrowhead', 'arrowhead'], ['prop-shape-line-style', 'line_style'], ['prop-shape-fill-style', 'fill_style']] as const) {
       const select = document.getElementById(id) as HTMLSelectElement | null;
       select?.addEventListener('change', () => {
         (anno as any)[key] = select.value;
@@ -2493,7 +2693,7 @@ export class AnnotationEditor {
       });
     }
 
-    if (anno.type === 'badge' || anno.type === 'label') {
+    if (anno.type === 'badge') {
       for (const [id, coordinate] of [['prop-badge-x', 0], ['prop-badge-y', 1]] as const) {
         const input = document.getElementById(id) as HTMLInputElement;
         input.addEventListener('input', () => {
@@ -2733,6 +2933,7 @@ export class AnnotationEditor {
           clone.control[0] -= rx; clone.control[1] -= ry;
           clone.end[0] -= rx; clone.end[1] -= ry;
         } else if ('target' in clone && Array.isArray(clone.target)) {
+          if (clone.type === 'label' && clone.at) { clone.at[0] -= rx; clone.at[1] -= ry; }
           clone.target[0] -= rx;
           clone.target[1] -= ry;
         }
@@ -2794,6 +2995,7 @@ export class AnnotationEditor {
           clone.control[0] += this.autoCropOffset.x; clone.control[1] += this.autoCropOffset.y;
           clone.end[0] += this.autoCropOffset.x; clone.end[1] += this.autoCropOffset.y;
         } else if ('target' in clone && Array.isArray(clone.target)) {
+          if (clone.type === 'label' && clone.at) { clone.at[0] += this.autoCropOffset.x; clone.at[1] += this.autoCropOffset.y; }
           clone.target[0] += this.autoCropOffset.x;
           clone.target[1] += this.autoCropOffset.y;
         }
@@ -2851,6 +3053,7 @@ export class AnnotationEditor {
           clone.control[0] -= rx; clone.control[1] -= ry;
           clone.end[0] -= rx; clone.end[1] -= ry;
         } else if ('target' in clone && Array.isArray(clone.target)) {
+          if (clone.type === 'label' && clone.at) { clone.at[0] -= rx; clone.at[1] -= ry; }
           clone.target[0] -= rx;
           clone.target[1] -= ry;
         }
@@ -2915,6 +3118,7 @@ export class AnnotationEditor {
           clone.control[0] += totalOffsetX; clone.control[1] += totalOffsetY;
           clone.end[0] += totalOffsetX; clone.end[1] += totalOffsetY;
         } else if ('target' in clone && Array.isArray(clone.target)) {
+          if (clone.type === 'label' && clone.at) { clone.at[0] += totalOffsetX; clone.at[1] += totalOffsetY; }
           clone.target[0] += totalOffsetX;
           clone.target[1] += totalOffsetY;
         }
@@ -2971,7 +3175,7 @@ export class AnnotationEditor {
         for (const pt of [anno.start, anno.control, anno.end]) {
           if (pt) includePoint(pt, padding);
         }
-      } else if ('target' in anno && Array.isArray(anno.target)) {
+      } else if (anno.type !== 'label' && 'target' in anno && Array.isArray(anno.target)) {
         const [x, y, w, h] = anno.target;
         minX = Math.min(minX, x);
         minY = Math.min(minY, y);

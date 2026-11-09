@@ -187,6 +187,28 @@
               },
               "shadow": {
                 "type": "boolean"
+              },
+              "line_style": {
+                "type": "string",
+                "enum": [
+                  "solid",
+                  "dashed",
+                  "dotted"
+                ],
+                "default": "solid"
+              },
+              "fill_style": {
+                "type": "string",
+                "enum": [
+                  "none",
+                  "light",
+                  "solid"
+                ],
+                "default": "light"
+              },
+              "stroke_width": {
+                "type": "number",
+                "exclusiveMinimum": 0
               }
             },
             "required": [
@@ -238,6 +260,28 @@
               },
               "shadow": {
                 "type": "boolean"
+              },
+              "line_style": {
+                "type": "string",
+                "enum": [
+                  "solid",
+                  "dashed",
+                  "dotted"
+                ],
+                "default": "solid"
+              },
+              "fill_style": {
+                "type": "string",
+                "enum": [
+                  "none",
+                  "light",
+                  "solid"
+                ],
+                "default": "light"
+              },
+              "stroke_width": {
+                "type": "number",
+                "exclusiveMinimum": 0
               }
             },
             "required": [
@@ -281,6 +325,28 @@
               },
               "shadow": {
                 "type": "boolean"
+              },
+              "line_style": {
+                "type": "string",
+                "enum": [
+                  "solid",
+                  "dashed",
+                  "dotted"
+                ],
+                "default": "solid"
+              },
+              "fill_style": {
+                "type": "string",
+                "enum": [
+                  "none",
+                  "light",
+                  "solid"
+                ],
+                "default": "light"
+              },
+              "stroke_width": {
+                "type": "number",
+                "exclusiveMinimum": 0
               }
             },
             "required": [
@@ -349,6 +415,14 @@
               },
               "outline": {
                 "type": "boolean"
+              },
+              "at": {
+                "type": "array",
+                "items": {
+                  "type": "number"
+                },
+                "minItems": 2,
+                "maxItems": 2
               }
             },
             "required": [
@@ -418,6 +492,10 @@
               },
               "outline": {
                 "type": "boolean"
+              },
+              "target_box": {
+                "type": "boolean",
+                "default": true
               }
             },
             "required": [
@@ -564,7 +642,10 @@
             "type": "object",
             "properties": {
               "type": {
-                "enum": ["spotlight", "mosaic"]
+                "enum": [
+                  "spotlight",
+                  "mosaic"
+                ]
               },
               "block_size": {
                 "type": "integer",

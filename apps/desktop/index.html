@@ -42,6 +42,8 @@
           <button id="btn-undo" class="btn btn-icon" title="元に戻す (Ctrl+Z)">↩</button>
           <button id="btn-redo" class="btn btn-icon" title="やり直す (Ctrl+Y)">↪</button>
           <div class="divider-v"></div>
+          <button id="btn-copy-marks" class="btn btn-icon" title="マークをコピー (Ctrl+C)" aria-label="マークをコピー">⧉</button>
+          <button id="btn-paste-marks" class="btn btn-icon" title="マークを貼り付け (Ctrl+V)" aria-label="マークを貼り付け">▣</button>
           <button id="btn-copy-clipboard" class="btn" title="クリップボードにコピー">
             📋 コピー
           </button>
@@ -115,28 +117,19 @@
           <button class="tool-btn" data-type="bezier-arrow" title="ベジェ曲線矢印 (テキスト対応)">
             ⤴ 曲線矢印
           </button>
-          <button class="tool-btn" data-type="step-arrow" title="番号付き矢印">
-            ➔① ステップ矢印
-          </button>
           <div class="tool-group-label">テキスト・バッジ</div>
           <button class="tool-btn" data-type="callout" title="引出線付きコールアウト">
             💬 コールアウト
           </button>
-          <button class="tool-btn" data-type="pin" title="Skitch風ピン">
-            📍 ピンタグ
-          </button>
           <button class="tool-btn" data-type="label" title="テキストラベル">
             🏷️ ラベル
           </button>
-          <button class="tool-btn" data-type="badge" title="手順バッジ">
-            ❶ バッジ
+          <button class="tool-btn" data-type="badge" title="番号バッジ（矢印・対象枠を切り替え）">
+            ❶ 番号バッジ
           </button>
           <div class="tool-group-label">ハイライト・図形</div>
           <button class="tool-btn" data-type="rect" title="矩形ハイライト">
             ⬜ 矩形
-          </button>
-          <button class="tool-btn" data-type="rounded-rect" title="角丸矩形">
-            ▢ 角丸矩形
           </button>
           <button class="tool-btn" data-type="circle" title="円形・楕円">
             ⭕ 円形
@@ -144,12 +137,6 @@
           <button class="tool-btn" data-type="mosaic" title="選択範囲にモザイクをかける">▦ モザイク</button>
           <button class="tool-btn" data-type="spotlight" title="スポットライト (注目領域暗転)">
             🔦 スポットライト
-          </button>
-          <button class="tool-btn" data-type="bullseye" title="注目点マーカー">
-            🎯 ブルズアイ
-          </button>
-          <button class="tool-btn" data-type="divider" title="区切り線">
-            ➖ 区切り線
           </button>
         </div>
       </aside>

@@ -244,6 +244,16 @@ pub enum SemanticStyle {
     Pink,
 }
 
+/// Shape interior treatment. Light preserves the original theme fill.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "kebab-case")]
+pub enum FillStyle {
+    None,
+    #[default]
+    Light,
+    Solid,
+}
+
 /// Position placement hint for annotations relative to target.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "kebab-case")]
@@ -342,6 +352,10 @@ pub enum Annotation {
     },
     Rect {
         target: TargetRect,
+        #[serde(default)]
+        line_style: LineStyle,
+        #[serde(default)]
+        fill_style: FillStyle,
         #[serde(default, alias = "stroke_width", alias = "width", alias = "thickness", alias = "line_width")]
         stroke_width: Option<f64>,
         #[serde(default)]
@@ -352,6 +366,10 @@ pub enum Annotation {
     #[serde(alias = "rounded_rect")]
     RoundedRect {
         target: TargetRect,
+        #[serde(default)]
+        line_style: LineStyle,
+        #[serde(default)]
+        fill_style: FillStyle,
         #[serde(default, alias = "stroke_width", alias = "width", alias = "thickness", alias = "line_width")]
         stroke_width: Option<f64>,
         #[serde(default)]
@@ -366,6 +384,10 @@ pub enum Annotation {
     #[serde(alias = "ellipse")]
     Circle {
         target: TargetRect,
+        #[serde(default)]
+        line_style: LineStyle,
+        #[serde(default)]
+        fill_style: FillStyle,
         #[serde(default, alias = "stroke_width", alias = "width", alias = "thickness", alias = "line_width")]
         stroke_width: Option<f64>,
         #[serde(default)]
@@ -375,6 +397,8 @@ pub enum Annotation {
     },
     Label {
         target: TargetRect,
+        #[serde(default)]
+        at: Option<Point2D>,
         text: String,
         #[serde(default)]
         max_width: Option<f64>,
@@ -389,6 +413,8 @@ pub enum Annotation {
     },
     Callout {
         target: TargetRect,
+        #[serde(default = "default_true")]
+        target_box: bool,
         text: String,
         #[serde(default)]
         max_width: Option<f64>,

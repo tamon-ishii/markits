@@ -653,6 +653,23 @@ document.addEventListener('DOMContentLoaded', async () => {
   });
 
   // --- In-Editor Zoom Controls ---
+  document.getElementById('btn-copy-marks')?.addEventListener('click', async () => {
+    const text = editor.copySelectedMarks();
+    if (!text) return;
+    try {
+      if (isTauri) {
+        const { writeText } = await import('@tauri-apps/plugin-clipboard-manager');
+        await writeText(text);
+      } else await navigator.clipboard.writeText(text);
+    } catch (error) { alert(t`マークをコピーできませんでした: ${error}`); }
+  });
+  document.getElementById('btn-paste-marks')?.addEventListener('click', async () => {
+    try {
+      const text = isTauri ? await (await import('@tauri-apps/plugin-clipboard-manager')).readText() : await navigator.clipboard.readText();
+      if (text) editor.pasteMarks(text);
+    } catch (error) { alert(t`マークを貼り付けできませんでした: ${error}`); }
+  });
+
   document.getElementById('btn-zoom-in')?.addEventListener('click', () => editor.zoomIn());
   document.getElementById('btn-zoom-out')?.addEventListener('click', () => editor.zoomOut());
   document.getElementById('btn-zoom-reset')?.addEventListener('click', () => editor.resetZoom());
