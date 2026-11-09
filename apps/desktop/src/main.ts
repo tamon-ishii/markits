@@ -369,8 +369,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     uiStatusEl.textContent = label;
   };
   window.addEventListener('markits-image-loaded', () => {
-    const count = editor.getUiElements().length;
-    setUiStatus(count > 0 ? 'ready' : 'idle', count > 0 ? t`UI ${count} 要素` : t('UI 検出なし'));
+    const count = editor.getUiElements().filter(element => element.role !== 'window').length;
+    setUiStatus(count > 0 ? 'ready' : 'idle', count > 0 ? t`UI ${count} 要素` : t('UI 部品なし'));
   });
 
   // Tool buttons
@@ -878,8 +878,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     await listen<{ history_id: string; elements: DetectedUiElement[] }>('capture-ui-elements', (event) => {
       if (event.payload.history_id === currentHistoryId) {
         editor.setUiElements(event.payload.elements);
-        const count = editor.getUiElements().length;
-        setUiStatus(count > 0 ? 'ready' : 'idle', count > 0 ? t`UI ${count} 要素` : t('UI 要素なし'));
+        const count = editor.getUiElements().filter(element => element.role !== 'window').length;
+        setUiStatus(count > 0 ? 'ready' : 'failed', count > 0 ? t`UI ${count} 要素` : t('UI 部品を取得できません'));
       }
     });
 

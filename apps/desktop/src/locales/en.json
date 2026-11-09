@@ -96,6 +96,8 @@
   "番号バッジ": "Number badge",
   "角なし": "Rounded corners",
   "角の丸み": "Corner roundness",
+  "UI 部品なし": "No UI controls",
+  "UI 部品を取得できません": "Could not read UI controls",
   "混在": "Mixed",
   "直角": "Square corners",
   "最大": "Maximum",
