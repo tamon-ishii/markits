@@ -16,7 +16,10 @@ function fixture({ zoom = 0.7, outputX = 1, outputY = 1, auto = false, offsets =
       module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022,
     } }).outputText;
     vm.runInNewContext(code, { exports, console, navigator: { language: 'ja' },
-      document: { getElementById: () => null },
+      document: { getElementById: () => null, querySelectorAll: () => [], createElement: () => ({
+        getContext: () => ({ drawImage() {} }), toDataURL: () => 'cropped-image',
+      }) },
+      window: { dispatchEvent() {} }, CustomEvent: class { constructor(type) { this.type = type; } },
       require: id => load(path.resolve(path.dirname(file), id)),
     });
     return exports;
@@ -85,4 +88,81 @@ test('an uncropped image opens a full-image frame without adding a translation',
   editor.startCropMode();
   assert.deepEqual(JSON.parse(JSON.stringify(editor.getCropRect())), { x: 0, y: 0, width: 1600, height: 1000 });
   assert.equal(editor.canvasContainerEl.style.translate, '');
+});
+
+function pendingCrop() {
+  const { editor } = fixture();
+  editor.startCropMode();
+  editor.cropRect = { x: 100, y: 50, width: 400, height: 240 };
+  editor.scene.annotations = [
+    { type: 'rect', target: [150, 100, 60, 40] },
+    { type: 'label', target: [500, 300, 1, 1], at: [500, 300], text: 'Hidden' },
+  ];
+  editor.scene.hidden_annotations = [1];
+  editor.bgImgEl = { src: 'full-image' };
+  editor.uiElements = [];
+  editor.getCanvasCoords = event => ({ x: event.x, y: event.y });
+  editor.cropApplications = 0;
+  editor.setBackgroundImage = function(dataUrl, width, height, json) {
+    this.cropApplications++;
+    this.scene = JSON.parse(json);
+    this.bgImgEl.src = dataUrl;
+    this.outputWidth = width; this.outputHeight = height;
+  };
+  return editor;
+}
+
+test('choosing another mark tool commits the crop before changing tools, exactly once', () => {
+  const editor = pendingCrop();
+  editor.setTool('arrow');
+  assert.equal(editor.isCropMode, false);
+  assert.equal(editor.activeTool, 'arrow');
+  assert.equal(editor.cropApplications, 1);
+  assert.deepEqual(editor.scene.canvas, { width: 400, height: 240 });
+  assert.deepEqual(editor.scene.annotations[0].target, [50, 50, 60, 40]);
+  assert.deepEqual(editor.scene.annotations[1].at, [400, 250]);
+  assert.deepEqual(editor.scene.hidden_annotations, [1]);
+  editor.setTool('select');
+  assert.equal(editor.cropApplications, 1);
+});
+
+test('outside actions commit, crop controls keep editing, and crop button confirms', () => {
+  for (const target of ['layer', 'inspector', 'zoom', 'copy']) {
+    const editor = pendingCrop();
+    editor.commitCropForInteraction({ closest: () => null });
+    assert.equal(editor.cropApplications, 1, target);
+    editor.commitCropForInteraction({ closest: () => null });
+    assert.equal(editor.cropApplications, 1, target);
+  }
+  const editor = pendingCrop();
+  editor.commitCropForInteraction({ closest: () => ({}) });
+  assert.equal(editor.isCropMode, true);
+  assert.equal(editor.cropApplications, 0);
+  editor.toggleCropMode();
+  assert.equal(editor.isCropMode, false);
+  assert.equal(editor.cropApplications, 1);
+});
+
+test('clicking a mark in the canvas commits and selects it, while crop handles still resize', () => {
+  const editor = pendingCrop();
+  const event = {
+    button: 0, x: 160, y: 110,
+    target: { closest: () => null, getAttribute: () => null },
+    preventDefault() {}, stopPropagation() {},
+  };
+  editor.handleCropMouseDown(event);
+  assert.equal(editor.cropApplications, 1);
+  assert.equal(editor.selectedIndex, 0);
+  assert.equal(editor.activeTool, 'select');
+  assert.deepEqual(editor.scene.annotations[0].target, [50, 50, 60, 40]);
+
+  const resizing = pendingCrop();
+  resizing.handleCropMouseDown({ ...event, target: { closest: () => null, getAttribute: () => 'se' } });
+  assert.equal(resizing.cropApplications, 0);
+  assert.equal(resizing.isDraggingCrop, true);
+  assert.equal(resizing.activeCropHandle, 'se');
+
+  const cancelled = pendingCrop();
+  cancelled.cancelCropMode();
+  assert.equal(cancelled.cropApplications, 0);
 });

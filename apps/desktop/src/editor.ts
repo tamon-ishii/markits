@@ -218,6 +218,7 @@ export class AnnotationEditor {
   }
 
   public setTool(tool: string) {
+    this.commitPendingCrop();
     this.activeTool = tool;
     document.querySelectorAll('.tool-btn').forEach((btn) => {
       if (btn.getAttribute('data-type') === tool) {
@@ -764,7 +765,8 @@ export class AnnotationEditor {
   private pasteCount = 0;
 
   public copySelectedMarks(): string | null {
-    if (this.isCropMode || this.isDraggingHandle || this.isDraggingAnnotation || this.isCreating) return null;
+    this.commitPendingCrop();
+    if (this.isDraggingHandle || this.isDraggingAnnotation || this.isCreating) return null;
     const annotations = this.scene.annotations.filter((_, index) => this.selection.has(index) && !this.scene.hidden_annotations?.includes(index));
     if (!annotations.length) return null;
     this.lastPastedMarks = '';
@@ -777,7 +779,8 @@ export class AnnotationEditor {
   }
 
   public pasteMarks(text: string): boolean {
-    if (!this.hasImage() || this.isCropMode || this.isDraggingHandle || this.isDraggingAnnotation || this.isCreating) return false;
+    this.commitPendingCrop();
+    if (!this.hasImage() || this.isDraggingHandle || this.isDraggingAnnotation || this.isCreating) return false;
     const annotations = decodeAnnotations(text);
     if (!annotations) return false;
     this.pasteCount = this.lastPastedMarks === text ? this.pasteCount + 1 : 1;
@@ -792,7 +795,18 @@ export class AnnotationEditor {
     return true;
   }
 
+  private commitCropForInteraction(target: Element) {
+    if (!this.isCropMode || this.isDraggingCrop || target.closest('#editor-crop-overlay, #btn-crop')) return;
+    this.commitPendingCrop();
+  }
+
   private bindEvents() {
+    const commitCrop = (event: Event) => {
+      if (event.target instanceof Element) this.commitCropForInteraction(event.target);
+    };
+    // Commit before focus/click handlers, including keyboard-activated buttons.
+    window.addEventListener('mousedown', commitCrop, true);
+    window.addEventListener('click', commitCrop, true);
     const isTextEditing = (target: EventTarget | null) => target instanceof HTMLElement &&
       (['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName) || target.isContentEditable);
     window.addEventListener('copy', event => {
@@ -869,8 +883,12 @@ export class AnnotationEditor {
         } else if (e.key === 'Escape') {
           e.preventDefault();
           this.cancelCropMode();
+        } else if ((e.ctrlKey || e.metaKey) && ['z', 'y', 'c', 'v'].includes(e.key.toLowerCase())) {
+          this.commitPendingCrop();
+        } else {
+          return;
         }
-        return;
+        if (this.isCropMode || e.key === 'Enter' || e.key === 'Escape') return;
       }
 
       if (e.key === 'Delete' || e.key === 'Backspace') {
@@ -2745,7 +2763,7 @@ export class AnnotationEditor {
 
   public toggleCropMode(): boolean {
     if (this.isCropMode) {
-      this.cancelCropMode();
+      this.commitPendingCrop();
       return false;
     } else {
       this.startCropMode();
@@ -2972,7 +2990,7 @@ export class AnnotationEditor {
       croppedDataUrl,
       rw,
       rh,
-      JSON.stringify({ canvas: { width: rw, height: rh }, shadow: this.scene.shadow, annotations: shiftedAnnotations }),
+      JSON.stringify({ canvas: { width: rw, height: rh }, shadow: this.scene.shadow, annotations: shiftedAnnotations, hidden_annotations: this.scene.hidden_annotations }),
       shiftedUiElements,
       true
     );
@@ -3236,6 +3254,18 @@ export class AnnotationEditor {
 
     const coords = this.getCanvasCoords(e);
     const handle = target.getAttribute('data-crop-handle');
+
+    if (!handle) {
+      const mark = this.findAnnotationAt(coords.x, coords.y);
+      if (mark !== null) {
+        this.commitPendingCrop();
+        this.setTool('select');
+        this.selectMany([mark]);
+        e.preventDefault();
+        e.stopPropagation();
+        return;
+      }
+    }
 
     this.isDraggingCrop = true;
     this.cropDragStartX = coords.x;
