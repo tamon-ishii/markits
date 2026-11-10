@@ -302,6 +302,7 @@ document.addEventListener('DOMContentLoaded', async () => {
           }
         : null;
 
+      const savedHistoryId = currentHistoryId;
       const item = await invokeTauri<HistoryItem>('cmd_save_to_history', {
         backgroundDataUrl: bgDataUrl,
         sceneJson,
@@ -310,8 +311,11 @@ document.addEventListener('DOMContentLoaded', async () => {
         baseBackgroundDataUrl,
         cropInfo,
       });
-      currentHistoryId = item.id;
-      editor.markClean();
+      // A new capture may have arrived while the previous image was saving.
+      if (currentHistoryId === savedHistoryId && editor.getBackgroundImageDataUrl() === bgDataUrl) {
+        currentHistoryId = item.id;
+        if (editor.getSceneJson() === sceneJson) editor.markClean();
+      }
     } catch (e) {
       console.warn('Auto-save to history failed:', e);
     }
@@ -319,9 +323,10 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   const switchView = async (view: 'home' | 'editor') => {
     if (view === 'home') {
-      // Persist the final editor state before exposing history cards; otherwise
-      // stale cards remain clickable while their thumbnails are refreshed.
-      if (editor.hasImage()) await autoSaveToHistory();
+      // Return immediately; keep stale history cards unavailable until saved.
+      const saving = autoSaveToHistory();
+      ++historyLoadGeneration;
+      historyGrid.innerHTML = t('<div class="history-loading">履歴を読み込んでいます...</div>');
       document.body.classList.remove('editor-view-active');
       // Switch view and tabs immediately for responsive UI
       tabHome.classList.add('active');
@@ -333,6 +338,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       openButton.style.display = '';
       tabEditor.style.display = '';
 
+      await saving;
       await loadHistory();
     } else {
       document.body.classList.add('editor-view-active');

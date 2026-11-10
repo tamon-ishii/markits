@@ -499,6 +499,20 @@ pub fn render_composed_png_bytes_with_crop(
     image_bytes: &[u8],
     crop_margin: Option<u32>,
 ) -> Result<Vec<u8>, Box<dyn Error>> {
+    render_composed_png_bytes_internal(json, image_bytes, crop_margin, None)
+}
+
+/// Render directly at preview resolution, avoiding a full-size raster and PNG.
+pub fn render_composed_thumbnail(json: &str, image_bytes: &[u8], max_size: u32) -> Result<Vec<u8>, Box<dyn Error>> {
+    render_composed_png_bytes_internal(json, image_bytes, None, Some(max_size.max(1)))
+}
+
+fn render_composed_png_bytes_internal(
+    json: &str,
+    image_bytes: &[u8],
+    crop_margin: Option<u32>,
+    max_size: Option<u32>,
+) -> Result<Vec<u8>, Box<dyn Error>> {
     let format = image::guess_format(image_bytes)?;
     let format_str = match format {
         ImageFormat::Png => "png",
@@ -558,14 +572,18 @@ pub fn render_composed_png_bytes_with_crop(
         &rendered_font,
     );
     let tree = usvg::Tree::from_str(&composed, &options)?;
-    let mut pixmap =
-        tiny_skia::Pixmap::new(width, height).ok_or("Image dimensions are too large to render")?;
+    let scale = max_size.map(|size| (size as f32 / width.max(height) as f32).min(1.0)).unwrap_or(1.0);
+    let mut pixmap = tiny_skia::Pixmap::new(
+        ((width as f32 * scale).round() as u32).max(1),
+        ((height as f32 * scale).round() as u32).max(1),
+    ).ok_or("Image dimensions are too large to render")?;
     resvg::render(
         &tree,
-        tiny_skia::Transform::identity(),
+        tiny_skia::Transform::from_scale(scale, scale),
         &mut pixmap.as_mut(),
     );
     let mut rendered_png = pixmap.encode_png()?;
+    if max_size.is_some() { return Ok(rendered_png); }
 
     let mut crop_rect = None;
     if let Some(margin) = crop_margin {
@@ -659,6 +677,13 @@ mod tests {
         assert_eq!(image.get_pixel(4, 3), image.get_pixel(15, 14));
         assert_eq!(image.get_pixel(4, 3).0, [66, 85, 50, 255]);
         assert_ne!(image.get_pixel(29, 19), original.get_pixel(29, 19));
+        let preview = render_composed_thumbnail(json, png.get_ref(), 15).unwrap();
+        let preview = image::load_from_memory(&preview).unwrap().to_rgba8();
+        assert_eq!(preview.dimensions(), (15, 10));
+        // Mosaic must remain applied even when rendering directly at thumbnail size.
+        assert_eq!(preview.get_pixel(4, 4).0, [66, 85, 50, 255]);
+        let unscaled = render_composed_thumbnail(json, png.get_ref(), 280).unwrap();
+        assert_eq!(image::load_from_memory(&unscaled).unwrap().to_rgba8(), image);
         let scene = Scene::from_json(json).unwrap();
         let roundtrip = serde_json::to_string(&scene).unwrap();
         assert_eq!(Scene::from_json(&roundtrip).unwrap().annotations.len(), 2);

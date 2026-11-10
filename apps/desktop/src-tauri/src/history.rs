@@ -128,13 +128,12 @@ pub fn save_or_update_history_item(
     let height = header_info.height;
 
     // Render composed image for thumbnail if annotations exist
-    let thumb_source_bytes = if let Some(json_str) = annotations_json {
-        markits::render_composed_png_bytes(json_str, png_bytes)
-            .unwrap_or_else(|_| png_bytes.to_vec())
+    let thumb_bytes = if let Some(json_str) = annotations_json {
+        markits::raster::render_composed_thumbnail(json_str, png_bytes, 280)
+            .or_else(|_| generate_thumbnail_bytes(png_bytes, 280))?
     } else {
-        png_bytes.to_vec()
+        generate_thumbnail_bytes(png_bytes, 280)?
     };
-    let thumb_bytes = generate_thumbnail_bytes(&thumb_source_bytes, 280)?;
     let _ = fs::write(&thumb_path, &thumb_bytes);
 
     let b64 = base64::engine::general_purpose::STANDARD.encode(&thumb_bytes);

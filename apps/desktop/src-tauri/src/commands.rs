@@ -23,6 +23,19 @@ impl Drop for DetailScanGuard {
     }
 }
 
+fn wait_for_capture_compositor() {
+    // Wait for the hidden window to leave the composed desktop, without a
+    // fixed 350 ms delay on Windows. Other desktops may animate unmapping.
+    #[cfg(target_os = "windows")]
+    unsafe {
+        if windows_sys::Win32::Graphics::Dwm::DwmFlush() < 0 {
+            std::thread::sleep(Duration::from_millis(50));
+        }
+    }
+    #[cfg(not(target_os = "windows"))]
+    std::thread::sleep(Duration::from_millis(350));
+}
+
 #[tauri::command]
 pub async fn cmd_capture_screen(app: tauri::AppHandle) -> Result<capture::CapturedImage, String> {
     let window = app.get_webview_window("main");
@@ -32,8 +45,7 @@ pub async fn cmd_capture_screen(app: tauri::AppHandle) -> Result<capture::Captur
 
     let res = tauri::async_runtime::spawn_blocking(
         || -> Result<capture::CapturedImage, capture::CaptureError> {
-            // Wait for OS window manager fade-out/unmap animation to completely finish (e.g. GNOME Mutter ~250ms)
-            std::thread::sleep(std::time::Duration::from_millis(350));
+            wait_for_capture_compositor();
             let mut captured = capture::capture_primary_screen()?;
             let elements = crate::ui_elements::capture_desktop_windows(0, 0);
             captured.ui_elements = elements;
@@ -80,8 +92,7 @@ async fn start_window_selection(app: tauri::AppHandle, recording_mode: bool) -> 
 
     let res = tauri::async_runtime::spawn_blocking(
         || -> Result<capture::CapturedImage, capture::CaptureError> {
-            // Wait for OS window manager fade-out/unmap animation to completely finish (e.g. GNOME Mutter ~250ms)
-            std::thread::sleep(std::time::Duration::from_millis(350));
+            wait_for_capture_compositor();
             #[cfg(target_os = "windows")]
             let (mut cap, origin_x, origin_y) = capture::capture_selection_desktop()?;
             #[cfg(not(target_os = "windows"))]
@@ -373,10 +384,10 @@ pub async fn cmd_finish_capture(
         )
         .map_err(|e| e.to_string())?;
 
-        let img = image::load_from_memory(&png_bytes).map_err(|e| e.to_string())?;
+        let img = metadata::inspect_png_header(&png_bytes).map_err(|e| e.to_string())?;
         let res = metadata::LoadedImageResult {
-            width: img.width(),
-            height: img.height(),
+            width: img.width,
+            height: img.height,
             image_data_url: format!("data:image/png;base64,{}", base64::engine::general_purpose::STANDARD.encode(&png_bytes)),
             annotations_json: None,
             history_id: Some(item.id.clone()),
