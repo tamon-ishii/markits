@@ -283,6 +283,19 @@ fn test_cli_list_screens_and_windows_text_format() {
     assert!(stdout.contains("Window ID"));
 }
 
+#[cfg(target_os = "linux")]
+#[test]
+fn window_listing_is_empty_without_a_display_session() {
+    let output = Command::new(env!("CARGO_BIN_EXE_markits"))
+        .args(["capture", "--list-windows", "--json"])
+        .env_remove("DISPLAY")
+        .env_remove("WAYLAND_DISPLAY")
+        .env_remove("XDG_SESSION_TYPE")
+        .output().unwrap();
+    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    assert_eq!(serde_json::from_slice::<serde_json::Value>(&output.stdout).unwrap(), serde_json::json!([]));
+}
+
 #[test]
 fn test_cli_capture_screen_out_of_bounds() {
     let output = Command::new(env!("CARGO_BIN_EXE_markits"))

@@ -6,6 +6,7 @@
 - Preserve editable annotations and cropping across recapture, and support lossless WebP/JPEG XL export and desktop capture history from the CLI.
 - Share Java Access Bridge UI detection and Windows cursor rendering between the CLI and desktop. Add configurable UI exploration depth and stable native window IDs.
 - Handle already-active windows and improve foreground activation for automated window operations on Windows.
+- Keep CLI window listing usable in headless Linux environments by returning an empty list when no display session is available.
 
 ## Downloads
 

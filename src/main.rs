@@ -758,7 +758,10 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             }
 
             if list_windows {
-                let windows = markits::window_capture::list_windows()?;
+                let headless = cfg!(target_os = "linux")
+                    && std::env::var_os("DISPLAY").is_none_or(|value| value.is_empty())
+                    && !markits::window_capture::is_wayland_session();
+                let windows = if headless { Vec::new() } else { markits::window_capture::list_windows()? };
                 let listing:Vec<_>=windows.iter().map(|w| {
                     let pid=markits::semantic_target::window_context(&w.id).ok().and_then(|c|c.pid);
                     serde_json::json!({"id":w.id,"pid":pid,"title":w.title,"x":w.x,"y":w.y,"width":w.width,"height":w.height})
