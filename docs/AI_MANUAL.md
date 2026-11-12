@@ -23,7 +23,7 @@ The output remains in the input format, regardless of its filename extension.
 Desktop **Save** exports flattened PNG, lossless WebP, or lossless JPEG XL
 without edit metadata. Editable source images, UIMap, crop state and operations
 remain in desktop history. CLI capture/render commands retain their existing
-metadata behavior; use `strip-metadata` when exporting those images for sharing.
+UIMap behavior. Add `--editing-metadata` to render/annotate/crop to preserve editable source, annotations and crop state; operation recordings are carried over when present. Use `export` (without this flag) or `strip-metadata` for sharing.
 
 ### 1. Standalone Screen Capture (`markits capture`)
 Take screenshots directly using MarkIts CLI:
@@ -65,7 +65,166 @@ markits capture button_crop.png --target "保存ボタン" --mark rect --crop --
    - **External / Carried-Over UIMap**: `--uimap` accepts both `.json` files AND `.png` images containing embedded metadata!
 4. Output PNG automatically preserves UIMap metadata so further annotations can be chained.
 
-PNG and JPEG input are supported; image output is PNG. `--output` must end in `.png`. If JSON explicitly includes `canvas`, its dimensions must match the image. Errors go to stderr with a nonzero exit status.
+PNG, JPEG, WebP and JPEG XL input are supported. Image outputs from capture, annotate, annotate-batch, render, crop and export accept `.png`, `.webp`, or `.jxl`. WebP and JPEG XL are lossless. If JSON explicitly includes `canvas`, its dimensions must match the image. Errors go to stderr with a nonzero exit status.
+
+
+## Extended CLI workflows
+
+All functionality below is discoverable through `markits --help`,
+`markits <command> --help`, and this bundled manual; no repository files are required.
+
+### Launch, operate and capture with an embedded recipe
+
+```sh
+# Embed the script CONTENTS, literal arguments, absolute cwd and recorded operations
+markits capture-run --launch-script ./start.ps1 --arg "project name" --cwd "C:/work/app" --window "My App" --operations session-01/recording.json --window-bounds "[100,100,1280,800]" -o app.png
+
+# Or launch an executable directly; repeat --arg for each argument
+markits capture-run --launch "C:/tools/MyApp.exe" --arg=--project --arg "C:/work/project" --cwd "C:/work/app" -o app.webp
+
+# Re-execute the embedded launch and window operations, then take a new image
+markits recapture app.png -o new.png
+
+# Inspect/extract the recipe WITHOUT executing anything
+markits recipe app.png
+markits recipe app.png --output recipe.json
+markits recapture app.png --dry-run
+
+# The extracted JSON can be edited and reused directly
+markits capture-run --recipe recipe.json -o from-json.jxl
+```
+
+`capture-run` starts the program/script, waits for a unique window, optionally
+sets window bounds, waits `--settle-ms` (default 1000), replays operations, detects
+UI elements, and saves the screenshot(s). Without `--operations`, or when the
+recording has no screenshot points, it automatically adds a final capture.
+`--operations` accepts the `recording.json` produced by `record finish` or a raw
+`OperationRecording` JSON object. Bounds placement and cursor inclusion are
+currently Windows features. On Windows, current outer window bounds are saved
+automatically when bounds were not specified.
+
+`--window` is a unique title substring. It is required for embedded scripts;
+for a direct executable, its process ID can select the window automatically.
+Launched processes are matched by PID or newly appearing matching windows, so
+an older window with the same title is not accidentally operated. Launchers that
+reuse an existing single-instance window should instead prepare that application
+and use `capture-run --window "My App"` without launch options.
+`--timeout-ms` bounds the window wait (default 30000).
+
+The version-1 `markits:capture_recipe` metadata contains `launch.program` OR
+`launch.script` (`name`, full UTF-8 `content`, optional `runner`), `launch.args`
+(an array of literal strings), absolute `launch.cwd`, `window`, `window_bounds`,
+`recording` (all clicks, text, keys, scrolls and capture points), timing, cursor
+and UI-depth settings, and a zero-based `capture_index` for the represented frame.
+An extracted JSON without `capture_index` generates all screenshot points.
+For multiple outputs, the first uses the requested filename and subsequent
+images use `_002`, `_003`, etc. Each image selects its own frame on recapture.
+
+Scripts are materialized from embedded contents in a new `markits-run-*` directory
+beside the output image; deleting the original script file does not prevent
+recapture. `.ps1` uses PowerShell, `.py` uses `python`, and `.sh` uses `sh`.
+Use `--script-runner` for another interpreter executable. The specified working
+directory and any script dependencies must still exist. Startup arguments are
+passed individually, without constructing a shell command. Launch stdout/stderr
+logs and intermediate captures remain in the run directory for inspection.
+The launched application is left running.
+
+`recapture` explicitly executes the saved launch script and operation recording.
+If an image was annotated/cropped with `--editing-metadata`, it reapplies those
+marks and crop to the fresh capture. `recipe` and `--dry-run` only inspect JSON
+and never launch or send input. `inspect` reports `has_capture_recipe`.
+Recipes survive editable PNG/WebP/JPEG XL conversion, desktop history and edits
+that retain editing metadata. `export` without `--editing-metadata` and
+`strip-metadata` remove the recipe, including scripts, arguments and cwd.
+
+### Java UI detection and cursor capture
+
+`capture --list-windows --json` lists native window IDs and PIDs. Select a unique
+ID or title with `--window`, or a PID with `--pid`. Ambiguous selections fail.
+On Windows, UI detection tries Java Access Bridge before UI Automation. The target
+Java runtime must provide and enable its accessibility bridge. Exploration depth
+is configurable from 1 to 128 (default 64).
+
+```sh
+markits capture --list-windows --json
+markits capture app.png --window "My Java App" --detect-ui --ui-depth 128
+markits capture cursor.png --window "My App" --include-cursor --detect-ui
+```
+
+`--include-cursor` is Windows only and also works for screen/region capture.
+It captures the pointer at its current position; move it before invoking capture.
+
+### Editable images and lossless formats
+
+```sh
+markits annotate app.png --target "Open" --mark rect --crop --crop-margin 16 --editing-metadata -o detail.webp
+markits export detail.webp --editing-metadata -o detail.jxl
+markits export detail.jxl -o share.png
+```
+
+`--editing-metadata` stores an unpainted background, editable annotations,
+UIMap, crop offsets and the uncropped base image. Embedded operation recordings
+and capture identity are retained. The desktop editor can reopen these files.
+Without this flag, annotate/render retain their existing UIMap behavior but do
+not save an editable annotation scene. `export` flattens and removes all MarkIts
+metadata by default; add the flag to retain existing metadata during conversion.
+It does not invent editing data for a flattened image.
+
+### Desktop capture history
+
+```sh
+markits history list
+markits history save detail.webp
+markits history load CAPTURE_ID -o restored.png
+markits history delete CAPTURE_ID
+```
+
+History uses the desktop app's data directory and format. List/save return JSON.
+Load includes the editable payload and crop base when available. Delete removes
+the named capture and its thumbnail/base image. Set `MARKITS_HISTORY_DIR` to use
+an alternate history directory, for example in tests.
+
+### Record operations and screenshot points
+
+```sh
+markits record start --session session-01 --window "My App"
+markits record status --session session-01
+markits record screenshot --session session-01 --include-cursor
+markits record pause --session session-01
+markits record resume --session session-01
+markits record finish --session session-01
+# To discard the operation log instead:
+# markits record cancel --session session-01
+```
+
+Start creates a NEW session directory and launches a background recorder, then
+returns. The recorder observes input targeting the selected window. Use separate
+CLI invocations to pause/resume, take screenshot points, inspect status, or stop.
+The screenshot command also detects UI elements. Finish writes `recording.json`
+and embeds the complete operation recording into `capture_001.png`, etc. Cancel
+stops the owned recorder and leaves previously captured images without embedding
+the operation log. Always finish or cancel a session; input monitoring requires
+OS accessibility/input permissions. Linux recording requires X11.
+
+### Replay and recapture
+
+```sh
+markits replay session-01/recording.json --dry-run
+markits replay session-01/recording.json --window "My App" --output-dir recaptured
+markits replay session-01/capture_001.png --window "My App" --output-dir recaptured --shorten-waits
+```
+
+Replay actually sends clicks, text, keys and scrolls to the selected application.
+Restore the application to the recording's initial state before running it.
+`--dry-run` validates and prints operations without accessing the desktop.
+Named click targets are resolved against the current UI; unnamed coordinates
+scale to the target window. Missing/ambiguous named targets and focus loss stop
+replay. Screenshots are taken at recorded screenshot points and saved with UIMap
+and operation metadata, under unique filenames. With no explicit target, the
+recorded window title is used. `--shorten-waits` skips recorded idle delays;
+`--max-wait-ms` caps each delay (default 60000). Short settle waits after input
+remain. `--include-cursor` forces pointer inclusion on Windows; otherwise each
+recorded screenshot's cursor setting is used.
 
 ## UIMap & Named Targets
 

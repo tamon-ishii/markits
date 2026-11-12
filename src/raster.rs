@@ -207,7 +207,7 @@ pub fn extract_png_uimap(png_bytes: &[u8]) -> Option<Vec<UiElement>> {
 }
 
 pub fn load_uimap_from_path(path: &Path) -> Result<Vec<UiElement>, Box<dyn Error>> {
-    let bytes = fs::read(path)?;
+    let bytes = crate::image_export::to_editable_png(&fs::read(path)?)?;
     if bytes.starts_with(PNG_SIGNATURE) {
         if let Some(elements) = extract_png_uimap(&bytes) {
             return Ok(elements);
@@ -233,12 +233,15 @@ pub struct ImageInfo {
 }
 
 pub fn read_image(path: &Path) -> Result<(Vec<u8>, ImageInfo), Box<dyn Error>> {
-    let bytes = fs::read(path)?;
-    let (format, name) = match image::guess_format(&bytes)? {
+    let original = fs::read(path)?;
+    let bytes = crate::image_export::to_editable_png(&original)?;
+    let (format, mut name) = match image::guess_format(&bytes)? {
         ImageFormat::Png => (ImageFormat::Png, "png"),
         ImageFormat::Jpeg => (ImageFormat::Jpeg, "jpeg"),
         _ => return Err("Image must contain a PNG or JPEG image".into()),
     };
+    if crate::image_export::is_webp(&original) { name = "webp"; }
+    if crate::image_export::is_jxl(&original) { name = "jxl"; }
     let uimap = if format == ImageFormat::Png {
         extract_png_uimap(&bytes)
     } else {
@@ -260,7 +263,12 @@ pub fn inspect_image(path: &Path) -> Result<ImageInfo, Box<dyn Error>> {
     Ok(read_image(path)?.1)
 }
 
-fn crop_image(
+pub fn inspect_image_bytes(bytes: &[u8]) -> Result<ImageInfo, Box<dyn Error>> {
+    let source = image::load_from_memory(bytes)?;
+    Ok(ImageInfo { width: source.width(), height: source.height(), format: "png", uimap: extract_png_uimap(bytes) })
+}
+
+pub fn crop_image(
     image: &DynamicImage,
     x: u32,
     y: u32,

@@ -188,6 +188,18 @@ pub fn capture_desktop_detailed_elements(
     screen_origin_y: i32,
     bounds_filter: Option<(f64, f64, f64, f64)>,
 ) -> Vec<DetectedUiElement> {
+    #[cfg(target_os = "windows")]
+    {
+        let mut elements = Vec::new();
+        for window in crate::window_capture::list_windows().unwrap_or_default() {
+            let Ok(target) = crate::semantic_target::window_context(&window.id) else { continue; };
+            let x = target.x - screen_origin_x as f64;
+            let y = target.y - screen_origin_y as f64;
+            if bounds_filter.is_some_and(|(bx,by,bw,bh)| x+target.width<=bx || x>=bx+bw || y+target.height<=by || y>=by+bh) { continue; }
+            elements.extend(capture_desktop_detailed_elements_for_window(screen_origin_x,screen_origin_y,&target));
+        }
+        return elements;
+    }
     #[cfg(target_os = "linux")]
     {
         let windows = capture_desktop_windows(screen_origin_x, screen_origin_y);
@@ -203,7 +215,7 @@ pub fn capture_desktop_detailed_elements(
         }
         return elements;
     }
-    #[cfg(not(target_os = "linux"))]
+    #[cfg(not(any(target_os = "linux", target_os = "windows")))]
     collect_detailed_elements(screen_origin_x, screen_origin_y, bounds_filter, None)
 }
 
@@ -212,6 +224,10 @@ pub fn capture_desktop_detailed_elements_for_window(
     screen_origin_y: i32,
     target: &DetectedUiElement,
 ) -> Vec<DetectedUiElement> {
+    #[cfg(target_os = "windows")]
+    if let Some(elements) = crate::java_access_bridge::collect(target, screen_origin_x, screen_origin_y, capture_depth()) {
+        return elements;
+    }
     #[cfg(target_os = "linux")]
     return linux_atspi::collect_window_elements(screen_origin_x, screen_origin_y, target);
     #[cfg(not(target_os = "linux"))]

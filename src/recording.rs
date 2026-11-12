@@ -64,6 +64,10 @@ pub fn named_target_at_point(x: i32, y: i32) -> Option<(crate::semantic_target::
 }
 
 pub fn run_helper(path: &Path) -> Result<(), String> {
+    let started = Instant::now();
+    let clock = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)
+        .map_err(|e| e.to_string())?.as_millis();
+    std::fs::write(path.with_extension("clock"), clock.to_string()).map_err(|e| e.to_string())?;
     let pause_file = path.with_extension("pause");
     let capture_shortcut = std::env::var("MARKITS_RECORDING_CAPTURE_SHORTCUT")
         .unwrap_or_else(|_| "PrintScreen".into());
@@ -118,7 +122,6 @@ pub fn run_helper(path: &Path) -> Result<(), String> {
             }
         });
     }
-    let started = Instant::now();
     let mut ctrl = false;
     let mut shift = false;
     let mut alt = false;
@@ -367,6 +370,14 @@ pub struct RecordingStatus {
 }
 
 impl RecordingSession {
+    /// Timestamp for externally requested screenshots, on the input helper's clock.
+    pub fn elapsed_ms(&self) -> Result<u64, String> {
+        let started: u128 = std::fs::read_to_string(self.event_file.with_extension("clock"))
+            .map_err(|e| e.to_string())?.parse::<u128>().map_err(|e| e.to_string())?;
+        let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)
+            .map_err(|e| e.to_string())?.as_millis();
+        Ok(now.saturating_sub(started).min(u64::MAX as u128) as u64)
+    }
     pub fn window_id(&self) -> &str {
         &self.window.id
     }
@@ -405,6 +416,7 @@ impl RecordingSession {
             .env("MARKITS_RECORDING_TARGET_ONLY", "1")
             .env("MARKITS_RECORDING_WINDOW_ID", window_id)
             .env("MARKITS_RECORDING_CAPTURE_SHORTCUT", capture_shortcut)
+            .env("MUNIN_UI_CAPTURE_DEPTH", crate::ui_elements::capture_depth().to_string())
             .env(
                 "MUNIN_RECORDING_WINDOW",
                 serde_json::to_string(&context).map_err(|e| e.to_string())?,

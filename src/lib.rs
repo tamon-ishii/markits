@@ -26,3 +26,14 @@ pub mod visual_target;
 pub mod window_capture;
 pub mod capture_lifecycle;
 pub mod recording;
+
+pub mod metadata;
+pub mod image_export;
+pub mod history;
+pub mod recording_metadata;
+pub mod capture_recipe;
+pub mod cursor_capture;
+pub mod cli_support;
+pub mod replay_input;
+#[cfg(target_os = "windows")]
+pub mod java_access_bridge;

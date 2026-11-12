@@ -3136,10 +3136,17 @@ dependencies = [
 name = "markits"
 version = "0.8.4"
 dependencies = [
+ "arboard",
  "ashpd",
  "base64 0.22.1",
+ "chrono",
  "clap",
+ "crc32fast",
+ "dirs 6.0.0",
  "image 0.25.10",
+ "image-webp",
+ "jxl-oxide",
+ "png 0.18.1",
  "rdev",
  "resvg",
  "screenshots",
@@ -3150,11 +3157,14 @@ dependencies = [
  "tokio",
  "url",
  "windows 0.62.2",
+ "windows-sys 0.61.2",
  "x11-dl",
  "x11rb 0.13.2",
  "xa11y",
  "xcap",
  "zbus",
+ "zune-core",
+ "zune-jpegxl",
 ]
 
 [[package]]

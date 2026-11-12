@@ -113,6 +113,7 @@ fn cli_inspects_images_and_infers_canvas_for_render_and_validate() {
             "width": 64,
             "height": 48,
             "format": "jpeg",
+            "has_capture_recipe": false,
             "has_uimap": false,
             "uimap_elements_count": 0
         })

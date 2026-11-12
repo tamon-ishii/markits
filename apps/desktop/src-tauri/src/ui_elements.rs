@@ -13,7 +13,6 @@ pub fn set_exploration_depth(depth: usize) -> Result<(), String> {
     Ok(())
 }
 
-use serde::{Deserialize, Serialize};
 #[cfg(target_os = "windows")]
 #[path = "windows_capture.rs"]
 mod windows_capture;
@@ -23,20 +22,7 @@ mod java_access_bridge;
 #[cfg(not(target_os = "linux"))]
 use xa11y::{App, AppExt, Element, Rect, Role};
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct DetectedUiElement {
-    pub role: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub name: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub window_id: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub pid: Option<u32>,
-    pub x: f64,
-    pub y: f64,
-    pub width: f64,
-    pub height: f64,
-}
+pub use markits::ui_elements::DetectedUiElement;
 
 /// Collect native desktop windows in stacking order without requiring accessibility support.
 #[cfg(target_os = "windows")]

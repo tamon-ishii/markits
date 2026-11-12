@@ -902,12 +902,21 @@ mod native {
             .ok_or("Selected window is no longer open")?;
         #[cfg(target_os = "windows")]
         {
-            #[link(name = "user32")]
-            unsafe extern "system" {
-                fn SetForegroundWindow(window: isize) -> i32;
-            }
-            // xcap exposes the low 32 bits of HWND; Windows sign-extends them on 64-bit systems.
-            if unsafe { SetForegroundWindow((id as i32) as isize) } == 0 {
+            use windows_sys::Win32::{System::Threading::{AttachThreadInput,GetCurrentThreadId}, UI::WindowsAndMessaging::{BringWindowToTop,GetForegroundWindow,GetWindowThreadProcessId,SetForegroundWindow}};
+            let target=(id as i32 as isize) as windows_sys::Win32::Foundation::HWND;
+            // A zero return is not an error when the selected window is already foreground.
+            let activated=unsafe {
+                if GetForegroundWindow()==target { true } else if SetForegroundWindow(target)!=0 { true } else {
+                    let current=GetCurrentThreadId();
+                    let foreground=GetWindowThreadProcessId(GetForegroundWindow(),std::ptr::null_mut());
+                    let attached=foreground!=0&&foreground!=current&&AttachThreadInput(current,foreground,1)!=0;
+                    BringWindowToTop(target);
+                    SetForegroundWindow(target);
+                    if attached{AttachThreadInput(current,foreground,0);}
+                    GetForegroundWindow()==target
+                }
+            };
+            if !activated {
                 return Err("Windows denied activation of the selected window".into());
             }
         }

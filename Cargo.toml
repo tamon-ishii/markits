@@ -27,9 +27,18 @@ serde_json = "1.0"
 clap = { version = "4.5", features = ["derive"] }
 thiserror = "2.0"
 base64 = "0.22"
-image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp"] }
 resvg = { version = "0.48", default-features = false, features = ["text", "system-fonts", "raster-images"] }
 screenshots = "0.8.10"
+png = "0.18"
+crc32fast = "1.4"
+dirs = "6.0"
+chrono = "0.4"
+zune-core = "0.5"
+zune-jpegxl = "0.5.2"
+image-webp = "0.2.4"
+jxl-oxide = { version = "0.12.6", default-features = false }
+arboard = "3.6"
 xa11y = { version = "0.15.1", default-features = false }
 
 [target.'cfg(target_os = "linux")'.dependencies]
@@ -52,3 +61,7 @@ lto = true
 codegen-units = 1
 panic = "abort"
 strip = true
+
+[target.'cfg(target_os = "windows")'.dependencies.windows-sys]
+version = "0.61"
+features = ["Win32_Foundation", "Win32_Graphics_Gdi", "Win32_UI_WindowsAndMessaging", "Win32_UI_Input_KeyboardAndMouse", "Win32_System_LibraryLoader", "Win32_System_Threading"]

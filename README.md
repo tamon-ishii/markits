@@ -132,6 +132,48 @@ markits manual
 markits --help
 ```
 
+### CLIでの編集情報・操作記録・履歴の利用
+
+```sh
+# マークとクロップを再編集できるWebPとして保存（JPEG XLにも対応）
+markits annotate screen.png --target "保存" --mark rect --crop --editing-metadata -o detail.webp
+
+# Windowsでカーソル付き撮影。Java UI検出と探索深さの指定にも対応
+markits capture app.png --window "アプリ名" --detect-ui --ui-depth 128 --include-cursor
+
+# メタデータを除いた共有用画像へ変換
+markits export detail.webp -o share.jxl
+
+# 別のCLI呼び出しから制御できる操作記録
+markits record start --session session-01 --window "アプリ名"
+markits record screenshot --session session-01
+markits record finish --session session-01
+markits replay session-01/recording.json --dry-run
+markits replay session-01/recording.json --window "アプリ名" --output-dir recaptured
+
+# デスクトップ版と共通の撮影履歴
+markits history list
+markits history save detail.webp
+```
+
+操作記録は `pause`・`resume`・`status`・`cancel` でも制御できます。再生は対象アプリを実際に操作するため、開始時の状態に戻してから実行してください。各コマンドの `--help` と `markits manual` に詳細を同梱しています。
+
+### 起動・操作を保存して自動撮影・再撮影
+
+```sh
+# 起動スクリプトの内容・引数・作業ディレクトリ・操作記録を画像に埋め込む
+markits capture-run --launch-script start.ps1 --arg "project name" --cwd "C:/work/app" --window "アプリ名" --operations session-01/recording.json -o app.png
+
+# 画像に埋め込まれたレシピから再起動・操作・再撮影
+markits recapture app.png -o new.png
+
+# レシピを実行せずJSONとして取り出す・編集して再利用
+markits recipe app.png --output recipe.json
+markits capture-run --recipe recipe.json -o from-json.png
+```
+
+`--operations` を省略すると、起動後の画面を1枚撮影します。`--launch` でEXEの直接起動、`--window-bounds` でウィンドウ位置・サイズの指定（Windows）にも対応します。スクリプト本体を画像に含めるので、元スクリプトの削除後も再撮影できます。`--dry-run` で実行前の内容確認ができます。
+
 ### 既存画像から再編集メタデータを除去
 
 ```sh
