@@ -3181,6 +3181,7 @@ dependencies = [
  "tauri-plugin-dialog",
  "tauri-plugin-fs",
  "tauri-plugin-global-shortcut",
+ "tempfile",
  "thiserror 2.0.21",
  "tokio",
  "windows-sys 0.61.2",

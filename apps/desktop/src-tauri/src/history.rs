@@ -35,6 +35,15 @@ pub struct HistoryItem {
     pub is_cropped: bool,
 }
 
+#[cfg(test)]
+pub fn get_history_dir() -> PathBuf {
+    thread_local! {
+        static HISTORY: tempfile::TempDir = tempfile::tempdir().expect("isolated test history");
+    }
+    HISTORY.with(|directory| directory.path().to_path_buf())
+}
+
+#[cfg(not(test))]
 pub fn get_history_dir() -> PathBuf {
     let base = dirs::data_dir().unwrap_or_else(|| PathBuf::from("."));
     let dir = base.join("markits").join("history");

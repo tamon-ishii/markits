@@ -63,7 +63,7 @@ impl LaunchCaptureOptions {
 
 #[derive(Clone, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct ManualStudioSession { pub input: String, pub output: String, pub completion: String }
+pub struct ManualStudioSession { pub input: String, pub output: String, pub completion: String, pub recapture: bool }
 
 impl AppState {
     fn accept_capture_shortcut(&self, pressed: bool) -> bool {
@@ -82,7 +82,7 @@ fn launch_session(args: &[String]) -> Option<ManualStudioSession> {
     let output = args.windows(2).find(|pair| pair[0] == "--manual-studio-output").map(|pair| pair[1].clone());
     let completion = args.windows(2).find(|pair| pair[0] == "--manual-studio-completion").map(|pair| pair[1].clone());
     let input = input.or_else(|| args.iter().any(|arg| arg == "--capture").then(String::new));
-    input.zip(output).zip(completion).map(|((input, output), completion)| ManualStudioSession { input, output, completion })
+    input.zip(output).zip(completion).map(|((input, output), completion)| ManualStudioSession { input, output, completion, recapture: args.iter().any(|arg|arg=="--manual-studio-recapture") })
 }
 
 struct StartupCapture(std::sync::atomic::AtomicBool);
@@ -144,7 +144,7 @@ mod startup_capture_tests {
         let state = super::AppState::default();
         assert!(!state.exit_on_capture_cancel().unwrap());
         *state.manual_studio.lock().unwrap() = Some(super::ManualStudioSession {
-            input: String::new(), output: "capture.png".into(), completion: "done".into(),
+            input: String::new(), output: "capture.png".into(), completion: "done".into(), recapture: false,
         });
         assert!(state.exit_on_capture_cancel().unwrap(), "cancel before capture returns to Munin");
         state.capture_ready_for_editing.store(true, std::sync::atomic::Ordering::SeqCst);
@@ -166,6 +166,12 @@ fn cmd_manual_studio_complete(app: AppHandle) -> Result<(), String> {
     std::fs::write(session.completion, "saved").map_err(|e| e.to_string())?;
     app.exit(0);
     Ok(())
+}
+
+#[tauri::command]
+fn cmd_manual_studio_cancel(app:AppHandle)->Result<(),String>{
+    if app.state::<AppState>().manual_studio.lock().map_err(|e|e.to_string())?.is_none(){return Err("Not in Manual Studio integration mode".into());}
+    app.exit(0);Ok(())
 }
 
 const DEFAULT_CAPTURE_SHORTCUT: &str = "Control+Shift+E";
@@ -433,6 +439,7 @@ pub fn run() {
             cmd_manual_studio_session,
             cmd_take_startup_capture,
             cmd_manual_studio_complete,
+            cmd_manual_studio_cancel,
             i18n::cmd_set_locale
         ])
         .on_window_event(|window, event| match event {
