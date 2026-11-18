@@ -267,6 +267,23 @@ fn decode(url: &str) -> Result<Vec<u8>, String> {
         .map_err(|e| e.to_string())
 }
 
+pub fn resolve_window(id: Option<&str>, pid: Option<u32>, title: Option<&str>) -> Result<markits::window_capture::WindowInfo, String> {
+    let windows = markits::window_capture::list_windows()?;
+    if let Some((id, pid)) = id.zip(pid) {
+        let owners = markits::window_capture::window_process_ids()?;
+        if owners.iter().any(|(owner_id, owner_pid)| owner_id == id && *owner_pid == pid) {
+            if let Some(window) = windows.iter().find(|window| window.id == id) {
+                return Ok(window.clone());
+            }
+        }
+    }
+    let mut matches = windows.into_iter().filter(|window| Some(window.title.as_str()) == title);
+    match (matches.next(), matches.next()) {
+        (Some(window), None) => Ok(window),
+        _ => Err(crate::i18n::text("対象ウインドウを一意に特定できません。対象を開いてからやり直してください", "Cannot identify a unique target window. Open the target and try again.").into()),
+    }
+}
+
 pub fn snapshot(window_id: &str) -> Result<Vec<u8>, String> {
     let _timing = crate::playback_trace::Span::new("snapshot.total");
     #[cfg(target_os = "windows")]
@@ -468,28 +485,7 @@ fn replay(
     if let Some(area) = saved.capture_area.clone() {
         return replay_fullscreen(app, saved, area, max_wait_ms);
     }
-    let windows = markits::window_capture::list_windows()?;
-    let owners = markits::window_capture::window_process_ids()?;
-    let original = windows.iter().find(|w| {
-        w.id == saved.window_id
-            && owners
-                .iter()
-                .any(|(id, pid)| id == &w.id && *pid == saved.pid)
-    });
-    let window = if let Some(window) = original {
-        window
-    } else {
-        let matches: Vec<_> = windows
-            .iter()
-            .filter(|w| w.title == saved.recording.window)
-            .collect();
-        if matches.len() != 1 {
-            return Err(
-                crate::i18n::text("対象ウインドウを一意に特定できません。対象を開いてから再生してください", "Cannot identify a unique target window. Open the target and try again.").into(),
-            );
-        }
-        matches[0]
-    };
+    let window = resolve_window(Some(&saved.window_id), Some(saved.pid), Some(&saved.recording.window))?;
     // Validate all keyboard events before executing any input.
     for event in &saved.recording.events {
         if let RecordedEvent::Key { value, .. } = event {
@@ -582,7 +578,7 @@ fn replay(
                             send(rdev::EventType::MouseMove { x, y })?;
                         }
                         wait_before_screenshot(app, shorten_waits, point.is_some(), action_settled.replace(false), &check)?;
-                        wait_for_visual_ready(app, window, None, &check)?;
+                        wait_for_visual_ready(app, &window, None, &check)?;
                         let recorded_pointer = if include_cursor && pointer.is_none() {
                             crate::cursor_capture::current_pointer(&window.id)?.map(|pointer|
                                 pointer_in_recording_space(pointer, saved.recording.bounds,
@@ -694,7 +690,7 @@ fn replay(
         });
         pictures.push(without_popup(app, || {
             countdown(app, if shorten_waits { if action_settled.get() { 0 } else { 1000 } } else { 250 }, &check)?;
-            wait_for_visual_ready(app, window, None, &check)?;
+            wait_for_visual_ready(app, &window, None, &check)?;
             let include_cursor = app.state::<PlaybackState>().2.lock().map_err(|e| e.to_string())?.include_cursor;
             if include_cursor {
                 let pointer = crate::cursor_capture::current_pointer(&window.id)?.map(|pointer|
