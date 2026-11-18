@@ -328,8 +328,41 @@ pub async fn cmd_playback(
     max_wait_ms: Option<u64>,
     shorten_waits: Option<bool>,
 ) -> Result<Vec<metadata::LoadedImageResult>, String> {
-    let saved = extract(&decode(&image_data_url)?)?.ok_or(crate::i18n::text("この画像には操作記録がありません", "This image has no recorded operations"))?;
     let _ = max_wait_ms;
+    run_playback(&app, &decode(&image_data_url)?, shorten_waits, true).await
+}
+
+#[tauri::command]
+pub async fn cmd_manual_studio_recapture(app: tauri::AppHandle) -> Result<(), String> {
+    let session = app.state::<crate::AppState>().manual_studio.lock().map_err(|e| e.to_string())?
+        .clone().filter(|session| session.recapture).ok_or("Missing Manual Studio recapture session")?;
+    let result = async {
+        let source = std::fs::read(&session.input).map_err(|e| e.to_string())?;
+        let images = run_playback(&app, &source, None, false).await?;
+        let image = images.last().ok_or(crate::i18n::text("再撮影画像を取得できませんでした", "No image was captured"))?;
+        std::fs::write(&session.output, decode(&image.image_data_url)?).map_err(|e| e.to_string())?;
+        std::fs::write(&session.completion, "saved").map_err(|e| e.to_string())
+    }.await;
+    if let Err(error) = result {
+        if !app.state::<PlaybackState>().1.load(Ordering::SeqCst) {
+            if let Err(write_error) = std::fs::write(&session.completion, format!("error:{error}")) {
+                eprintln!("Could not report recapture failure: {write_error}");
+                app.exit(1);
+                return Err(write_error.to_string());
+            }
+        }
+    }
+    app.exit(0);
+    Ok(())
+}
+
+async fn run_playback(
+    app: &tauri::AppHandle,
+    source: &[u8],
+    shorten_waits: Option<bool>,
+    restore_editor: bool,
+) -> Result<Vec<metadata::LoadedImageResult>, String> {
+    let saved = extract(source)?.ok_or(crate::i18n::text("この画像には操作記録がありません", "This image has no recorded operations"))?;
     let max_wait_ms = u64::MAX;
     app.state::<crate::recording::RecordingState>()
         .claim_playback(&app.state::<PlaybackState>())?;
@@ -338,7 +371,7 @@ pub async fn cmd_playback(
     app.state::<PlaybackState>()
         .1
         .store(false, Ordering::SeqCst);
-    progress(&app, |value| {
+    progress(app, |value| {
         let shorten_waits = shorten_waits.unwrap_or(value.shorten_waits);
         let cursor_override = value.cursor_override;
         let recorded_cursor = saved.recording.events.iter().any(|event|
@@ -359,7 +392,7 @@ pub async fn cmd_playback(
     let popup = if let Some(existing) = app.get_webview_window("playback") {
         existing.show().map(|_| existing)
     } else { tauri::WebviewWindowBuilder::new(
-        &app,
+        app,
         "playback",
         tauri::WebviewUrl::App("index.html".into()),
     )
@@ -373,7 +406,7 @@ pub async fn cmd_playback(
         app.state::<PlaybackState>()
             .0
             .store(false, Ordering::SeqCst);
-        progress(&app, |value| {
+        progress(app, |value| {
             value.running = false;
             value.error = Some(error.to_string());
         });
@@ -387,7 +420,7 @@ pub async fn cmd_playback(
     app.state::<PlaybackState>()
         .0
         .store(false, Ordering::SeqCst);
-    progress(&app, |value| {
+    progress(app, |value| {
         value.running = false;
         value.wait_remaining_ms = 0;
         match &result {
@@ -401,12 +434,14 @@ pub async fn cmd_playback(
             }
         }
     });
-    if let Some(popup) = app.get_webview_window("playback") {
-        let _ = popup.show();
-        let _ = popup.set_focusable(true);
-    }
-    if let Some(main) = app.get_webview_window("main") {
-        crate::commands::force_raise_window(&main);
+    if restore_editor {
+        if let Some(popup) = app.get_webview_window("playback") {
+            let _ = popup.show();
+            let _ = popup.set_focusable(true);
+        }
+        if let Some(main) = app.get_webview_window("main") {
+            crate::commands::force_raise_window(&main);
+        }
     }
     result
 }

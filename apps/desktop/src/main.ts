@@ -265,7 +265,6 @@ document.addEventListener('DOMContentLoaded', async () => {
         await switchView('editor');
       }
       await loadHistory();
-      return Boolean(image);
     } catch (error) {
       if (!['再撮影を停止しました', 'Recapture stopped', '再生を停止しました', 'Playback stopped'].includes(String(error))) alert(t`再生・再撮影に失敗しました: ${error}`);
     }
@@ -963,6 +962,10 @@ document.addEventListener('DOMContentLoaded', async () => {
     try {
       manualStudioSession = await invokeTauri<ManualStudioSession | null>('cmd_manual_studio_session');
       if (manualStudioSession) {
+        if (manualStudioSession.recapture) {
+          await invokeTauri('cmd_manual_studio_recapture');
+          return;
+        }
         document.body.classList.add('manual-studio-integration');
         const doneButton = document.getElementById('btn-done-editing');
         if (doneButton) { doneButton.textContent = t('編集終了'); doneButton.title = t('編集内容を保存し、スクリーンショット一覧へ返します'); }
@@ -972,12 +975,6 @@ document.addEventListener('DOMContentLoaded', async () => {
         if (image.base_image_data_url && image.base_width && image.base_height) editor.restoreCropState({ dataUrl: image.base_image_data_url, width: image.base_width, height: image.base_height, uiElements: image.base_ui_elements ?? [] }, image.crop_info ?? null);
         currentHistoryId = null;
         await switchView('editor');
-        if (manualStudioSession.recapture) {
-          if(await replayCapture(image.image_data_url)) {
-            editor.commitPendingCrop();
-            if (prepareExport()) await executeSaveWithResolution();
-          }else await invokeTauri('cmd_manual_studio_cancel');
-        }
         } else {
           await handleCaptureTrigger();
         }

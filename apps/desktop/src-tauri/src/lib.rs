@@ -168,12 +168,6 @@ fn cmd_manual_studio_complete(app: AppHandle) -> Result<(), String> {
     Ok(())
 }
 
-#[tauri::command]
-fn cmd_manual_studio_cancel(app:AppHandle)->Result<(),String>{
-    if app.state::<AppState>().manual_studio.lock().map_err(|e|e.to_string())?.is_none(){return Err("Not in Manual Studio integration mode".into());}
-    app.exit(0);Ok(())
-}
-
 const DEFAULT_CAPTURE_SHORTCUT: &str = "Control+Shift+E";
 
 #[cfg(test)]
@@ -376,7 +370,8 @@ pub fn run() {
     let capture_requested = args.iter().any(|arg| arg == "--capture");
     let manual_studio = launch_session(&args);
     let startup_capture = args.iter().any(|arg| arg == "--capture") && manual_studio.is_none();
-    let background = capture_requested || (args.iter().any(|arg| arg == "--background") && manual_studio.is_none());
+    let background = capture_requested || manual_studio.as_ref().is_some_and(|session| session.recapture)
+        || (args.iter().any(|arg| arg == "--background") && manual_studio.is_none());
     tauri::Builder::default()
         .manage(StartupCapture(std::sync::atomic::AtomicBool::new(startup_capture)))
         .manage(recording::RecordingState::default())
@@ -394,6 +389,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             playback::cmd_has_operations,
             playback::cmd_playback,
+            playback::cmd_manual_studio_recapture,
             playback::cmd_playback_cancel,
             playback::cmd_playback_control,
             playback::cmd_playback_wait_mode,
@@ -439,7 +435,6 @@ pub fn run() {
             cmd_manual_studio_session,
             cmd_take_startup_capture,
             cmd_manual_studio_complete,
-            cmd_manual_studio_cancel,
             i18n::cmd_set_locale
         ])
         .on_window_event(|window, event| match event {
