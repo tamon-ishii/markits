@@ -63,6 +63,11 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y libxkbcommon-dev libxcb1-dev libx11-dev libxi-dev libxtst-dev
+      # screenshots 0.8.10 relies on unit fallback in its Linux backend.
+      - uses: dtolnay/rust-toolchain@master
+        if: runner.os == 'Linux'
+        with:
+          toolchain: '1.99.0'
       - name: Build markits and upload to GitHub Release
         uses: taiki-e/upload-rust-binary-action@v1
         with:

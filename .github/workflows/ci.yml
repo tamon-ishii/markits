@@ -36,7 +36,10 @@ jobs:
           npm run build
         working-directory: apps/desktop
 
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          # screenshots 0.8.10 relies on unit fallback in its Linux backend.
+          toolchain: ${{ runner.os == 'Linux' && '1.99.0' || 'stable' }}
 
       - name: Cargo check
         run: cargo check --all-targets

@@ -56,6 +56,8 @@ jobs:
             rust_targets: ''
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: refs/tags/${{ needs.release.outputs.tag }}
       - name: Install Linux system dependencies
         if: runner.os == 'Linux'
         run: |
@@ -68,8 +70,10 @@ jobs:
           cache: npm
           cache-dependency-path: apps/desktop/package-lock.json
       - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@master
         with:
+          # screenshots 0.8.10 relies on unit fallback in its Linux backend.
+          toolchain: ${{ runner.os == 'Linux' && '1.99.0' || 'stable' }}
           targets: ${{ matrix.rust_targets }}
       - name: Install frontend dependencies
         run: npm ci
