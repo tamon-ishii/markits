@@ -160,6 +160,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   const editorView = document.getElementById('editor-view')!;
   const editorActions = document.getElementById('editor-actions')!;
   const captureButton = document.getElementById('btn-trigger-capture')!;
+  const clipboardCaptureButton = document.getElementById('btn-capture-clipboard') as HTMLButtonElement;
   const openButton = document.getElementById('btn-open-file')!;
   const historyGrid = document.getElementById('history-grid')!;
   const historyCount = document.getElementById('history-count')!;
@@ -335,6 +336,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       editorView.style.display = 'none';
       editorActions.style.display = 'none';
       captureButton.style.display = '';
+      clipboardCaptureButton.style.display = '';
       openButton.style.display = '';
       tabEditor.style.display = '';
 
@@ -348,6 +350,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       editorView.style.display = 'flex';
       editorActions.style.display = 'flex';
       captureButton.style.display = 'none';
+      clipboardCaptureButton.style.display = 'none';
       openButton.style.display = 'none';
       tabEditor.style.display = 'none';
       await raiseAppWindow();
@@ -573,6 +576,50 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   document.getElementById('btn-trigger-capture')?.addEventListener('click', handleCaptureTrigger);
   document.getElementById('btn-empty-capture')?.addEventListener('click', handleCaptureTrigger);
+
+  clipboardCaptureButton.addEventListener('click', async () => {
+    clipboardCaptureButton.disabled = true;
+    try {
+      const canvas = document.createElement('canvas');
+      const context = canvas.getContext('2d')!;
+      if (isTauri) {
+        const { readImage } = await import('@tauri-apps/plugin-clipboard-manager');
+        const image = await readImage();
+        try {
+          const { width, height } = await image.size();
+          canvas.width = width;
+          canvas.height = height;
+          context.putImageData(new ImageData(new Uint8ClampedArray(await image.rgba()), width, height), 0, 0);
+        } finally {
+          await image.close();
+        }
+      } else {
+        const items = await navigator.clipboard.read();
+        const item = items.find((entry) => entry.types.some((type) => type.startsWith('image/')));
+        const type = item?.types.find((entry) => entry.startsWith('image/'));
+        if (!item || !type) throw new Error('No clipboard image');
+        const bitmap = await createImageBitmap(await item.getType(type));
+        try {
+          canvas.width = bitmap.width;
+          canvas.height = bitmap.height;
+          context.drawImage(bitmap, 0, 0);
+        } finally {
+          bitmap.close();
+        }
+      }
+
+      const dataUrl = canvas.toDataURL();
+      if (dataUrl === 'data:,') throw new Error('Could not encode clipboard image');
+      editor.setBackgroundImage(dataUrl, canvas.width, canvas.height, null);
+      currentHistoryId = null;
+      await switchView('editor');
+    } catch (error) {
+      console.warn('Failed to import clipboard image:', error);
+      alert(t('クリップボードから画像を読み取れませんでした。画像をコピーしてからもう一度お試しください。'));
+    } finally {
+      clipboardCaptureButton.disabled = false;
+    }
+  });
 
   // File Open Flow
   const handleOpenFile = async () => {

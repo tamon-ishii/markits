@@ -23,6 +23,7 @@
         <button id="btn-trigger-capture" class="btn btn-primary" title="画面キャプチャ">
           📷 キャプチャ
         </button>
+        <button id="btn-capture-clipboard" class="btn" type="button"><span aria-hidden="true">📋</span> クリップボードからキャプチャ</button>
         <button id="btn-open-file" class="btn" title="画像ファイルを開く">
           📂 開く
         </button>
@@ -263,13 +264,13 @@
       <div class="overlay-toolbar">
         <div class="capture-toolbar-row">
           <div class="capture-modes" role="group" aria-label="キャプチャモード">
-            <button id="btn-mode-capture" class="btn btn-sm btn-primary" aria-pressed="true">ウィンドウ</button>
-            <button id="btn-mode-region" class="btn btn-sm" aria-pressed="false">選択範囲</button>
-            <button id="btn-mode-record" class="btn btn-sm" aria-pressed="false">操作を記録</button>
+            <button id="btn-mode-capture" class="btn btn-sm btn-primary" aria-pressed="true"><span aria-hidden="true">🪟</span> ウィンドウ</button>
+            <button id="btn-mode-region" class="btn btn-sm" aria-pressed="false"><span aria-hidden="true">⬚</span> 選択範囲</button>
+            <button id="btn-mode-record" class="btn btn-sm" aria-pressed="false"><span aria-hidden="true">⏺</span> 操作を記録</button>
           </div>
           <div class="capture-actions">
-            <button id="btn-capture-fullscreen" class="btn btn-sm">全画面を撮影</button>
-            <button id="btn-cancel-capture" class="btn btn-sm capture-cancel">キャンセル <kbd>Esc</kbd></button>
+            <button id="btn-capture-fullscreen" class="btn btn-sm"><span aria-hidden="true">🖥</span> 全画面を撮影</button>
+            <button id="btn-cancel-capture" class="btn btn-sm capture-cancel"><span aria-hidden="true">✕</span> キャンセル <kbd>Esc</kbd></button>
           </div>
         </div>
         <div class="capture-toolbar-footer">

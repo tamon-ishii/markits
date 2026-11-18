@@ -281,6 +281,8 @@
   "画像ファイルを開く": "Open image file",
   "画面をキャプチャする": "Capture screen",
   "画面キャプチャ": "Screen capture",
+  "クリップボードからキャプチャ": "Capture from clipboard",
+  "クリップボードから画像を読み取れませんでした。画像をコピーしてからもう一度お試しください。": "Could not read an image from the clipboard. Copy an image and try again.",
   "画面キャプチャに失敗しました": "Screen capture failed",
   "画面キャプチャの起動に失敗しました": "Could not start screen capture",
   "画面キャプチャはデスクトップ環境で動作します。": "Screen capture is available in the desktop app.",
