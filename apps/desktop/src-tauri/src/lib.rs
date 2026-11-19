@@ -63,7 +63,14 @@ impl LaunchCaptureOptions {
 
 #[derive(Clone, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct ManualStudioSession { pub input: String, pub output: String, pub completion: String, pub recapture: bool }
+pub struct ManualStudioSession {
+    pub input: String,
+    pub output: String,
+    pub completion: String,
+    pub recapture: bool,
+    #[serde(skip)]
+    pub recapture_window: Option<String>,
+}
 
 impl AppState {
     fn accept_capture_shortcut(&self, pressed: bool) -> bool {
@@ -82,7 +89,10 @@ fn launch_session(args: &[String]) -> Option<ManualStudioSession> {
     let output = args.windows(2).find(|pair| pair[0] == "--manual-studio-output").map(|pair| pair[1].clone());
     let completion = args.windows(2).find(|pair| pair[0] == "--manual-studio-completion").map(|pair| pair[1].clone());
     let input = input.or_else(|| args.iter().any(|arg| arg == "--capture").then(String::new));
-    input.zip(output).zip(completion).map(|((input, output), completion)| ManualStudioSession { input, output, completion, recapture: args.iter().any(|arg|arg=="--manual-studio-recapture") })
+    let recapture_window = args.windows(2).find(|pair| pair[0] == "--manual-studio-recapture-window").map(|pair| pair[1].clone());
+    input.zip(output).zip(completion).map(|((input, output), completion)| ManualStudioSession {
+        input, output, completion, recapture: args.iter().any(|arg|arg=="--manual-studio-recapture"), recapture_window,
+    })
 }
 
 struct StartupCapture(std::sync::atomic::AtomicBool);
@@ -144,7 +154,7 @@ mod startup_capture_tests {
         let state = super::AppState::default();
         assert!(!state.exit_on_capture_cancel().unwrap());
         *state.manual_studio.lock().unwrap() = Some(super::ManualStudioSession {
-            input: String::new(), output: "capture.png".into(), completion: "done".into(), recapture: false,
+            input: String::new(), output: "capture.png".into(), completion: "done".into(), recapture: false, recapture_window: None,
         });
         assert!(state.exit_on_capture_cancel().unwrap(), "cancel before capture returns to Munin");
         state.capture_ready_for_editing.store(true, std::sync::atomic::Ordering::SeqCst);
@@ -391,6 +401,9 @@ pub fn run() {
             playback::cmd_playback,
             playback::cmd_manual_studio_recapture,
             playback::cmd_playback_cancel,
+            playback::cmd_playback_open_window_picker,
+            playback::cmd_playback_select_window,
+            playback::cmd_playback_confirm_window_update,
             playback::cmd_playback_control,
             playback::cmd_playback_wait_mode,
             playback::cmd_playback_cursor_mode,

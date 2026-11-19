@@ -43,7 +43,7 @@ pub fn capture_desktop_windows(screen_origin_x: i32, screen_origin_y: i32) -> Ve
             elements.push(DetectedUiElement {
                 role: "window".to_string(),
                 name: Some(win.title),
-                window_id: None,
+                window_id: Some(win.id),
                 pid: win.pid,
                 x: (win.x - screen_origin_x) as f64,
                 y: (win.y - screen_origin_y) as f64,
@@ -533,6 +533,7 @@ mod linux_x11 {
     use x11_dl::xlib;
 
     pub struct WindowBounds {
+        pub id: String,
         pub title: String,
         pub pid: Option<u32>,
         pub x: i32,
@@ -762,6 +763,7 @@ mod linux_x11 {
 
                 if !display_title.is_empty() {
                     windows.push(WindowBounds {
+                        id: format!("0x{win:x}"),
                         title: display_title,
                         pid: window_pid,
                         x: win_x,

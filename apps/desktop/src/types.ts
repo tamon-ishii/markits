@@ -202,6 +202,7 @@ export interface CapturedImage {
   include_cursor?: boolean;
   capture_shortcut?: string;
   recording_mode?: boolean;
+  playback_mode?: boolean;
   width: number;
   height: number;
   data_url: string;

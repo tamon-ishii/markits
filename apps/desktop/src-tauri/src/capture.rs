@@ -26,6 +26,8 @@ pub struct CapturedImage {
     pub capture_shortcut: Option<String>,
     #[serde(default)]
     pub recording_mode: bool,
+    #[serde(default)]
+    pub playback_mode: bool,
     pub width: u32,
     pub height: u32,
     pub data_url: String,
@@ -49,6 +51,7 @@ pub fn rgba_to_captured_image(img: &RgbaImage) -> Result<CapturedImage, CaptureE
         include_cursor: false,
         capture_shortcut: None,
         recording_mode: false,
+        playback_mode: false,
         width: img.width(),
         height: img.height(),
         data_url,

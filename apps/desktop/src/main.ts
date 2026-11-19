@@ -144,7 +144,10 @@ document.addEventListener('DOMContentLoaded', async () => {
           },
           captured.recording_mode ?? false,
           captured.capture_shortcut ?? 'Control+Shift+E',
-          captured.include_cursor ?? false
+          captured.include_cursor ?? false,
+          captured.playback_mode ? window => invokeTauri<void>('cmd_playback_select_window', {
+            windowId: window.window_id, pid: window.pid ?? null,
+          }) : undefined
         );
       });
       await invokeTauri('cmd_overlay_ready');

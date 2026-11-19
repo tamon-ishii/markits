@@ -24,6 +24,8 @@ export class CaptureOverlay {
   private onCancelCallback?: () => void;
   private onRecordCallback?: (window: DetectedUiElement, includeCursor: boolean) => void;
   private onCursorCallback?: (selection: CursorCaptureSelection) => void;
+  private onPickWindow?: (window: DetectedUiElement) => Promise<void>;
+  private pickingWindow = false;
   private recordingMode = false;
   private regionMode = false;
   private dragStart: { x: number; y: number } | null = null;
@@ -76,6 +78,14 @@ export class CaptureOverlay {
   }
 
   private captureWindow(win: DetectedUiElement) {
+    if (this.onPickWindow) {
+      if (!win.window_id || this.pickingWindow) return;
+      this.pickingWindow = true;
+      void this.onPickWindow(win).then(() => this.hide()).catch(error => {
+        if (!this.overlayEl.classList.contains('hidden')) alert(String(error));
+      }).finally(() => { this.pickingWindow = false; });
+      return;
+    }
     if (this.recordingMode) { this.recordWindow(win); return; }
     if (this.includeCursor) {
       this.hide();
@@ -116,6 +126,11 @@ export class CaptureOverlay {
   }
 
   private updateCaptureHint() {
+    if (this.onPickWindow) {
+      document.getElementById('ui-element-action-hint')!.textContent = t('クリックで撮影対象を選択');
+      document.querySelector('.overlay-hint')!.textContent = t('再撮影するウィンドウをクリックしてください。');
+      return;
+    }
     const key = this.captureShortcut.replace('Control', 'Ctrl');
     if (this.regionMode) {
       document.querySelector('.overlay-hint')!.textContent = this.includeCursor
@@ -205,14 +220,17 @@ export class CaptureOverlay {
     onCursor?: (selection: CursorCaptureSelection) => void,
     recordingMode = false,
     captureShortcut = 'Control+Shift+E',
-    includeCursor = false
+    includeCursor = false,
+    onPickWindow?: (window: DetectedUiElement) => Promise<void>
   ) {
     this.bgImgEl.src = fullDataUrl;
-    this.uiElements = uiElements;
+    this.uiElements = onPickWindow ? uiElements.filter(element => !!element.window_id) : uiElements;
     this.onCompleteCallback = onComplete;
     this.onCancelCallback = onCancel;
     this.onRecordCallback = onRecord;
     this.onCursorCallback = onCursor;
+    this.onPickWindow = onPickWindow;
+    this.overlayEl.classList.toggle('playback-window-picker', !!onPickWindow);
     this.captureShortcut = captureShortcut;
     this.setCursorIncluded(includeCursor);
     this.setRecordingMode(recordingMode);

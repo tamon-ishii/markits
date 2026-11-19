@@ -63,21 +63,27 @@ pub async fn cmd_capture_screen(app: tauri::AppHandle) -> Result<capture::Captur
 
 #[tauri::command]
 pub async fn cmd_start_capture(app: tauri::AppHandle) -> Result<(), String> {
+    if crate::playback::window_picker_active(&app) {
+        return Ok(());
+    }
     if app.state::<crate::AppState>().launch_capture_options.include_cursor {
         app.state::<crate::AppState>().capture_ready_for_editing.store(false, Ordering::SeqCst);
         crate::cursor_capture::cancel(&app);
         app.state::<crate::AppState>().capture_generation.fetch_add(1, Ordering::SeqCst);
         return crate::cursor_capture::cmd_arm_cursor_capture(app, crate::cursor_capture::CursorCaptureTarget::UnderCursor).await;
     }
-    start_window_selection(app, false).await
+    start_window_selection(app, SelectionMode::Capture).await
 }
 
 #[tauri::command]
 pub async fn cmd_select_recording_window(app: tauri::AppHandle) -> Result<(), String> {
-    start_window_selection(app, true).await
+    start_window_selection(app, SelectionMode::Record).await
 }
 
-async fn start_window_selection(app: tauri::AppHandle, recording_mode: bool) -> Result<(), String> {
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum SelectionMode { Capture, Record, Playback }
+
+pub(crate) async fn start_window_selection(app: tauri::AppHandle, mode: SelectionMode) -> Result<(), String> {
     app.state::<crate::AppState>().capture_ready_for_editing.store(false, Ordering::SeqCst);
     crate::cursor_capture::cancel(&app);
     let generation = app
@@ -85,7 +91,7 @@ async fn start_window_selection(app: tauri::AppHandle, recording_mode: bool) -> 
         .capture_generation
         .fetch_add(1, Ordering::SeqCst)
         + 1;
-    let main_win = app.get_webview_window("main");
+    let main_win = (mode != SelectionMode::Playback).then(|| app.get_webview_window("main")).flatten();
     if let Some(ref w) = main_win {
         let _ = w.hide();
     }
@@ -109,6 +115,7 @@ async fn start_window_selection(app: tauri::AppHandle, recording_mode: bool) -> 
         .capture_generation
         .load(Ordering::SeqCst)
         != generation
+        || (mode == SelectionMode::Playback && !crate::playback::window_picker_active(&app))
     {
         return Ok(());
     }
@@ -129,7 +136,8 @@ async fn start_window_selection(app: tauri::AppHandle, recording_mode: bool) -> 
         }
     };
 
-    captured.recording_mode = recording_mode;
+    captured.recording_mode = mode == SelectionMode::Record;
+    captured.playback_mode = mode == SelectionMode::Playback;
     captured.include_cursor = app.state::<crate::AppState>().launch_capture_options.include_cursor;
     #[cfg(target_os = "windows")]
     if let Some(overlay) = app.get_webview_window("overlay") {
@@ -580,6 +588,9 @@ pub fn cmd_cancel_capture(app: tauri::AppHandle) -> Result<(), String> {
     }
     if let Some(overlay_win) = app.get_webview_window("overlay") {
         let _ = overlay_win.hide();
+    }
+    if crate::playback::cancel_window_picker(&app)? {
+        return Ok(());
     }
     if app.state::<crate::AppState>().exit_on_capture_cancel()? {
         app.exit(0);

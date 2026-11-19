@@ -1,6 +1,7 @@
 use crate::{history, metadata};
 use base64::Engine;
 use markits::recording::{OperationRecording, RecordedEvent};
+use markits::window_capture::{self, WindowInfo};
 use serde::{Deserialize, Serialize};
 #[cfg(any(test, not(target_os = "windows")))]
 use std::io::Cursor;
@@ -66,8 +67,36 @@ pub struct PlaybackProgress {
     wait_remaining_ms: u64,
     shorten_waits: bool,
     include_cursor: bool,
+    window_selection: Option<WindowSelection>,
     #[serde(skip)]
     cursor_override: Option<bool>,
+}
+
+#[derive(Clone, Serialize)]
+struct WindowSelection {
+    title: String,
+    #[serde(skip)]
+    id: Option<String>,
+    #[serde(skip)]
+    pid: Option<u32>,
+    selected: Option<SelectedWindow>,
+    #[serde(skip)]
+    picker_active: bool,
+}
+
+#[derive(Clone, Serialize)]
+struct SelectedWindow {
+    window: WindowInfo,
+    #[serde(skip)]
+    pid: Option<u32>,
+    update: Option<WindowUpdate>,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Serialize)]
+enum WindowUpdate {
+    Automatic,
+    Keep,
+    Replace,
 }
 
 #[tauri::command]
@@ -110,11 +139,15 @@ pub fn cmd_playback_capture_wait(state: tauri::State<'_, PlaybackState>, index: 
 #[tauri::command]
 pub fn cmd_playback_control(state: tauri::State<'_, PlaybackState>, action: String, shorten_waits: Option<bool>) -> Result<(), String> {
     let mut mode = state.4.lock().map_err(|e| e.to_string())?;
+    let mut progress = state.2.lock().map_err(|e| e.to_string())?;
+    if progress.window_selection.is_some() {
+        return Ok(());
+    }
     let next_mode = match action.as_str() { "pause" => 1, "resume" => 0, "step" => 2, _ => return Err(crate::i18n::text("不明な操作です", "Unknown operation").into()) };
     // Commit the displayed delay mode before releasing the playback worker.
     if next_mode != 1 {
         if let Some(shorten_waits) = shorten_waits {
-            state.2.lock().map_err(|e| e.to_string())?.shorten_waits = shorten_waits;
+            progress.shorten_waits = shorten_waits;
         }
     }
     *mode = next_mode;
@@ -267,21 +300,159 @@ fn decode(url: &str) -> Result<Vec<u8>, String> {
         .map_err(|e| e.to_string())
 }
 
-pub fn resolve_window(id: Option<&str>, pid: Option<u32>, title: Option<&str>) -> Result<markits::window_capture::WindowInfo, String> {
-    let windows = markits::window_capture::list_windows()?;
+pub fn resolve_window(id: Option<&str>, pid: Option<u32>, title: Option<&str>) -> Result<Option<WindowInfo>, String> {
+    let windows = window_capture::list_windows()?;
     if let Some((id, pid)) = id.zip(pid) {
-        let owners = markits::window_capture::window_process_ids()?;
+        let owners = window_capture::window_process_ids()?;
         if owners.iter().any(|(owner_id, owner_pid)| owner_id == id && *owner_pid == pid) {
             if let Some(window) = windows.iter().find(|window| window.id == id) {
-                return Ok(window.clone());
+                return Ok(Some(window.clone()));
             }
         }
     }
     let mut matches = windows.into_iter().filter(|window| Some(window.title.as_str()) == title);
     match (matches.next(), matches.next()) {
-        (Some(window), None) => Ok(window),
-        _ => Err(crate::i18n::text("対象ウインドウを一意に特定できません。対象を開いてからやり直してください", "Cannot identify a unique target window. Open the target and try again.").into()),
+        (Some(window), None) => Ok(Some(window)),
+        _ => Ok(None),
     }
+}
+
+pub(crate) fn window_picker_active(app: &tauri::AppHandle) -> bool {
+    app.state::<PlaybackState>().2.lock().is_ok_and(|progress|
+        progress.window_selection.as_ref().is_some_and(|selection| selection.picker_active))
+}
+
+#[tauri::command]
+pub async fn cmd_playback_open_window_picker(app: tauri::AppHandle) -> Result<(), String> {
+    {
+        let state = app.state::<PlaybackState>();
+        let mut progress = state.2.lock().map_err(|e| e.to_string())?;
+        let selection = progress.window_selection.as_mut()
+            .filter(|selection| !state.1.load(Ordering::SeqCst) && selection.selected.is_none() && !selection.picker_active)
+            .ok_or("Playback is not waiting for a target window")?;
+        selection.picker_active = true;
+    }
+    let result = async {
+        let popup = app.get_webview_window("playback").ok_or("Playback window is unavailable")?;
+        popup.hide().map_err(|e| e.to_string())?;
+        crate::commands::start_window_selection(app.clone(), crate::commands::SelectionMode::Playback).await
+    }.await;
+    if result.is_err() && window_picker_active(&app) {
+        let _ = crate::commands::cmd_cancel_capture(app);
+    }
+    result
+}
+
+pub(crate) fn cancel_window_picker(app: &tauri::AppHandle) -> Result<bool, String> {
+    let state = app.state::<PlaybackState>();
+    let mut progress = state.2.lock().map_err(|e| e.to_string())?;
+    let Some(selection) = progress.window_selection.as_mut().filter(|selection| selection.picker_active) else {
+        return Ok(false);
+    };
+    selection.picker_active = false;
+    drop(progress);
+    if let Some(popup) = app.get_webview_window("playback").filter(|_| !state.1.load(Ordering::SeqCst)) {
+        crate::commands::force_raise_window(&popup);
+    }
+    Ok(true)
+}
+
+#[tauri::command]
+pub fn cmd_playback_select_window(app: tauri::AppHandle, window_id: Option<String>, pid: Option<u32>) -> Result<(), String> {
+    let state = app.state::<PlaybackState>();
+    let mut progress = state.2.lock().map_err(|e| e.to_string())?;
+    let selection = progress.window_selection.as_mut()
+        .filter(|selection| !state.1.load(Ordering::SeqCst) && selection.selected.is_none() && selection.picker_active == window_id.is_some())
+        .ok_or("Playback is not waiting for a target window")?;
+    let selected = if let Some(id) = window_id {
+        let id = id.trim_start_matches("hwnd:");
+        let unavailable = crate::i18n::text("選択したウインドウが見つかりません。対象を選び直してください。", "The selected window is unavailable. Select the target again.");
+        if let Some(pid) = pid {
+            if pid == std::process::id() || !window_capture::window_process_ids()?.iter().any(|(owner_id, owner_pid)| owner_id == id && *owner_pid == pid) {
+                return Err(unavailable.into());
+            }
+        }
+        let selected = window_capture::list_windows()?.into_iter().find(|window| window.id == id)
+            .ok_or(unavailable)?;
+        let overlay = app.get_webview_window("overlay").ok_or("Capture overlay window is unavailable")?;
+        overlay.hide().map_err(|e| e.to_string())?;
+        SelectedWindow { window: selected, pid, update: None }
+    } else {
+        let window = resolve_window(selection.id.as_deref(), selection.pid, Some(&selection.title))?
+            .ok_or(crate::i18n::text("対象を特定できませんでした。「ウインドウを選択」から指定してください。", "The target could not be identified. Use Select Window to specify it."))?;
+        SelectedWindow { window, pid: None, update: Some(WindowUpdate::Automatic) }
+    };
+    let confirm_update = selected.update.is_none();
+    selection.picker_active = false;
+    selection.selected = Some(selected);
+    drop(progress);
+    if confirm_update {
+        if let Some(popup) = app.get_webview_window("playback") {
+            crate::commands::force_raise_window(&popup);
+        }
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub fn cmd_playback_confirm_window_update(state: tauri::State<'_, PlaybackState>, update: bool) -> Result<(), String> {
+    let mut progress = state.2.lock().map_err(|e| e.to_string())?;
+    let selected = progress.window_selection.as_mut().and_then(|selection| selection.selected.as_mut())
+        .filter(|selected| !state.1.load(Ordering::SeqCst) && selected.update.is_none())
+        .ok_or("Playback is not waiting for a window update decision")?;
+    selected.update = Some(if update { WindowUpdate::Replace } else { WindowUpdate::Keep });
+    Ok(())
+}
+
+fn wait_for_window_selection(app: &tauri::AppHandle, selection: WindowSelection) -> Result<(WindowInfo, Option<u32>, WindowUpdate), String> {
+    if let Some(main) = app.get_webview_window("main") {
+        main.hide().map_err(|e| e.to_string())?;
+    }
+    let state = app.state::<PlaybackState>();
+    {
+        let mut mode = state.4.lock().map_err(|e| e.to_string())?;
+        *mode = 1;
+        progress(app, |value| value.window_selection = Some(selection));
+    }
+    if let Some(popup) = app.get_webview_window("playback") {
+        let _ = popup.set_focus();
+    }
+    loop {
+        {
+            let mut progress = state.2.lock().map_err(|e| e.to_string())?;
+            if state.1.load(Ordering::SeqCst) {
+                let picker_active = progress.window_selection.as_ref().is_some_and(|selection| selection.picker_active);
+                drop(progress);
+                if picker_active {
+                    let _ = crate::commands::cmd_cancel_capture(app.clone());
+                }
+                self::progress(app, |value| value.window_selection = None);
+                return Err(crate::i18n::text("再撮影を停止しました", "Recapture stopped").into());
+            }
+            if let Some(selection) = progress.window_selection.as_mut() {
+                if let Some(update) = selection.selected.as_ref().and_then(|selected| selected.update) {
+                    let selected = selection.selected.take().unwrap();
+                    progress.window_selection = None;
+                    progress.target_description = Some(crate::localized!("対象ウインドウ：{}", "Target window: {}", selected.window.title));
+                    return Ok((selected.window, selected.pid, update));
+                }
+            }
+        }
+        thread::sleep(Duration::from_millis(50));
+    }
+}
+
+fn preserve_window_identity(png: Vec<u8>, name: Option<String>, id: Option<String>, pid: Option<u32>) -> Result<Vec<u8>, String> {
+    let key = metadata::MARKITS_CAPTURE_TARGET_KEYWORD;
+    let Some(json) = metadata::extract_text_chunk(&png, key).map_err(|e| e.to_string())? else {
+        return Ok(png);
+    };
+    let mut target: crate::ui_elements::DetectedUiElement = serde_json::from_str(&json).map_err(|e| e.to_string())?;
+    target.name = name;
+    target.window_id = id;
+    target.pid = pid;
+    let json = serde_json::to_string(&target).map_err(|e| e.to_string())?;
+    metadata::embed_text_chunk(&png, key, &json).map_err(|e| e.to_string())
 }
 
 pub fn snapshot(window_id: &str) -> Result<Vec<u8>, String> {
@@ -354,10 +525,18 @@ pub async fn cmd_manual_studio_recapture(app: tauri::AppHandle) -> Result<(), St
     let session = app.state::<crate::AppState>().manual_studio.lock().map_err(|e| e.to_string())?
         .clone().filter(|session| session.recapture).ok_or("Missing Manual Studio recapture session")?;
     let result = async {
-        let source = std::fs::read(&session.input).map_err(|e| e.to_string())?;
-        let images = run_playback(&app, &source, None, false).await?;
-        let image = images.last().ok_or(crate::i18n::text("再撮影画像を取得できませんでした", "No image was captured"))?;
-        std::fs::write(&session.output, decode(&image.image_data_url)?).map_err(|e| e.to_string())?;
+        let bytes = if let Some(target) = session.recapture_window.as_deref() {
+            let target: crate::ui_elements::DetectedUiElement = serde_json::from_str(target).map_err(|e| e.to_string())?;
+            let host = app.clone();
+            tauri::async_runtime::spawn_blocking(move || recapture_window(&host, target))
+                .await.map_err(|e| e.to_string())??
+        } else {
+            let source = std::fs::read(&session.input).map_err(|e| e.to_string())?;
+            let images = run_playback(&app, &source, None, false).await?;
+            let image = images.last().ok_or(crate::i18n::text("再撮影画像を取得できませんでした", "No image was captured"))?;
+            decode(&image.image_data_url)?
+        };
+        std::fs::write(&session.output, bytes).map_err(|e| e.to_string())?;
         std::fs::write(&session.completion, "saved").map_err(|e| e.to_string())
     }.await;
     if let Err(error) = result {
@@ -371,6 +550,36 @@ pub async fn cmd_manual_studio_recapture(app: tauri::AppHandle) -> Result<(), St
     }
     app.exit(0);
     Ok(())
+}
+
+fn show_playback_window(app: &tauri::AppHandle, height: f64) -> tauri::Result<tauri::WebviewWindow> {
+    if let Some(existing) = app.get_webview_window("playback") {
+        existing.show()?;
+        return Ok(existing);
+    }
+    tauri::WebviewWindowBuilder::new(app, "playback", tauri::WebviewUrl::App("index.html".into()))
+        .title(crate::i18n::text("MarkIts — 再生・再撮影", "MarkIts — Playback & Recapture"))
+        .inner_size(480.0, height)
+        .always_on_top(true)
+        .focused(false)
+        .focusable(true)
+        .build()
+}
+
+fn recapture_window(app: &tauri::AppHandle, target: crate::ui_elements::DetectedUiElement) -> Result<Vec<u8>, String> {
+    progress(app, |value| {
+        value.running = true;
+        value.paused = true;
+    });
+    show_playback_window(app, 460.0).map_err(|e| e.to_string())?;
+    let (window, _, update) = wait_for_window_selection(app, WindowSelection {
+        title: target.name.clone().unwrap_or_default(), id: target.window_id.clone(), pid: target.pid, selected: None, picker_active: false,
+    })?;
+    let png = without_popup_restore(app, false, || snapshot(&window.id))?;
+    if update == WindowUpdate::Keep {
+        return preserve_window_identity(png, target.name, target.window_id, target.pid);
+    }
+    Ok(png)
 }
 
 async fn run_playback(
@@ -406,20 +615,7 @@ async fn run_playback(
             ..Default::default()
         }
     });
-    let popup = if let Some(existing) = app.get_webview_window("playback") {
-        existing.show().map(|_| existing)
-    } else { tauri::WebviewWindowBuilder::new(
-        app,
-        "playback",
-        tauri::WebviewUrl::App("index.html".into()),
-    )
-    .title(crate::i18n::text("MarkIts — 再生・再撮影", "MarkIts — Playback & Recapture"))
-    .inner_size(480.0, 760.0)
-    .always_on_top(true)
-    .focused(false)
-    .focusable(true)
-    .build() };
-    if let Err(error) = popup {
+    if let Err(error) = show_playback_window(app, 760.0) {
         app.state::<PlaybackState>()
             .0
             .store(false, Ordering::SeqCst);
@@ -485,7 +681,12 @@ fn replay(
     if let Some(area) = saved.capture_area.clone() {
         return replay_fullscreen(app, saved, area, max_wait_ms);
     }
-    let window = resolve_window(Some(&saved.window_id), Some(saved.pid), Some(&saved.recording.window))?;
+    let (window, pid, update) = match resolve_window(Some(&saved.window_id), Some(saved.pid), Some(&saved.recording.window))? {
+        Some(window) => (window, None, WindowUpdate::Automatic),
+        None => wait_for_window_selection(app, WindowSelection {
+            title: saved.recording.window.clone(), id: Some(saved.window_id.clone()), pid: Some(saved.pid), selected: None, picker_active: false,
+        })?,
+    };
     // Validate all keyboard events before executing any input.
     for event in &saved.recording.events {
         if let RecordedEvent::Key { value, .. } = event {
@@ -531,7 +732,7 @@ fn replay(
                 value.target_image = None;
                 value.target_description = match event {
                     RecordedEvent::Click { x, y, target, .. } => Some(crate::localized!("対象ウィンドウ：{} ／ 記録時の位置：({x:.0}, {y:.0}) ／ {}", "Target window: {} / Recorded position: ({x:.0}, {y:.0}) / {}",
-                        saved.recording.window,
+                        window.title,
                         target.as_ref().map(|t| crate::localized!("操作対象：{}", "Target: {}", t.name))
                             .unwrap_or_else(|| crate::i18n::text("記録座標を使用", "Use recorded coordinates").into())
                     )),
@@ -702,6 +903,19 @@ fn replay(
                 Ok(png)
             } else { snapshot(&window.id) }
         })?);
+    }
+    match update {
+        WindowUpdate::Replace => {
+            saved.recording.window = window.title;
+            saved.window_id = window.id;
+            saved.pid = pid.unwrap_or(0);
+        }
+        WindowUpdate::Keep => {
+            pictures = pictures.into_iter().map(|png| preserve_window_identity(
+                png, Some(saved.recording.window.clone()), Some(saved.window_id.clone()), Some(saved.pid),
+            )).collect::<Result<Vec<_>, _>>()?;
+        }
+        WindowUpdate::Automatic => {}
     }
     save_snapshots(&saved, pictures)
 }

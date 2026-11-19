@@ -17,6 +17,7 @@ interface PlaybackProgress {
   error: string | null;
   target_image: string | null;
   target_description: string | null;
+  window_selection: { title: string; selected: { window: { title: string }; update: string | null } | null } | null;
 }
 
 export function showPlaybackControls(invoke: Invoke) {
@@ -40,7 +41,20 @@ export function showPlaybackControls(invoke: Invoke) {
     <button id="playback-stop" class="btn btn-danger">停止</button>
     </div>
     <h3>操作リスト <span>待機時間を編集できます</span></h3><ol id="playback-completed"></ol>
-  </main>`);
+  </main>
+  <dialog id="playback-window-dialog" aria-labelledby="playback-window-heading" aria-describedby="playback-window-warning">
+    <h2 id="playback-window-heading">対象ウインドウの確認</h2>
+    <p id="playback-window-warning">対象ウインドウを一意に特定できません。記録時の対象を開いて「はい」を押すか、ウインドウを選択してください。</p>
+    <p id="playback-window-recorded"></p>
+    <p id="playback-window-error" role="alert" hidden></p>
+    <div class="playback-window-actions">
+      <button id="playback-window-cancel" class="btn" autofocus>キャンセル</button>
+      <button id="playback-window-retry" class="btn">はい</button>
+      <button id="playback-window-choose" class="btn btn-primary">ウインドウを選択</button>
+      <button id="playback-window-keep" class="btn" hidden>今回だけ使う</button>
+      <button id="playback-window-update" class="btn btn-primary" hidden>更新する</button>
+    </div>
+  </dialog>`);
   const count = document.getElementById('playback-count')!;
   const current = document.getElementById('playback-current')!;
   const captures = document.getElementById('playback-captures')!;
@@ -54,6 +68,34 @@ export function showPlaybackControls(invoke: Invoke) {
   const step = document.getElementById('playback-step') as HTMLButtonElement;
   const waitMode = document.getElementById('playback-wait-mode') as HTMLInputElement;
   const cursor = document.getElementById('playback-include-cursor') as HTMLInputElement;
+  const windowDialog = document.querySelector<HTMLDialogElement>('#playback-window-dialog')!;
+  const choose = document.querySelector<HTMLButtonElement>('#playback-window-choose')!;
+  const retry = document.querySelector<HTMLButtonElement>('#playback-window-retry')!;
+  const keep = document.querySelector<HTMLButtonElement>('#playback-window-keep')!;
+  const update = document.querySelector<HTMLButtonElement>('#playback-window-update')!;
+  const windowHeading = document.getElementById('playback-window-heading')!;
+  const windowWarning = document.getElementById('playback-window-warning')!;
+  const recordedWindow = document.getElementById('playback-window-recorded')!;
+  const windowError = document.getElementById('playback-window-error')!;
+  const showWindowError = (message: string) => {
+    windowError.textContent = message;
+    windowError.hidden = !message;
+  };
+  const handleWindowAction = (command: string, args?: Record<string, unknown>) => async () => {
+    retry.disabled = choose.disabled = keep.disabled = update.disabled = true;
+    showWindowError('');
+    try {
+      await invoke(command, args);
+    } catch (cause) {
+      showWindowError(String(cause));
+    } finally {
+      retry.disabled = choose.disabled = keep.disabled = update.disabled = false;
+    }
+  };
+  retry.onclick = handleWindowAction('cmd_playback_select_window');
+  choose.onclick = handleWindowAction('cmd_playback_open_window_picker');
+  keep.onclick = handleWindowAction('cmd_playback_confirm_window_update', { update: false });
+  update.onclick = handleWindowAction('cmd_playback_confirm_window_update', { update: true });
   let cursorSupported = false;
   let changingCursor = false;
   void invoke<boolean>('cmd_cursor_capture_supported').then(supported => {
@@ -97,18 +139,25 @@ export function showPlaybackControls(invoke: Invoke) {
   let stopping = false;
   let previousStep = -1;
   let previouslyShortened = false;
-  stop.onclick = async () => {
-    if (!running) return;
+  const cancelPlayback = async () => {
+    if (!running || stopping) return;
+    stopping = true;
     stop.disabled = true;
     try {
-      if (running) {
-        await invoke('cmd_playback_cancel');
-        stopping = true;
-        stop.textContent = t('停止中…');
-      }
+      await invoke('cmd_playback_cancel');
+      stop.textContent = t('停止中…');
     } catch (cause) {
-      error.hidden = false; error.textContent = String(cause); stop.disabled = false;
+      stopping = false;
+      stop.disabled = false;
+      if (windowDialog.open) showWindowError(String(cause));
+      else { error.hidden = false; error.textContent = String(cause); }
     }
+  };
+  stop.onclick = cancelPlayback;
+  document.getElementById('playback-window-cancel')!.onclick = cancelPlayback;
+  windowDialog.oncancel = event => {
+    event.preventDefault();
+    void cancelPlayback();
   };
   const poll = async () => {
     try {
@@ -118,6 +167,25 @@ export function showPlaybackControls(invoke: Invoke) {
       // Discard it even if the setting command has already finished.
       if (requestedModeRevision !== modeRevision || changingMode) return;
       running = status.running;
+      if (status.window_selection && !stopping) {
+        const { title, selected } = status.window_selection;
+        const confirming = selected?.update === null;
+        if (!windowDialog.open || confirming !== !update.hidden) {
+          showWindowError('');
+          windowHeading.textContent = confirming ? t('ウインドウ情報を更新しますか？') : t('対象ウインドウの確認');
+          windowWarning.textContent = confirming
+            ? t('更新すると、再撮影結果に今選んだウインドウを記録します。')
+            : t('対象ウインドウを一意に特定できません。記録時の対象を開いて「はい」を押すか、ウインドウを選択してください。');
+          recordedWindow.hidden = !confirming && !title;
+          recordedWindow.textContent = confirming ? t`選択した対象：${selected.window.title}` : t`記録時の対象：${title}`;
+          retry.hidden = choose.hidden = confirming;
+          keep.hidden = update.hidden = !confirming;
+          if (!windowDialog.open) windowDialog.showModal();
+          if (confirming) keep.focus();
+        }
+      } else if (!status.window_selection && windowDialog.open) {
+        windowDialog.close();
+      }
       if (!changingCursor) {
         cursor.checked = status.include_cursor;
         cursor.disabled = !cursorSupported || (status.running && !status.paused);
@@ -184,8 +252,8 @@ export function showPlaybackControls(invoke: Invoke) {
       if (!running) stopping = false;
       stop.textContent = stopping ? t('停止中…') : t('停止');
       pause.disabled = !running || status.paused || stopping;
-      resume.disabled = changingMode || changingCursor || (running && (!status.paused || stopping));
-      step.disabled = !running || !status.paused || stopping;
+      resume.disabled = !!status.window_selection || changingMode || changingCursor || (running && (!status.paused || stopping));
+      step.disabled = !!status.window_selection || !running || !status.paused || stopping;
       stop.disabled = !running || stopping;
     } catch (cause) {
       error.hidden = false; error.textContent = t`進捗を取得できませんでした：${cause}`;
