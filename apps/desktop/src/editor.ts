@@ -248,9 +248,6 @@ export class AnnotationEditor {
     this.cropViewScale = null;
     this.canvasContainerEl.style.translate = '';
     this.bgImgEl.src = dataUrl;
-    window.dispatchEvent(new CustomEvent('markits-background-changed', {
-      detail: isInternalCrop ? this.baseImageState?.dataUrl ?? dataUrl : dataUrl,
-    }));
     this.scene.canvas = { width, height };
     this.outputWidth = width;
     this.outputHeight = height;

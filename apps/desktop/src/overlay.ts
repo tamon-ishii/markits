@@ -100,11 +100,9 @@ export class CaptureOverlay {
     document.getElementById('btn-mode-region')?.setAttribute('aria-pressed', 'false');
     this.recordingMode = recording;
     this.overlayEl.style.cursor = 'default';
-    for (const [id, active] of [['btn-mode-capture', !recording], ['btn-mode-record', recording]] as const) {
-      const button = document.getElementById(id);
-      button?.classList.toggle('btn-primary', active);
-      button?.setAttribute('aria-pressed', String(active));
-    }
+    const captureButton = document.getElementById('btn-mode-capture');
+    captureButton?.classList.toggle('btn-primary', !recording);
+    captureButton?.setAttribute('aria-pressed', String(!recording));
     this.updateCaptureHint();
     (document.getElementById('btn-capture-fullscreen') as HTMLButtonElement).disabled = recording;
   }
@@ -156,9 +154,7 @@ export class CaptureOverlay {
     window.addEventListener('mouseup', e => this.finishRegion(e));
     this.bgImgEl.addEventListener('dragstart', e => e.preventDefault());
     document.getElementById('btn-mode-capture')?.addEventListener('click', () => this.setRecordingMode(false));
-    document.getElementById('btn-mode-record')?.addEventListener('click', () => this.setRecordingMode(true));
     document.getElementById('capture-include-cursor')?.addEventListener('change', event => this.setCursorIncluded((event.target as HTMLInputElement).checked));
-    document.getElementById('btn-record-hovered-window')?.addEventListener('click', () => { this.setRecordingMode(true); this.recordWindow(this.hoveredElement); });
     this.overlayEl.addEventListener('click', (e) => this.handleWindowClick(e));
     window.addEventListener('mousemove', (e) => this.handleMouseMove(e));
 

@@ -23,6 +23,7 @@ pub struct AppState {
     pub launch_capture_options: LaunchCaptureOptions,
     pub cursor_target: Mutex<Option<cursor_capture::CursorCaptureTarget>>,
     pub cursor_guide: Mutex<Option<cursor_capture::CursorGuideStatus>>,
+    pub cursor_waiting_shortcut: Mutex<Option<Shortcut>>,
     pub cursor_capture_busy: std::sync::atomic::AtomicBool,
     pub capture_shortcut_down: std::sync::atomic::AtomicBool,
     pub last_capture_data_url: Mutex<Option<String>>,
@@ -338,6 +339,7 @@ fn register_capture_shortcuts(app: &AppHandle) -> Result<(), String> {
     let key = state.shortcut.lock().map_err(|e| e.to_string())?.clone();
     let shortcut = key.parse::<Shortcut>().map_err(|e| e.to_string())?;
     if app.global_shortcut().is_registered(shortcut) {
+        *state.shortcut_warning.lock().map_err(|e| e.to_string())? = None;
         return Ok(());
     }
     let handle = app.clone();

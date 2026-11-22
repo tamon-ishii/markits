@@ -9,37 +9,6 @@ interface RecordedEvent {
 }
 interface Status { running: boolean; paused: boolean; events: RecordedEvent[] }
 
-export function addRecordingButton(invoke: Invoke, currentImage?: () => string | null) {
-  const button = document.createElement('button');
-  button.id = 'btn-record-operations';
-  button.className = 'btn';
-  button.textContent = t('⏺ 操作を記録');
-  const status = document.createElement('span');
-  status.setAttribute('role', 'status');
-  const captureButton = document.getElementById('btn-trigger-capture');
-  if (captureButton) captureButton.after(button, status);
-  else document.querySelector('.action-bar')?.prepend(button, status);
-  button.addEventListener('click', async () => {
-    button.disabled = true;
-    status.textContent = t('記録を準備しています…');
-    try {
-      const imageDataUrl = currentImage?.();
-      if (imageDataUrl) await invoke('cmd_recording_start_from_image', { imageDataUrl });
-      else await chooseRecordingWindow(invoke);
-      status.textContent = '';
-    } catch (error) { status.textContent = String(error); }
-    finally { button.disabled = false; }
-  });
-}
-
-async function chooseRecordingWindow(invoke: Invoke) {
-  try {
-    await invoke('cmd_select_recording_window');
-  } catch (error) {
-    alert(String(error));
-  }
-}
-
 export function showRecordingControls(invoke: Invoke) {
   document.body.innerHTML = t(`<main class="recording-panel">
     <header class="recording-heading"><span class="recording-eyebrow">OPERATION RECORDER</span><h2>操作を記録</h2><p>操作を記録し、必要な場面をキャプチャしましょう。</p></header>

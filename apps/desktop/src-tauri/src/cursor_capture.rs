@@ -87,14 +87,17 @@ pub fn cmd_cursor_guide_status(app: tauri::AppHandle) -> Result<CursorGuideStatu
 
 #[tauri::command]
 pub fn cmd_retry_cursor_capture_shortcut(app: tauri::AppHandle) -> Result<CursorGuideStatus, String> {
-    let warning=register_waiting_shortcut(&app)?;
-    let state=app.state::<crate::AppState>();
-    let key=state.shortcut.lock().map_err(|e|e.to_string())?.clone();
-    let available=key.parse::<Shortcut>().is_ok_and(|key|app.global_shortcut().is_registered(key));
-    let mut guide=state.cursor_guide.lock().map_err(|e|e.to_string())?;
-    let status=guide.as_mut().ok_or("Cursor capture is not active")?;
-    status.capture_shortcut_available=available;
-    status.warning=warning;
+    let previous = cmd_cursor_guide_status(app.clone())?;
+    if previous.capture_shortcut_available {
+        return Ok(previous);
+    }
+    let (shortcut, available, warning) = register_waiting_shortcut(&app)?;
+    let state = app.state::<crate::AppState>();
+    let mut guide = state.cursor_guide.lock().map_err(|e| e.to_string())?;
+    let status = guide.as_mut().ok_or("Cursor capture is not active")?;
+    status.shortcut = shortcut;
+    status.capture_shortcut_available = available;
+    status.warning = warning;
     Ok(status.clone())
 }
 
@@ -107,6 +110,11 @@ pub fn cancel(app: &tauri::AppHandle) {
     }
     if let Some(guide) = app.get_webview_window("cursor-guide") {
         let _ = guide.hide();
+    }
+    let temporary = app.state::<crate::AppState>().cursor_waiting_shortcut
+        .lock().ok().and_then(|mut shortcut| shortcut.take());
+    if let Some(shortcut) = temporary {
+        let _ = app.global_shortcut().unregister(shortcut);
     }
     if let Ok(key) = "Escape".parse::<Shortcut>() {
         let _ = app.global_shortcut().unregister(key);
@@ -176,12 +184,15 @@ async fn arm_cursor_capture(
             .map_err(|e| crate::localized!("選択画面のマウス入力を解除できません: {e}", "Cannot release mouse input from the selection overlay: {e}"))?;
         }
     }
-    let mut shortcut_warning = register_waiting_shortcut(app)?;
+    let (shortcut, capture_shortcut_available, mut shortcut_warning) = register_waiting_shortcut(app)?;
     let escape = "Escape".parse::<Shortcut>().map_err(|e| e.to_string())?;
     let cancel_shortcut_available = app.global_shortcut()
         .on_shortcut(escape, |app, _, event| {
             if event.state() == tauri_plugin_global_shortcut::ShortcutState::Pressed {
-                let _ = crate::commands::cmd_cancel_capture(app.clone());
+                let app = app.clone();
+                tauri::async_runtime::spawn(async move {
+                    let _ = crate::commands::cmd_cancel_capture(app);
+                });
             }
         }).is_ok();
     if !cancel_shortcut_available {
@@ -193,8 +204,6 @@ async fn arm_cursor_capture(
         let _ = tauri::async_runtime::spawn_blocking(move || markits::window_capture::activate_window(&id)).await;
     }
     let bounds = target.bounds().ok();
-    let shortcut = app.state::<crate::AppState>().shortcut.lock().map_err(|e| e.to_string())?.clone();
-    let capture_shortcut_available = shortcut.parse::<Shortcut>().is_ok_and(|key|app.global_shortcut().is_registered(key));
     let status = CursorGuideStatus {
         shortcut,
         window_title: if target == CursorCaptureTarget::UnderCursor {
@@ -240,15 +249,41 @@ async fn arm_cursor_capture(
     Ok(())
 }
 
-fn register_waiting_shortcut(app: &tauri::AppHandle) -> Result<Option<String>, String> {
-    let requested = app.state::<crate::AppState>().shortcut.lock().map_err(|e| e.to_string())?.clone();
-    match crate::register_capture_shortcuts(app) {
-        Ok(()) => Ok(None),
-        Err(error) => Ok(Some(crate::localized!(
-            "設定された {requested} を登録できません。他のMarkItsなどが使用していないか確認してください。キーは変更していません。\n{error}",
-            "Cannot register the configured {requested}. Check whether another MarkIts instance is using it. The key has not been changed.\n{error}"
-        ))),
+fn register_waiting_shortcut(app: &tauri::AppHandle) -> Result<(String, bool, Option<String>), String> {
+    let state = app.state::<crate::AppState>();
+    let requested = state.shortcut.lock().map_err(|e| e.to_string())?.clone();
+    let error = match crate::register_capture_shortcuts(app) {
+        Ok(()) => return Ok((requested, true, None)),
+        Err(error) => error,
+    };
+    for key in ["Control+Shift+F8", "Control+Shift+F9"] {
+        let shortcut = key.parse::<Shortcut>().map_err(|e| e.to_string())?;
+        if app.global_shortcut().is_registered(shortcut) {
+            continue;
+        }
+        let result = app.global_shortcut().on_shortcut(shortcut, |app, _, event| {
+            if event.state() == tauri_plugin_global_shortcut::ShortcutState::Pressed {
+                let app = app.clone();
+                tauri::async_runtime::spawn(async move {
+                    if let Err(error) = capture_pending(&app).await {
+                        let _ = cmd_recover_cursor_capture(app, error);
+                    }
+                });
+            }
+        });
+        if result.is_ok() {
+            *state.cursor_waiting_shortcut.lock().map_err(|e| e.to_string())? = Some(shortcut);
+            let warning = crate::localized!(
+                "{requested} は使用中です。今回の撮影は上に表示されたキーを使ってください。設定は変更していません。",
+                "{requested} is in use. Use the shortcut shown above for this capture. Your settings are unchanged."
+            );
+            return Ok((key.into(), true, Some(warning)));
+        }
     }
+    Ok((requested.clone(), false, Some(crate::localized!(
+        "設定された {requested} を登録できません。他のMarkitsなどが使用していないか確認してください。\n{error}",
+        "Cannot register {requested}. Check whether another Markits instance is using it.\n{error}"
+    ))))
 }
 /// Returns true while a pending pointer capture is handled, so repeated key presses
 /// cannot reopen the selection overlay during capture.

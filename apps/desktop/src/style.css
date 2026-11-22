@@ -696,11 +696,6 @@ textarea.form-control {
   box-shadow: 0 2px 6px rgba(0, 0, 0, 0.35);
 }
 
-#btn-record-hovered-window {
-  pointer-events: auto;
-  cursor: pointer;
-}
-
 .overlay-toolbar {
   position: absolute;
   bottom: 24px;
@@ -1406,7 +1401,6 @@ dialog::backdrop { background: rgba(0, 0, 0, 0.55); }
 .history-frame { flex: 0 0 180px; height: 100%; padding: 0; border: 1px solid var(--border-color); background: transparent; cursor: pointer; border-radius: 6px; }
 .history-frame img { width: 100%; height: 100%; object-fit: contain; }
 .history-play { margin: 0 12px 12px; }
-#btn-playback[hidden] { display: none; }
 
 /* Playback control window */
 .playback-panel { padding: 24px; gap: 0; background: radial-gradient(ellipse at top right, #202c45 0, #141820 52%); }

@@ -143,7 +143,7 @@ pub async fn cmd_recording_start_from_image(app: AppHandle, image_data_url: Stri
     let bytes = base64::engine::general_purpose::STANDARD.decode(payload).map_err(|e| e.to_string())?;
     let (id, pid) = if let Some(saved) = crate::playback::extract(&bytes)? {
         if saved.capture_area.is_some() {
-            return Err(crate::i18n::text("全画面の画像には単一の撮影元ウィンドウがありません。ホームの「操作を記録」から対象を選択してください。", "Fullscreen images have no single source window. Use Record actions on Home to select a target.").into());
+            return Err(crate::i18n::text("全画面の画像には単一の撮影元ウィンドウがありません。CLIの markits record start で対象ウィンドウを指定してください。", "Fullscreen images have no single source window. Specify a target window with markits record start.").into());
         }
         (saved.window_id, Some(saved.pid))
     } else {

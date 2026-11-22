@@ -1,6 +1,6 @@
 import { t, getLocale, initializeI18n, saveLocale } from './i18n.ts';
 import { AnnotationEditor } from './editor.ts';
-import { addRecordingButton, showRecordingControls } from './recording.ts';
+import { showRecordingControls } from './recording.ts';
 import { showPlaybackControls } from './playback.ts';
 import { showCursorGuide } from './cursor-guide.ts';
 import { groupHistory } from './history-groups.ts';
@@ -230,53 +230,6 @@ document.addEventListener('DOMContentLoaded', async () => {
   }
 
   let currentHistoryId: string | null = null;
-  let playbackBusy = false;
-  let backgroundGeneration = 0;
-  let playbackImageDataUrl = '';
-  const playButton = document.createElement('button');
-  playButton.className = 'btn';
-  playButton.id = 'btn-playback';
-  playButton.textContent = t('▶ 再撮影');
-  playButton.hidden = true;
-  editorActions.prepend(playButton);
-  window.addEventListener('markits-background-changed', async (event) => {
-    playbackImageDataUrl = (event as CustomEvent<string>).detail;
-    const generation = ++backgroundGeneration;
-    playButton.hidden = true;
-    if (!isTauri) return;
-    try {
-      const available = await invokeTauri<boolean>('cmd_has_operations', { imageDataUrl: (event as CustomEvent<string>).detail });
-      if (generation === backgroundGeneration) playButton.hidden = !available;
-    } catch (error) { console.warn('Could not read operation recording', error); }
-  });
-  let replaySource = '';
-  const replayCapture = async (imageDataUrl: string, shortenWaits?: boolean) => {
-    if (playbackBusy) return;
-    replaySource = imageDataUrl;
-    playbackBusy = true; playButton.disabled = true;
-    try {
-      await autoSaveToHistory();
-      const images = await invokeTauri<LoadedImageResult[]>('cmd_playback', { imageDataUrl, shortenWaits });
-      const image = images.at(-1);
-      if (image) {
-        editor.setBackgroundImage(image.image_data_url, image.width, image.height, image.annotations_json, image.ui_elements);
-        currentHistoryId = image.history_id ?? null;
-        editor.markClean();
-        await switchView('editor');
-      }
-      await loadHistory();
-    } catch (error) {
-      if (!['再撮影を停止しました', 'Recapture stopped', '再生を停止しました', 'Playback stopped'].includes(String(error))) alert(t`再生・再撮影に失敗しました: ${error}`);
-    }
-    finally { playbackBusy = false; playButton.disabled = false; }
-  };
-  playButton.onclick = () => { void replayCapture(playbackImageDataUrl); };
-  if (isTauri) {
-    const { listen } = await import('@tauri-apps/api/event');
-    await listen<{ shortenWaits: boolean }>('restart-playback', (event) => {
-      if (replaySource) void replayCapture(replaySource, event.payload.shortenWaits);
-    });
-  }
 
   const autoSaveToHistory = async () => {
     if (!isTauri || !editor.hasImage()) return;
@@ -368,9 +321,6 @@ document.addEventListener('DOMContentLoaded', async () => {
       return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 600"><text x="20" y="40" fill="#3b82f6" font-size="20">MarkIts Preview</text></svg>`;
     }
   });
-  addRecordingButton(invokeTauri, () => document.body.classList.contains('editor-view-active')
-    ? playbackImageDataUrl || editor.getBackgroundImageDataUrl() : null);
-
   const uiStatusEl = document.getElementById('ui-detection-status');
   const setUiStatus = (state: 'idle' | 'scanning' | 'ready' | 'failed', label: string) => {
     if (!uiStatusEl) return;
@@ -659,7 +609,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   document.getElementById('btn-done-editing')?.addEventListener('click', async () => {
     editor.commitPendingCrop();
     if (manualStudioSession) {
-      if (prepareExport()) await executeSaveWithResolution();
+      if (prepareExport()) await executeSaveWithResolution(true);
       return;
     }
     await switchView('home');
@@ -816,7 +766,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     return { width: w, height: h };
   };
 
-  const executeSaveWithResolution = async () => {
+  const executeSaveWithResolution = async (completeIntegration = false) => {
     const bgDataUrl = editor.getBackgroundImageDataUrl();
     if (!bgDataUrl || bgDataUrl.length === 0) return;
 
@@ -833,7 +783,8 @@ document.addEventListener('DOMContentLoaded', async () => {
         { name: 'WebP', extensions: ['webp'] },
         { name: 'JPEG XL', extensions: ['jxl'] },
       ];
-      const savePath = manualStudioSession?.output ?? await save({
+      const integrationSession = completeIntegration ? manualStudioSession : null;
+      const savePath = integrationSession?.output ?? await save({
         filters: [...formats.filter(item => item.extensions[0] === format), ...formats.filter(item => item.extensions[0] !== format)],
         defaultPath: `markits_${Date.now()}.${format}`,
       });
@@ -849,12 +800,13 @@ document.addEventListener('DOMContentLoaded', async () => {
           uiElements: editor.getUiElements(),
           exportWidth: width,
           exportHeight: height,
-          reproductionJson: manualStudioSession ? false : exportReproduction,
-          editingMetadata: manualStudioSession ? { baseUiElements: cropState.baseImageState?.uiElements ?? null } : null,
+          reproductionJson: integrationSession ? false : exportReproduction,
+          editingMetadata: integrationSession && (document.getElementById('save-editing-metadata') as HTMLInputElement | null)?.checked
+            ? { baseUiElements: cropState.baseImageState?.uiElements ?? null } : null,
           baseBackgroundDataUrl: cropState.baseImageState?.dataUrl ?? null,
           cropInfo: cropState.baseImageState && (cropState.isAutoCropped || cropState.hasCropHistory) ? { is_auto_cropped: cropState.isAutoCropped, offset_x: cropState.autoCropOffset.x, offset_y: cropState.autoCropOffset.y, base_width: cropState.baseImageState.width, base_height: cropState.baseImageState.height } : null,
         });
-        if (manualStudioSession) {
+        if (integrationSession) {
           await invokeTauri('cmd_manual_studio_complete');
           return;
         }
@@ -963,6 +915,10 @@ document.addEventListener('DOMContentLoaded', async () => {
       manualStudioSession = await invokeTauri<ManualStudioSession | null>('cmd_manual_studio_session');
       if (manualStudioSession) {
         document.body.classList.add('manual-studio-integration');
+        const metadataOption = document.getElementById('save-editing-metadata-option');
+        if (metadataOption) metadataOption.hidden = false;
+        const metadataCheckbox = document.getElementById('save-editing-metadata') as HTMLInputElement | null;
+        if (metadataCheckbox) metadataCheckbox.checked = true;
         const doneButton = document.getElementById('btn-done-editing');
         if (doneButton) { doneButton.textContent = t('編集終了'); doneButton.title = t('編集内容を保存し、スクリーンショット一覧へ返します'); }
         if (manualStudioSession.input) {

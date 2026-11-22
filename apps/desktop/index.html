@@ -230,7 +230,11 @@
             <option value="webp">WebP (.webp)</option>
             <option value="jxl">JPEG XL (.jxl)</option>
           </select>
-          <div class="output-size-hint">保存画像には元画像・UI情報・操作記録を含めません。再編集は履歴から行えます。</div>
+          <div class="output-size-hint">「保存」ではメタデータを削除します。再編集は履歴から行えます。</div>
+          <div id="save-editing-metadata-option" hidden>
+            <label class="reproduction-json-option"><input id="save-editing-metadata" type="checkbox" /> 外部連携の「編集終了」でメタデータを保持</label>
+            <div class="output-size-hint">有効にすると、元画像・編集内容・UI情報・操作記録を保存画像に含めます。</div>
+          </div>
           <label class="reproduction-json-option"><input id="save-reproduction-json" type="checkbox" /> 再現用テキスト（JSON）も保存</label>
           <div class="output-size-hint">UIスナップした対象はUI名で記録します。再現時は新しい画像のUI情報を指定してください。</div>
         </div>
@@ -257,7 +261,6 @@
           <div class="ui-element-header">
             <span id="ui-element-badge" class="ui-element-badge"></span>
             <span id="ui-element-action-hint" class="ui-element-action-hint">クリックでキャプチャ</span>
-            <button id="btn-record-hovered-window" class="ui-element-action-hint" type="button">⏺ 操作を記録</button>
           </div>
         </div>
       </div>
@@ -266,7 +269,6 @@
           <div class="capture-modes" role="group" aria-label="キャプチャモード">
             <button id="btn-mode-capture" class="btn btn-sm btn-primary" aria-pressed="true"><span aria-hidden="true">🪟</span> ウィンドウ</button>
             <button id="btn-mode-region" class="btn btn-sm" aria-pressed="false"><span aria-hidden="true">⬚</span> 選択範囲</button>
-            <button id="btn-mode-record" class="btn btn-sm" aria-pressed="false"><span aria-hidden="true">⏺</span> 操作を記録</button>
           </div>
           <div class="capture-actions">
             <button id="btn-capture-fullscreen" class="btn btn-sm"><span aria-hidden="true">🖥</span> 全画面を撮影</button>

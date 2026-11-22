@@ -24,7 +24,7 @@ class Element {
   closest() { return null; }
 }
 
-function fixture() {
+function fixture(recordingMode = false) {
   const html = fs.readFileSync(path.join(__dirname, '../index.html'), 'utf8');
   const elements = new Map([...html.matchAll(/<[^>]+\bid="([^"]+)"[^>]*>/g)].map(match =>
     [match[1], new Element(match[0].match(/class="([^"]*)"/)?.[1])]));
@@ -51,7 +51,7 @@ function fixture() {
   let cancelled = 0;
   overlay.setCursorSupported(true);
   overlay.show('data:image/png;base64,test', [target], rect => shots.push(rect), () => cancelled++,
-    (win, includeCursor) => recordings.push({ win, includeCursor }), request => pending.push(request), false, 'PrintScreen');
+    (win, includeCursor) => recordings.push({ win, includeCursor }), request => pending.push(request), recordingMode, 'PrintScreen');
   const event = (x, y) => ({ button: 0, clientX: x, clientY: y, target: elements.get('overlay-bg') });
   const clickWindow = () => overlay.handleWindowClick(event(150, 150));
   const check = checked => { const input = elements.get('capture-include-cursor'); input.checked = checked; input.emit('change'); };
@@ -162,9 +162,8 @@ test('fullscreen uses keyboard waiting only when cursor inclusion is checked', (
   }
 });
 
-test('recording mode keeps the cursor option and starts recording instead of a standalone shot', () => {
-  const f = fixture(); f.check(true);
-  f.elements.get('btn-mode-record').emit('click');
+test('externally requested recording mode respects cursor inclusion and starts recording', () => {
+  const f = fixture(true); f.check(true);
   assert.equal(f.elements.get('capture-include-cursor').checked, true);
   assert.equal(f.elements.get('btn-capture-fullscreen').disabled, true);
   assert.equal(f.recordings.length, 0);

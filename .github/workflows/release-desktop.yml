@@ -4,6 +4,7 @@ on:
   push:
     tags:
       - 'v*'
+      - 'windows-v*'
   workflow_dispatch:
     inputs:
       tag:
@@ -20,6 +21,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       tag: ${{ steps.release-tag.outputs.tag }}
+      matrix: ${{ steps.release-tag.outputs.matrix }}
     steps:
       - uses: actions/checkout@v4
       - id: release-tag
@@ -30,6 +32,19 @@ jobs:
           TAG="$INPUT_TAG"
           if [ -z "$TAG" ]; then TAG="${GITHUB_REF#refs/tags/}"; fi
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          MATRIX=$(jq -c --arg tag "$TAG" '
+            if ($tag | startswith("windows-v")) then
+              .include |= map(select(.platform == "windows"))
+            else . end
+          ' <<'JSON'
+          {"include":[
+            {"os":"ubuntu-22.04","platform":"linux","args":"","rust_targets":""},
+            {"os":"macos-latest","platform":"macos-universal","args":"--target universal-apple-darwin","rust_targets":"aarch64-apple-darwin x86_64-apple-darwin"},
+            {"os":"windows-latest","platform":"windows","args":"--config src-tauri/tauri.windows.conf.json","rust_targets":""}
+          ]}
+          JSON
+          )
+          echo "matrix=$MATRIX" >> "$GITHUB_OUTPUT"
           if ! gh release view "$TAG" >/dev/null 2>&1; then
             gh release create "$TAG" --title "MarkIts $TAG" --generate-notes || true
           fi
@@ -40,20 +55,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
-      matrix:
-        include:
-          - os: ubuntu-22.04
-            platform: linux
-            args: ''
-            rust_targets: ''
-          - os: macos-latest
-            platform: macos-universal
-            args: --target universal-apple-darwin
-            rust_targets: aarch64-apple-darwin x86_64-apple-darwin
-          - os: windows-latest
-            platform: windows
-            args: ''
-            rust_targets: ''
+      matrix: ${{ fromJSON(needs.release.outputs.matrix) }}
     steps:
       - uses: actions/checkout@v4
         with:
