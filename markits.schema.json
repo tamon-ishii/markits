@@ -49,6 +49,13 @@
         "$ref": "#/$defs/uiElement"
       }
     },
+    "hidden_annotations": {
+      "type": "array",
+      "items": {
+        "type": "integer",
+        "minimum": 0
+      }
+    },
     "annotations": {
       "type": "array",
       "items": {
@@ -117,6 +124,40 @@
               "stroke_width": {
                 "type": "number",
                 "minimum": 0.5
+              },
+              "line_style": {
+                "type": "string",
+                "enum": [
+                  "solid",
+                  "dashed",
+                  "dotted"
+                ],
+                "default": "solid"
+              },
+              "arrowhead": {
+                "type": "string",
+                "enum": [
+                  "filled",
+                  "open"
+                ],
+                "default": "filled"
+              },
+              "arrow_skin": {
+                "type": "string",
+                "enum": [
+                  "classic",
+                  "sketch",
+                  "bold"
+                ],
+                "default": "classic"
+              },
+              "font_family": {
+                "type": "string",
+                "minLength": 1
+              },
+              "font_size": {
+                "type": "number",
+                "exclusiveMinimum": 0
               },
               "box": {
                 "type": "boolean"
@@ -379,6 +420,14 @@
               "text": {
                 "type": "string"
               },
+              "font_family": {
+                "type": "string",
+                "minLength": 1
+              },
+              "font_size": {
+                "type": "number",
+                "exclusiveMinimum": 0
+              },
               "max_width": {
                 "type": "number",
                 "minimum": 40
@@ -455,6 +504,14 @@
               },
               "text": {
                 "type": "string"
+              },
+              "font_family": {
+                "type": "string",
+                "minLength": 1
+              },
+              "font_size": {
+                "type": "number",
+                "exclusiveMinimum": 0
               },
               "max_width": {
                 "type": "number",
@@ -533,6 +590,14 @@
               "text": {
                 "type": "string"
               },
+              "font_family": {
+                "type": "string",
+                "minLength": 1
+              },
+              "font_size": {
+                "type": "number",
+                "exclusiveMinimum": 0
+              },
               "style": {
                 "type": "string",
                 "enum": [
@@ -565,6 +630,26 @@
               },
               "arrow": {
                 "type": "boolean"
+              },
+              "target_box": {
+                "type": "boolean",
+                "default": false
+              },
+              "target_style": {
+                "type": "string",
+                "enum": [
+                  "primary",
+                  "secondary",
+                  "warning",
+                  "danger",
+                  "info",
+                  "step",
+                  "pink"
+                ]
+              },
+              "stroke_width": {
+                "type": "number",
+                "exclusiveMinimum": 0
               }
             },
             "required": [
@@ -601,6 +686,14 @@
               "text": {
                 "type": "string"
               },
+              "font_family": {
+                "type": "string",
+                "minLength": 1
+              },
+              "font_size": {
+                "type": "number",
+                "exclusiveMinimum": 0
+              },
               "style": {
                 "type": "string",
                 "enum": [
@@ -630,6 +723,10 @@
               },
               "shadow": {
                 "type": "boolean"
+              },
+              "stroke_width": {
+                "type": "number",
+                "exclusiveMinimum": 0
               }
             },
             "required": [
@@ -642,10 +739,47 @@
             "type": "object",
             "properties": {
               "type": {
-                "enum": [
-                  "spotlight",
-                  "mosaic"
+                "const": "spotlight"
+              },
+              "id": {
+                "type": "string",
+                "minLength": 1
+              },
+              "target": {
+                "oneOf": [
+                  {
+                    "$ref": "#/$defs/targetRect"
+                  },
+                  {
+                    "type": "string",
+                    "minLength": 1
+                  }
                 ]
+              },
+              "style": {
+                "type": "string",
+                "enum": [
+                  "primary",
+                  "secondary",
+                  "warning",
+                  "danger",
+                  "info",
+                  "step",
+                  "pink"
+                ]
+              }
+            },
+            "required": [
+              "type",
+              "target"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "const": "mosaic"
               },
               "block_size": {
                 "type": "integer",
@@ -713,6 +847,14 @@
               },
               "text": {
                 "type": "string"
+              },
+              "font_family": {
+                "type": "string",
+                "minLength": 1
+              },
+              "font_size": {
+                "type": "number",
+                "exclusiveMinimum": 0
               },
               "style": {
                 "type": "string",
@@ -922,13 +1064,47 @@
                 "type": "number",
                 "minimum": 0.5
               },
+              "line_style": {
+                "type": "string",
+                "enum": [
+                  "solid",
+                  "dashed",
+                  "dotted"
+                ],
+                "default": "solid"
+              },
+              "arrowhead": {
+                "type": "string",
+                "enum": [
+                  "filled",
+                  "open"
+                ],
+                "default": "filled"
+              },
+              "arrow_skin": {
+                "type": "string",
+                "enum": [
+                  "classic",
+                  "sketch",
+                  "bold"
+                ],
+                "default": "classic"
+              },
+              "font_family": {
+                "type": "string",
+                "minLength": 1
+              },
+              "font_size": {
+                "type": "number",
+                "exclusiveMinimum": 0
+              },
               "text_placement": {
                 "type": "string",
                 "enum": [
                   "middle",
                   "end"
                 ],
-                "description": "Placement of the text label along the arrow ('middle' or 'end')"
+                "description": "Placement of the text label along the arrow ('middle' or 'end' at the tail)"
               },
               "text_position": {
                 "type": "string",
@@ -936,7 +1112,7 @@
                   "middle",
                   "end"
                 ],
-                "description": "Alias for text_placement ('middle' or 'end')"
+                "description": "Alias for text_placement ('middle' or 'end' at the tail)"
               }
             },
             "required": [
@@ -979,6 +1155,14 @@
               },
               "text": {
                 "type": "string"
+              },
+              "font_family": {
+                "type": "string",
+                "minLength": 1
+              },
+              "font_size": {
+                "type": "number",
+                "exclusiveMinimum": 0
               },
               "max_width": {
                 "type": "number",

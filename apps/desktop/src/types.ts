@@ -82,6 +82,7 @@ export interface PinAnnotation extends BaseAnnotation {
   position?: PositionHint;
   outline?: boolean;
   font_family?: string;
+  font_size?: number;
 }
 
 export interface BadgeAnnotation extends BaseAnnotation {
@@ -94,6 +95,7 @@ export interface BadgeAnnotation extends BaseAnnotation {
   text?: string;
   position?: PositionHint;
   font_family?: string;
+  font_size?: number;
 }
 
 export interface StepArrowAnnotation extends BaseAnnotation {
@@ -103,6 +105,7 @@ export interface StepArrowAnnotation extends BaseAnnotation {
   text?: string;
   position?: PositionHint;
   font_family?: string;
+  font_size?: number;
 }
 
 export interface LabelAnnotation extends BaseAnnotation {

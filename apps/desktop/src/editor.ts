@@ -456,6 +456,15 @@ export class AnnotationEditor {
     const base: any = { type: anno.type };
     if (anno.style) base.style = anno.style;
     if (anno.shadow !== undefined) base.shadow = anno.shadow;
+    const copyTypography = (res: any) => {
+      if (typeof anno.font_family === 'string' && anno.font_family.trim().length > 0) {
+        res.font_family = anno.font_family.trim();
+      }
+      if (anno.font_size !== undefined && anno.font_size !== null) {
+        const size = Number(anno.font_size);
+        if (Number.isFinite(size) && size > 0) res.font_size = size;
+      }
+    };
 
     switch (anno.type) {
       case 'arrow': {
@@ -483,6 +492,7 @@ export class AnnotationEditor {
             res.text_placement = placement;
           }
         }
+        copyTypography(res);
         if (anno.position) res.position = anno.position;
         if (anno.box !== undefined) res.box = Boolean(anno.box);
         if (anno.outline !== undefined) res.outline = Boolean(anno.outline);
@@ -507,6 +517,7 @@ export class AnnotationEditor {
             res.text_placement = placement;
           }
         }
+        copyTypography(res);
         if (anno.position) res.position = anno.position;
         if (anno.offset !== undefined) res.offset = Number(anno.offset);
         if (anno.t !== undefined) res.t = Number(anno.t);
@@ -551,6 +562,7 @@ export class AnnotationEditor {
           res.step = parseInt(String(anno.step), 10) || 1;
         }
         if (anno.text) res.text = String(anno.text);
+        copyTypography(res);
         if (anno.position) res.position = anno.position;
         return res;
       }
@@ -566,6 +578,7 @@ export class AnnotationEditor {
           Math.max(1, Math.round(anno.target[3])),
         ];
         res.text = String(anno.text ?? '');
+        copyTypography(res);
         if (anno.position) res.position = anno.position;
         if (anno.max_width !== undefined) res.max_width = Number(anno.max_width);
         if (anno.outline !== undefined) res.outline = Boolean(anno.outline);
@@ -585,6 +598,7 @@ export class AnnotationEditor {
           res.step = parseInt(String(anno.step), 10) || 1;
         }
         if (anno.text) res.text = String(anno.text);
+        copyTypography(res);
         if (anno.position) res.position = anno.position;
         if (anno.arrow !== undefined) res.arrow = Boolean(anno.arrow);
         return res;
@@ -599,6 +613,7 @@ export class AnnotationEditor {
         ];
         if (anno.icon) res.icon = String(anno.icon);
         if (anno.text) res.text = String(anno.text);
+        copyTypography(res);
         if (anno.position) res.position = anno.position;
         if (anno.outline !== undefined) res.outline = Boolean(anno.outline);
         return res;
@@ -2302,8 +2317,8 @@ export class AnnotationEditor {
     if (['arrow','bezier-arrow','step-arrow','rect','rounded-rect','circle','divider'].includes(types[0])) fields.push(['stroke_width',t('線の太さ'),null]);
     if (['rect','rounded-rect','circle'].includes(types[0])) fields.push(['line_style',t('線種'),['solid','dashed','dotted']],['fill_style',t('塗りつぶし'),['none','light','solid']]);
     if (['arrow','bezier-arrow'].includes(types[0])) fields.push(['line_style',t('線種'),['solid','dashed','dotted']],['arrowhead',t('矢印の先端'),['filled','open']],['arrow_skin',t('矢印の形'),['classic','sketch','bold']],['box',t('テキスト背景'),['true','false']],['text_placement',t('テキスト位置'),['middle','end']]);
-    if (['arrow','bezier-arrow','callout','pin','badge','step-arrow','label'].includes(types[0])) fields.push(['text',t('テキスト'),null],['font_family',t('フォント'),['sans-serif','serif','monospace']]);
-    if (['arrow','bezier-arrow','callout','label'].includes(types[0])) fields.push(['font_size',t('文字サイズ'),null]);
+    if (['arrow','bezier-arrow','callout','pin','badge','step-arrow','label'].includes(types[0])) fields.push(['text',t('テキスト'),null],['font_family',t('フォント'),['Arial','Noto Sans','DejaVu Sans','Helvetica','Liberation Sans','sans-serif','serif','monospace']]);
+    if (['arrow','bezier-arrow','callout','pin','badge','step-arrow','label'].includes(types[0])) fields.push(['font_size',t('文字サイズ'),null]);
     for (const [key,title,options] of fields) {
       const label=document.createElement('label'); label.textContent=title;
       const input=document.createElement(options ? 'select' : 'input'); input.className='form-control';
@@ -2488,22 +2503,30 @@ export class AnnotationEditor {
     }
 
     // Typography (Font family & Font size)
-    const showTypography = anno.type === 'callout' || anno.type === 'label' ||
+    const showTypography = anno.type === 'callout' || anno.type === 'label' || anno.type === 'pin' || anno.type === 'badge' || anno.type === 'step-arrow' ||
       ((anno.type === 'bezier-arrow' || anno.type === 'arrow') && ((anno as any).has_text ?? Boolean((anno as any).text)));
     if (showTypography) {
-      const currentFamily = (anno as any).font_family ?? 'Arial';
-      const currentSize = (anno as any).font_size ?? 14;
+      const currentFamily = typeof (anno as any).font_family === 'string' ? (anno as any).font_family.trim() : '';
+      const currentSize = (anno as any).font_size ?? (anno.type === 'badge' || anno.type === 'step-arrow' ? 13 : 14);
+      const standardFonts = ['Arial', 'Noto Sans', 'DejaVu Sans', 'Helvetica', 'Liberation Sans', 'sans-serif', 'serif', 'monospace'];
+      const customFontOption = currentFamily && !standardFonts.includes(currentFamily)
+        ? `<option value="${escapeXml(currentFamily)}" selected>${escapeXml(currentFamily)}</option>`
+        : '';
 
       html += t`
         <div class="form-group">
           <label>フォント設定</label>
           <select id="prop-font-family" class="form-control">
+            <option value="" ${currentFamily === '' ? 'selected' : ''}>標準（テーマ既定）</option>
+            ${customFontOption}
             <option value="Arial" ${currentFamily === 'Arial' ? 'selected' : ''}>Arial</option>
             <option value="Noto Sans" ${currentFamily === 'Noto Sans' ? 'selected' : ''}>Noto Sans</option>
             <option value="DejaVu Sans" ${currentFamily === 'DejaVu Sans' ? 'selected' : ''}>DejaVu Sans</option>
             <option value="Helvetica" ${currentFamily === 'Helvetica' ? 'selected' : ''}>Helvetica</option>
             <option value="Liberation Sans" ${currentFamily === 'Liberation Sans' ? 'selected' : ''}>Liberation Sans</option>
-            <option value="sans-serif" ${currentFamily === 'sans-serif' ? 'selected' : ''}>標準 Sans-Serif</option>
+            <option value="sans-serif" ${currentFamily === 'sans-serif' ? 'selected' : ''}>Sans-Serif</option>
+            <option value="serif" ${currentFamily === 'serif' ? 'selected' : ''}>Serif</option>
+            <option value="monospace" ${currentFamily === 'monospace' ? 'selected' : ''}>Monospace</option>
           </select>
         </div>
         <div class="form-group">
@@ -2724,7 +2747,8 @@ export class AnnotationEditor {
     const fontFamEl = document.getElementById('prop-font-family') as HTMLSelectElement | null;
     if (fontFamEl) {
       fontFamEl.addEventListener('change', () => {
-        (anno as any).font_family = fontFamEl.value;
+        if (fontFamEl.value) (anno as any).font_family = fontFamEl.value;
+        else delete (anno as any).font_family;
         this.pushState();
         this.scheduleRender();
       });

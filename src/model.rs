@@ -320,7 +320,9 @@ pub enum Annotation {
         step: Option<u32>,
         #[serde(default)]
         text: Option<String>,
-        #[serde(default)]
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        font_family: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
         font_size: Option<f64>,
         #[serde(
             default,
@@ -400,6 +402,10 @@ pub enum Annotation {
         #[serde(default)]
         at: Option<Point2D>,
         text: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        font_family: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        font_size: Option<f64>,
         #[serde(default)]
         max_width: Option<f64>,
         #[serde(default)]
@@ -416,6 +422,10 @@ pub enum Annotation {
         #[serde(default = "default_true")]
         target_box: bool,
         text: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        font_family: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        font_size: Option<f64>,
         #[serde(default)]
         max_width: Option<f64>,
         #[serde(default)]
@@ -439,6 +449,10 @@ pub enum Annotation {
         step: Option<u32>,
         #[serde(default)]
         text: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        font_family: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        font_size: Option<f64>,
         #[serde(default)]
         style: SemanticStyle,
         #[serde(default)]
@@ -466,6 +480,10 @@ pub enum Annotation {
         step: Option<u32>,
         #[serde(default)]
         text: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        font_family: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        font_size: Option<f64>,
         #[serde(default)]
         style: SemanticStyle,
         #[serde(default)]
@@ -492,6 +510,10 @@ pub enum Annotation {
         icon: Option<String>,
         #[serde(default)]
         text: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        font_family: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        font_size: Option<f64>,
         #[serde(default)]
         style: SemanticStyle,
         #[serde(default)]
@@ -548,7 +570,9 @@ pub enum Annotation {
         arrow_skin: ArrowSkin,
         #[serde(default)]
         text: Option<String>,
-        #[serde(default)]
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        font_family: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
         font_size: Option<f64>,
         #[serde(default)]
         style: SemanticStyle,
@@ -694,6 +718,32 @@ impl Annotation {
             _ => None,
         }
     }
+
+    pub fn font_family(&self) -> Option<&str> {
+        match self {
+            Annotation::Arrow { font_family, .. }
+            | Annotation::Label { font_family, .. }
+            | Annotation::Callout { font_family, .. }
+            | Annotation::Badge { font_family, .. }
+            | Annotation::StepArrow { font_family, .. }
+            | Annotation::Pin { font_family, .. }
+            | Annotation::BezierArrow { font_family, .. } => font_family.as_deref(),
+            _ => None,
+        }
+    }
+
+    pub fn font_size(&self) -> Option<f64> {
+        match self {
+            Annotation::Arrow { font_size, .. }
+            | Annotation::Label { font_size, .. }
+            | Annotation::Callout { font_size, .. }
+            | Annotation::Badge { font_size, .. }
+            | Annotation::StepArrow { font_size, .. }
+            | Annotation::Pin { font_size, .. }
+            | Annotation::BezierArrow { font_size, .. } => *font_size,
+            _ => None,
+        }
+    }
 }
 
 /// The top-level scene specification.
@@ -754,6 +804,20 @@ impl Scene {
             if let Annotation::Label { max_width: Some(width), .. } | Annotation::Callout { max_width: Some(width), .. } = annotation {
                 if !width.is_finite() || *width < 40.0 {
                     return Err(MarkitsError::Validation(format!("annotations[{idx}].max_width must be a finite number >= 40")));
+                }
+            }
+            if let Some(size) = annotation.font_size() {
+                if !size.is_finite() || size <= 0.0 {
+                    return Err(MarkitsError::Validation(format!(
+                        "annotations[{idx}].font_size must be a finite number > 0"
+                    )));
+                }
+            }
+            if let Some(family) = annotation.font_family() {
+                if family.trim().is_empty() {
+                    return Err(MarkitsError::Validation(format!(
+                        "annotations[{idx}].font_family must not be empty"
+                    )));
                 }
             }
         }

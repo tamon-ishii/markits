@@ -171,6 +171,8 @@ fn instruction_parts(
             "max_width",
             "outline",
             "shadow",
+            "font_family",
+            "font_size",
         ]
         .contains(&key.as_str())
         {
@@ -253,6 +255,12 @@ fn instruction_parts(
     }
     if let Some(shadow) = object.get("shadow") {
         callout["shadow"] = shadow.clone();
+    }
+    if let Some(font_family) = object.get("font_family") {
+        callout["font_family"] = font_family.clone();
+    }
+    if let Some(font_size) = object.get("font_size") {
+        callout["font_size"] = font_size.clone();
     }
     parts.push(callout);
     Ok(parts)

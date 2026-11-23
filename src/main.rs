@@ -616,9 +616,11 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                         "line_style",
                         "arrowhead",
                         "arrow_skin",
+                        "font_family",
+                        "font_size",
                     ] {
                         let supported = match key {
-                            "position" => matches!(
+                            "position" | "font_family" | "font_size" => matches!(
                                 mark_type.as_str(),
                                 "arrow"
                                     | "bezier-arrow"

@@ -1,50 +1,75 @@
 # annotation-editor Specification
 
-## Style presets
-
-The editor SHALL offer selectable mark style presets that update the supported semantic color, stroke width, shadow, and outline fields of the selected annotation and render the change immediately.
-For straight and curved arrows, the editor SHALL also offer solid, dashed, and dotted lines and filled or open arrowheads.
-For straight and curved arrows, the editor SHALL offer three arrow skins with previews: classic, hand-drawn outline with diagonal hatching throughout the shaft and head, and tapered filled arrow. The selected skin SHALL change the entire shaft and head immediately and persist in the annotation data. Line pattern and arrowhead controls apply to the classic skin.
-The arrow text placement control SHALL identify whether it moves the label to the shaft's middle or near the tip, render the selected position immediately, and serialize only the canonical `text_placement` field.
-
 ## Purpose
 
-Provides an interactive graphical canvas editor for placing, manipulating handles, customizing typography, and applying semantic styles to MarkIts annotations on top of captured images.
+Provides an interactive graphical canvas editor for placing marks, manipulating handles, snapping to UI elements, cropping, customizing styles and typography, and exporting annotated images.
 
 ## Requirements
 
 ### Requirement: Interactive Mark Tool Palette
-The system SHALL provide a toolbar offering MarkIts annotation tools (arrows, bezier arrows, callouts, pins, badges, step-arrows, labels, rects, rounded rects, circles, bullseyes, dividers, spotlights) that can be clicked to activate and placed onto the canvas.
+The system SHALL provide a toolbar offering `select` plus primary annotation tools (`arrow`, `bezier-arrow`, `callout`, `label`, `badge`, `rect`, `circle`, `mosaic`, `spotlight`) that can be activated and placed onto the canvas, while also rendering and allowing inspection of additional model types (`rounded-rect`, `pin`, `step-arrow`, `bullseye`, `divider`) loaded from metadata.
 
 #### Scenario: Selecting and placing a mark on canvas
 - **WHEN** user selects an annotation tool from the toolbar and clicks or drags on the canvas
-- **THEN** an annotation of that type is created and displayed as selected with visible interactive manipulation handles
+- **THEN** an annotation of that type is created and displayed as selected with visible manipulation handles
 
-### Requirement: Direct Manipulation of Arrow Endpoints and Handles
-The system SHALL display interactive control handles on selected elements, enabling users to click and drag the start point, end point, and control curves of arrows and bezier arrows directly on the canvas.
+### Requirement: Direct Manipulation of Handles and Shapes
+The system SHALL display interactive control handles on selected annotations, enabling users to drag arrow start/end points, Bezier curvature control points, and shape bounding box corners/positions directly on the canvas.
 
 #### Scenario: Dragging arrow start and end points
-- **WHEN** user selects an arrow on the canvas and drags its start or end handle to a new position
-- **THEN** the arrow's start or end coordinates update dynamically in real time and the arrow head reorients accordingly
+- **WHEN** user selects an arrow and drags its start or end handle
+- **THEN** the coordinates update in real time and the arrowhead reorients accordingly
 
 #### Scenario: Dragging bezier arrow curvature handle
 - **WHEN** user drags the intermediate control point handle of a bezier arrow
-- **THEN** the curvature of the bezier curve updates smoothly to follow the handle position
+- **THEN** the curve updates smoothly to follow the handle position
 
-### Requirement: Typography and Style Customization
-The system SHALL provide an inspector panel allowing users to edit text content, choose font families (including system fonts), adjust font sizes, toggle text boxes/outlines, and switch semantic themes (primary, secondary, warning, danger, info, step).
+### Requirement: Inspector Styling and Typography
+The system SHALL provide an inspector for single or multi-selected marks supporting all seven semantic styles (`primary`, `secondary`, `warning`, `danger`, `info`, `step`, `pink`), stroke width, shadow, outline, shape line/fill/corner styles, mosaic block size, text content, font family, and font size.
 
-#### Scenario: Editing annotation text and font family
-- **WHEN** user edits the text field and selects a font family in the inspector for a callout or label
-- **THEN** the annotation on the canvas immediately reflects the updated text and typography
+#### Scenario: Bulk editing multiple selected annotations
+- **WHEN** user selects multiple marks and changes a shared property in the inspector
+- **THEN** all selected compatible annotations update together and re-render immediately
 
-#### Scenario: Changing semantic style
-- **WHEN** user switches the style palette from `primary` to `warning`
-- **THEN** the selected annotation changes its fill, stroke, and accent colors according to the MarkIts design token mapping
+### Requirement: Arrow Skins and Label Placement
+For `arrow` and `bezier-arrow` marks, the inspector SHALL offer three arrow skins with previews (`classic`, `sketch`, `bold`), classic-only line pattern (`solid`, `dashed`, `dotted`) and arrowhead (`filled`, `open`) controls, and `text_placement` (`middle` vs `end` at the tail) serialized only as canonical `text_placement`.
 
-### Requirement: Edit History and Undo/Redo
-The system SHALL maintain an undo/redo stack of canvas actions including adding, moving, editing handles, changing styles, and deleting annotations.
+#### Scenario: Switching arrow skin and text placement
+- **WHEN** user selects an arrow, picks the `sketch` or `bold` skin, or switches label placement between `middle` and `end`
+- **THEN** the canvas updates immediately, classic-only line/arrowhead controls disable for non-classic skins, and scene JSON serializes only canonical `text_placement`
+
+### Requirement: In-Editor Interactive Cropping
+The system SHALL provide an interactive in-editor crop mode with resize handles, resolution/aspect presets, a "Fit to Marks" bounds action, reversible crop history, and automatic commitment of any pending crop before saving, copying, or finishing editing.
+
+#### Scenario: Fit crop frame to marks and apply
+- **WHEN** user enters crop mode, clicks "Fit to Marks", and applies the crop
+- **THEN** the canvas crops to the annotation bounding box, translates annotation and UIMap coordinates, and preserves the pre-crop image for reversal
+
+#### Scenario: Commit pending crop on save or copy
+- **WHEN** user clicks Save, Copy, or Done Editing while crop mode has an unapplied selection
+- **THEN** the pending crop is applied first before generating output
+
+### Requirement: UI Element Snapping
+The system SHALL provide toggleable UI element snapping (with Alt key temporary toggle) that highlights detected UI targets with visual guides while dragging or placing marks and reports asynchronous UI scan status.
+
+#### Scenario: Snap rectangle to detected UI control
+- **WHEN** snap is enabled and the user moves or draws a mark near a detected UI element
+- **THEN** visual snap guides appear and the mark aligns to the UI element's bounds
+
+### Requirement: Layer Visibility, Clipboard Marks, and Edit History
+The system SHALL provide a mark layer list supporting visibility toggles (`hidden_annotations`), copy/paste of selected marks (`Ctrl+C`/`Ctrl+V`), and an undo/redo stack (`Ctrl+Z`/`Ctrl+Y`) covering additions, moves, handle edits, style changes, and deletions.
 
 #### Scenario: Undo an edit action
-- **WHEN** user presses Ctrl+Z (or Cmd+Z) after modifying an annotation position
+- **WHEN** user presses Ctrl+Z (or Cmd+Z) after modifying an annotation
 - **THEN** the annotation reverts to its state prior to that modification
+
+#### Scenario: Toggle mark visibility in layer list
+- **WHEN** user hides a mark from the layer list
+- **THEN** its index is recorded in `hidden_annotations` and it is excluded from canvas rendering and exports without being deleted
+
+### Requirement: Output Dimensions and Export Controls
+The system SHALL provide output width/height inputs with an aspect-ratio lock, an export format selector (`PNG`, `WebP`, `JPEG XL`), an optional reproduction JSON export toggle, and (in external integration mode) an editable metadata retention toggle.
+
+#### Scenario: Export at resized output dimensions
+- **WHEN** user adjusts output width with aspect lock enabled and saves or copies the image
+- **THEN** height updates proportionally and the exported image is rendered at the chosen dimensions

@@ -267,6 +267,13 @@ impl SvgRenderer {
         Self { theme }
     }
 
+    fn font_family<'a>(&'a self, custom: Option<&'a str>) -> std::borrow::Cow<'a, str> {
+        match custom.map(str::trim).filter(|s| !s.is_empty()) {
+            Some(family) => std::borrow::Cow::Owned(escape_xml(family)),
+            None => std::borrow::Cow::Borrowed(self.theme.font_family),
+        }
+    }
+
     pub fn render_scene(&self, scene: &ResolvedScene) -> String {
         let mut svg = String::with_capacity(4096);
         let w = scene.canvas.width;
@@ -455,11 +462,12 @@ impl SvgRenderer {
                         center.x, center.y, dot_radius, tokens.stroke_color
                     ));
                 }
-                ResolvedAnnotation::Arrow { start, end, text, style, shadow, stroke_width, line_style, arrowhead, arrow_skin, boxed, outline, text_placement, font_size } => {
+                ResolvedAnnotation::Arrow { start, end, text, style, shadow, stroke_width, line_style, arrowhead, arrow_skin, boxed, outline, text_placement, font_family, font_size } => {
                     let tokens = self.theme.tokens_for(*style);
                     let sw = stroke_width.unwrap_or(4.0);
                     let key = style_key(*style);
                     let filter_attr = if *shadow { r#" filter="url(#markits-shadow)""# } else { "" };
+                    let resolved_font_family = self.font_family(font_family.as_deref());
                     svg.push_str(&skin_arrow(&[*start, *end], &tokens.stroke_color, sw, *arrow_skin, key, filter_attr)
                         .unwrap_or_else(|| classic_arrow(&[*start, *end], None, &tokens.stroke_color, sw, *line_style, *arrowhead, filter_attr)));
 
@@ -510,7 +518,7 @@ impl SvgRenderer {
                                     box_x, box_y, pill_w, pill_h, rx, ry,
                                     tokens.fill_color, stroke_color,
                                     cx, cy,
-                                    tokens.text_color, self.theme.font_family, font_size,
+                                    tokens.text_color, resolved_font_family, font_size,
                                     escaped
                                 ));
                             } else {
@@ -526,7 +534,7 @@ impl SvgRenderer {
 "#,
                                     filter_attr,
                                     cx, cy,
-                                    tokens.stroke_color, self.theme.font_family, font_size,
+                                    tokens.stroke_color, resolved_font_family, font_size,
                                     outline_attr,
                                     escaped
                                 ));
@@ -555,11 +563,12 @@ impl SvgRenderer {
         // Layer 3: Labels, Callouts, Badges, Pins (Foremost layer)
         for (annotation_index, ann) in scene.annotations.iter().enumerate() {
             match ann {
-                ResolvedAnnotation::Label { box_rect, text, style, shadow, outline } => {
+                ResolvedAnnotation::Label { box_rect, text, font_family, font_size, style, shadow, outline } => {
                     let tokens = self.theme.tokens_for(*style);
-                    let escaped = multiline_text(text, box_rect.center_x(), self.theme.font_size);
+                    let escaped = multiline_text(text, box_rect.center_x(), *font_size);
                     let filter_attr = if *shadow { r#" filter="url(#markits-shadow)""# } else { "" };
                     let stroke_color = if *outline { "#ffffff" } else { tokens.stroke_color };
+                    let resolved_font_family = self.font_family(font_family.as_deref());
 
                     svg.push_str(&format!(
                         r#"  <g{}>
@@ -572,16 +581,17 @@ impl SvgRenderer {
                         self.theme.corner_radius, self.theme.corner_radius,
                         tokens.fill_color, stroke_color,
                         box_rect.center_x(), box_rect.center_y(),
-                        tokens.text_color, self.theme.font_family, self.theme.font_size,
+                        tokens.text_color, resolved_font_family, font_size,
                         escaped
                     ));
                 }
-                ResolvedAnnotation::Callout { box_rect, text, arrow_start, arrow_end, style, shadow, outline, .. } => {
+                ResolvedAnnotation::Callout { box_rect, text, font_family, font_size, arrow_start, arrow_end, style, shadow, outline, .. } => {
                     let tokens = self.theme.tokens_for(*style);
                     let key = style_key(*style);
-                    let escaped = multiline_text(text, box_rect.center_x(), self.theme.font_size);
+                    let escaped = multiline_text(text, box_rect.center_x(), *font_size);
                     let filter_attr = if *shadow { r#" filter="url(#markits-shadow)""# } else { "" };
                     let stroke_color = if *outline { "#ffffff" } else { tokens.stroke_color };
+                    let resolved_font_family = self.font_family(font_family.as_deref());
 
                     // Pointer arrow line
                     svg.push_str(&format!(
@@ -602,14 +612,15 @@ impl SvgRenderer {
                         self.theme.corner_radius, self.theme.corner_radius,
                         tokens.fill_color, stroke_color,
                         box_rect.center_x(), box_rect.center_y(),
-                        tokens.text_color, self.theme.font_family, self.theme.font_size,
+                        tokens.text_color, resolved_font_family, font_size,
                         escaped
                     ));
                 }
-                ResolvedAnnotation::Badge { center, radius, label, style, shadow, .. } => {
+                ResolvedAnnotation::Badge { center, radius, label, font_family, font_size, style, shadow, .. } => {
                     let tokens = self.theme.tokens_for(*style);
                     let escaped = escape_xml(label);
                     let filter_attr = if *shadow { r#" filter="url(#markits-shadow)""# } else { "" };
+                    let resolved_font_family = self.font_family(font_family.as_deref());
 
                     svg.push_str(&format!(
                         r##"  <g{}>
@@ -621,7 +632,7 @@ impl SvgRenderer {
                         center.x, center.y, radius,
                         tokens.fill_color,
                         center.x, center.y,
-                        tokens.text_color, self.theme.font_family, self.theme.font_size * 0.9,
+                        tokens.text_color, resolved_font_family, font_size,
                         escaped
                     ));
                 }
@@ -629,6 +640,8 @@ impl SvgRenderer {
                     center,
                     radius,
                     label,
+                    font_family,
+                    font_size,
                     arrow_start,
                     arrow_end,
                     style,
@@ -641,6 +654,7 @@ impl SvgRenderer {
                     let key = style_key(*style);
                     let escaped = escape_xml(label);
                     let filter_attr = if *shadow { r#" filter="url(#markits-shadow)""# } else { "" };
+                    let resolved_font_family = self.font_family(font_family.as_deref());
 
                     // 1. Pointer arrow line connecting badge to target
                     svg.push_str(&format!(
@@ -660,13 +674,14 @@ impl SvgRenderer {
                         center.x, center.y, radius,
                         tokens.fill_color,
                         center.x, center.y,
-                        tokens.text_color, self.theme.font_family, self.theme.font_size * 0.9,
+                        tokens.text_color, resolved_font_family, font_size,
                         escaped
                     ));
                 }
-                ResolvedAnnotation::Pin { head_center, head_radius, tip, icon, text, text_rect, style, shadow, outline } => {
+                ResolvedAnnotation::Pin { head_center, head_radius, tip, icon, text, font_family, font_size, text_rect, style, shadow, outline } => {
                     let tokens = self.theme.tokens_for(*style);
                     let filter_attr = if *shadow { r#" filter="url(#markits-shadow)""# } else { "" };
+                    let resolved_font_family = self.font_family(font_family.as_deref());
 
                     // Compute triangular pointer base perpendicular to the (head_center -> tip) direction
                     let dx = tip.x - head_center.x;
@@ -706,7 +721,7 @@ impl SvgRenderer {
                         svg.push_str(&format!(
                             r#"    <text x="{}" y="{}" fill="{}" font-family="{}" font-size="{}" font-weight="bold" text-anchor="middle" dominant-baseline="central">{}</text>
 "#,
-                            head_center.x, head_center.y, tokens.text_color, self.theme.font_family, head_radius * 0.95, escaped_icon
+                            head_center.x, head_center.y, tokens.text_color, resolved_font_family, head_radius * 0.95, escaped_icon
                         ));
                     }
 
@@ -720,18 +735,19 @@ impl SvgRenderer {
 "##,
                             tr.x, tr.y, tr.width, tr.height, self.theme.corner_radius, self.theme.corner_radius,
                             stroke_color,
-                            tr.center_x(), tr.center_y(), self.theme.font_family, self.theme.font_size,
+                            tr.center_x(), tr.center_y(), resolved_font_family, font_size,
                             escaped_text
                         ));
                     }
 
                     svg.push_str("  </g>\n");
                 }
-                ResolvedAnnotation::BezierArrow { text, text_rect, style, shadow, outline, boxed, font_size, .. } => {
+                ResolvedAnnotation::BezierArrow { text, text_rect, style, shadow, outline, boxed, font_family, font_size, .. } => {
                     if let (Some(txt), Some(tr)) = (text, text_rect) {
                         let tokens = self.theme.tokens_for(*style);
                         let escaped = escape_xml(txt);
                         let filter_attr = if *shadow { r#" filter="url(#markits-shadow)""# } else { "" };
+                        let resolved_font_family = self.font_family(font_family.as_deref());
 
                         if *boxed {
                             let stroke_color = if *outline { "#ffffff" } else { tokens.stroke_color };
@@ -746,7 +762,7 @@ impl SvgRenderer {
                                 self.theme.corner_radius, self.theme.corner_radius,
                                 tokens.fill_color, stroke_color,
                                 tr.center_x(), tr.center_y(),
-                                tokens.text_color, self.theme.font_family, font_size,
+                                tokens.text_color, resolved_font_family, font_size,
                                 escaped
                             ));
                         } else {
@@ -762,7 +778,7 @@ impl SvgRenderer {
 "#,
                                 filter_attr,
                                 tr.center_x(), tr.center_y(),
-                                tokens.stroke_color, self.theme.font_family, font_size,
+                                tokens.stroke_color, resolved_font_family, font_size,
                                 outline_attr,
                                 escaped
                             ));

@@ -459,6 +459,7 @@ pub enum ResolvedAnnotation {
         start: Point,
         end: Point,
         text: Option<String>,
+        font_family: Option<String>,
         font_size: f64,
         style: SemanticStyle,
         shadow: bool,
@@ -502,6 +503,8 @@ pub enum ResolvedAnnotation {
     Label {
         box_rect: TargetRect,
         text: String,
+        font_family: Option<String>,
+        font_size: f64,
         style: SemanticStyle,
         shadow: bool,
         outline: bool,
@@ -510,6 +513,8 @@ pub enum ResolvedAnnotation {
         target_box: Option<TargetRect>,
         box_rect: TargetRect,
         text: String,
+        font_family: Option<String>,
+        font_size: f64,
         arrow_start: Point,
         arrow_end: Point,
         style: SemanticStyle,
@@ -522,6 +527,8 @@ pub enum ResolvedAnnotation {
         stroke_width: Option<f64>,
         radius: f64,
         label: String,
+        font_family: Option<String>,
+        font_size: f64,
         style: SemanticStyle,
         shadow: bool,
     },
@@ -530,6 +537,8 @@ pub enum ResolvedAnnotation {
         center: Point,
         radius: f64,
         label: String,
+        font_family: Option<String>,
+        font_size: f64,
         arrow_start: Point,
         arrow_end: Point,
         style: SemanticStyle,
@@ -549,6 +558,8 @@ pub enum ResolvedAnnotation {
         tip: Point,
         icon: Option<String>,
         text: Option<String>,
+        font_family: Option<String>,
+        font_size: f64,
         text_rect: Option<TargetRect>,
         style: SemanticStyle,
         shadow: bool,
@@ -573,6 +584,7 @@ pub enum ResolvedAnnotation {
         control: Point,
         end: Point,
         text: Option<String>,
+        font_family: Option<String>,
         font_size: f64,
         text_rect: Option<TargetRect>,
         style: SemanticStyle,
@@ -784,13 +796,16 @@ impl LayoutEngine {
                     target,
                     at,
                     text,
+                    font_family,
+                    font_size,
                     max_width,
                     style,
                     position,
                     ..
                 } => {
-                    let wrapped = wrap_text(text, self.font_size, max_width.unwrap_or((scene.canvas.width as f64 * 0.55).min(320.0)));
-                    let dim = estimate_text_dimensions(&wrapped, self.font_size);
+                    let resolved_font_size = font_size.unwrap_or(self.font_size);
+                    let wrapped = wrap_text(text, resolved_font_size, max_width.unwrap_or((scene.canvas.width as f64 * 0.55).min(320.0)));
+                    let dim = estimate_text_dimensions(&wrapped, resolved_font_size);
                     let candidates = generate_candidates(target, dim, self.callout_offset);
                     let best = select_best_candidate(
                         &candidates,
@@ -804,6 +819,8 @@ impl LayoutEngine {
                     resolved.push(ResolvedAnnotation::Label {
                         box_rect,
                         text: wrapped,
+                        font_family: font_family.clone(),
+                        font_size: resolved_font_size,
                         style: *style,
                         shadow,
                         outline,
@@ -813,13 +830,16 @@ impl LayoutEngine {
                     target,
                     target_box,
                     text,
+                    font_family,
+                    font_size,
                     max_width,
                     style,
                     position,
                     ..
                 } => {
-                    let wrapped = wrap_text(text, self.font_size, max_width.unwrap_or((scene.canvas.width as f64 * 0.55).min(320.0)));
-                    let dim = estimate_text_dimensions(&wrapped, self.font_size);
+                    let resolved_font_size = font_size.unwrap_or(self.font_size);
+                    let wrapped = wrap_text(text, resolved_font_size, max_width.unwrap_or((scene.canvas.width as f64 * 0.55).min(320.0)));
+                    let dim = estimate_text_dimensions(&wrapped, resolved_font_size);
                     let best = select_callout_candidate(
                         target,
                         dim,
@@ -837,6 +857,8 @@ impl LayoutEngine {
                         target_box: target_box.then_some(*target),
                         box_rect: best.rect,
                         text: wrapped,
+                        font_family: font_family.clone(),
+                        font_size: resolved_font_size,
                         arrow_start,
                         arrow_end,
                         style: *style,
@@ -850,11 +872,14 @@ impl LayoutEngine {
                     stroke_width,
                     step,
                     text,
+                    font_family,
+                    font_size,
                     style,
                     position,
                     arrow,
                     ..
                 } => {
+                    let resolved_font_size = font_size.unwrap_or(self.font_size * 0.9);
                     let badge_label = if let Some(s) = step {
                         s.to_string()
                     } else if let Some(t) = text {
@@ -890,6 +915,8 @@ impl LayoutEngine {
                             center,
                             radius: self.badge_radius,
                             label: badge_label,
+                            font_family: font_family.clone(),
+                            font_size: resolved_font_size,
                             arrow_start,
                             arrow_end,
                             style: *style,
@@ -913,6 +940,8 @@ impl LayoutEngine {
                             stroke_width: *stroke_width,
                             radius: self.badge_radius,
                             label: badge_label,
+                            font_family: font_family.clone(),
+                            font_size: resolved_font_size,
                             style: *style,
                             shadow,
                         });
@@ -923,10 +952,13 @@ impl LayoutEngine {
                     stroke_width,
                     step,
                     text,
+                    font_family,
+                    font_size,
                     style,
                     position,
                     ..
                 } => {
+                    let resolved_font_size = font_size.unwrap_or(self.font_size * 0.9);
                     let badge_label = if let Some(s) = step {
                         s.to_string()
                     } else if let Some(t) = text {
@@ -961,6 +993,8 @@ impl LayoutEngine {
                         center,
                         radius: self.badge_radius,
                         label: badge_label,
+                        font_family: font_family.clone(),
+                        font_size: resolved_font_size,
                         arrow_start,
                         arrow_end,
                         style: *style,
@@ -978,6 +1012,7 @@ impl LayoutEngine {
                     arrow_skin,
                     step,
                     text,
+                    font_family,
                     font_size,
                     text_placement,
                     style,
@@ -998,6 +1033,8 @@ impl LayoutEngine {
                                 center: arrow_start,
                                 radius: self.badge_radius,
                                 label: s_num.to_string(),
+                                font_family: font_family.clone(),
+                                font_size: font_size.unwrap_or(self.font_size * 0.9),
                                 arrow_start,
                                 arrow_end,
                                 style: *style,
@@ -1009,6 +1046,7 @@ impl LayoutEngine {
                                 start: arrow_start,
                                 end: arrow_end,
                                 text: text.clone(),
+                                font_family: font_family.clone(),
                                 font_size: font_size.unwrap_or(self.font_size),
                                 style: *style,
                                 shadow,
@@ -1057,6 +1095,8 @@ impl LayoutEngine {
                                 center,
                                 radius: self.badge_radius,
                                 label: badge_label,
+                                font_family: font_family.clone(),
+                                font_size: font_size.unwrap_or(self.font_size * 0.9),
                                 arrow_start,
                                 arrow_end,
                                 style: *style,
@@ -1078,6 +1118,7 @@ impl LayoutEngine {
                                 start,
                                 end,
                                 text: text.clone(),
+                                font_family: font_family.clone(),
                                 font_size: font_size.unwrap_or(self.font_size),
                                 style: *style,
                                 shadow,
@@ -1096,10 +1137,13 @@ impl LayoutEngine {
                     target,
                     icon,
                     text,
+                    font_family,
+                    font_size,
                     style,
                     position,
                     ..
                 } => {
+                    let resolved_font_size = font_size.unwrap_or(self.font_size);
                     let r = self.pin_head_radius;
                     let tip_offset = 6.0;
 
@@ -1124,7 +1168,7 @@ impl LayoutEngine {
                     };
 
                     let text_rect = if let Some(txt) = text {
-                        let text_dim = estimate_text_dimensions(txt, self.font_size);
+                        let text_dim = estimate_text_dimensions(txt, resolved_font_size);
                         let pill_x = if head_center.x + r + text_dim.width > scene.canvas.width as f64 {
                             head_center.x - r - 4.0 - text_dim.width
                         } else {
@@ -1142,6 +1186,8 @@ impl LayoutEngine {
                         tip,
                         icon: icon.clone(),
                         text: text.clone(),
+                        font_family: font_family.clone(),
+                        font_size: resolved_font_size,
                         text_rect,
                         style: *style,
                         shadow,
@@ -1190,6 +1236,7 @@ impl LayoutEngine {
                     control,
                     end,
                     text,
+                    font_family,
                     font_size,
                     text_placement,
                     stroke_width,
@@ -1365,6 +1412,7 @@ impl LayoutEngine {
                         control: c,
                         end: e,
                         text: text_val,
+                        font_family: font_family.clone(),
                         font_size: font_size.unwrap_or(self.font_size),
                         text_rect,
                         style: *style,
@@ -1527,6 +1575,8 @@ mod tests {
                     target: TargetRect::new(200.0, 200.0, 40.0, 40.0),
                     icon: Some("♡".to_string()),
                     text: Some("Like".to_string()),
+                    font_family: None,
+                    font_size: None,
                     style: SemanticStyle::Pink,
                     position: PositionHint::Top,
                     shadow: None,
@@ -1582,6 +1632,7 @@ mod tests {
                     arrowhead: ArrowheadStyle::Filled,
                     arrow_skin: ArrowSkin::Classic,
                     text: Some("Midpoint Text".to_string()),
+                    font_family: None,
                     font_size: None,
                     style: SemanticStyle::Primary,
                     position: PositionHint::Center,
@@ -1602,6 +1653,7 @@ mod tests {
                     arrowhead: ArrowheadStyle::Filled,
                     arrow_skin: ArrowSkin::Classic,
                     text: Some("Offset Text".to_string()),
+                    font_family: None,
                     font_size: None,
                     style: SemanticStyle::Primary,
                     position: PositionHint::Top,

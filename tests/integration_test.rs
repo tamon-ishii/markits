@@ -410,3 +410,68 @@ fn test_uimap_and_named_ui_targets() {
     let spot_elem = result.elements.iter().find(|e| e.id.contains("annotation-3")).unwrap();
     assert_eq!(spot_elem.bounds, [220.0, 80.0, 90.0, 32.0]);
 }
+
+#[test]
+fn typography_font_family_and_font_size_render_and_resize_bounds() {
+    let json = r#"{
+      "canvas": {"width": 900, "height": 600},
+      "annotations": [
+        {"type": "callout", "target": [100, 100, 80, 30], "text": "大きな注釈", "font_family": "Noto Sans", "font_size": 24},
+        {"type": "label", "target": [100, 260, 80, 30], "text": "モノスペース", "font_family": "monospace", "font_size": 20},
+        {"type": "arrow", "start": [320, 120], "end": [520, 120], "text": "矢印フォント", "font_family": "DejaVu Sans", "font_size": 18},
+        {"type": "bezier-arrow", "start": [320, 240], "control": [420, 180], "end": [520, 240], "text": "曲線フォント", "font_family": "serif", "font_size": 22},
+        {"type": "pin", "target": [650, 140, 40, 40], "icon": "!", "text": "ピン", "font_family": "Liberation Sans", "font_size": 19},
+        {"type": "badge", "target": [650, 280, 40, 40], "step": 3, "font_family": "Helvetica"},
+        {"type": "step-arrow", "target": [650, 400, 40, 40], "step": 4, "font_family": "Arial"}
+      ]
+    }"#;
+
+    let result = render_with_layout_from_json(json).expect("Should render custom typography");
+    assert!(result.svg.contains(r#"font-family="Noto Sans" font-size="24""#));
+    assert!(result.svg.contains(r#"font-family="monospace" font-size="20""#));
+    assert!(result.svg.contains(r#"font-family="DejaVu Sans" font-size="18""#));
+    assert!(result.svg.contains(r#"font-family="serif" font-size="22""#));
+    assert!(result.svg.contains(r#"font-family="Liberation Sans" font-size="19""#));
+    assert!(result.svg.contains(r#"font-family="Helvetica""#));
+    assert!(result.svg.contains(r#"font-family="Arial""#));
+
+    let small = render_with_layout_from_json(
+        r#"{"canvas":{"width":900,"height":600},"annotations":[{"type":"callout","target":[100,100,80,30],"text":"大きな注釈","font_size":12}]}"#,
+    ).unwrap();
+    assert!(result.elements[0].bounds[2] > small.elements[0].bounds[2]);
+    assert!(result.elements[0].bounds[3] > small.elements[0].bounds[3]);
+}
+
+#[test]
+fn typography_escapes_xml_propagates_instruction_and_validates_inputs() {
+    let instruction_json = r#"{
+      "canvas": {"width": 500, "height": 300},
+      "annotations": [
+        {"type": "instruction", "action": "click", "target": [180, 140, 60, 30], "text": "保存", "font_family": "A & \"B\"", "font_size": 21}
+      ]
+    }"#;
+    let svg = render_from_json(instruction_json).expect("Instruction should forward typography");
+    assert!(svg.contains(r#"font-family="A &amp; &quot;B&quot;" font-size="21""#));
+
+    let bad_size = r#"{"canvas":{"width":400,"height":300},"annotations":[{"type":"label","target":[10,10,40,20],"text":"x","font_size":0}]}"#;
+    assert!(Scene::from_json(bad_size).unwrap_err().to_string().contains("font_size"));
+
+    let blank_family = r#"{"canvas":{"width":400,"height":300},"annotations":[{"type":"callout","target":[10,10,40,20],"text":"x","font_family":"   "}]}"#;
+    assert!(Scene::from_json(blank_family).unwrap_err().to_string().contains("font_family"));
+}
+
+#[test]
+fn raster_composition_renders_custom_font_family_and_size() {
+    let mut png = std::io::Cursor::new(Vec::new());
+    image::DynamicImage::new_rgba8(240, 140)
+        .write_to(&mut png, image::ImageFormat::Png)
+        .unwrap();
+    let json = r#"{
+      "annotations": [
+        {"type": "callout", "target": [100, 70, 40, 24], "text": "Hello", "font_family": "monospace", "font_size": 20}
+      ]
+    }"#;
+    let rendered = markits::render_composed_png_bytes(json, png.get_ref()).expect("Raster export should succeed with custom font");
+    let decoded = image::load_from_memory(&rendered).unwrap();
+    assert_eq!((decoded.width(), decoded.height()), (240, 140));
+}
